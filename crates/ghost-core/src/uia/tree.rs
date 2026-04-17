@@ -4,7 +4,7 @@ use windows::Win32::System::Com::CLSCTX_INPROC_SERVER;
 use windows::Win32::Foundation::{BOOL, HWND, LPARAM, WPARAM, TRUE};
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetForegroundWindow, GetWindowTextW, IsWindowVisible,
-    PostMessageW, SetForegroundWindow, ShowWindow,
+    PostMessageW, SetForegroundWindow, ShowWindow, GetWindowThreadProcessId,
     SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, WM_CLOSE,
 };
 use super::element::{UiaElement, role_id_to_name, ElementDescriptor, INTERACTIVE_ROLES};
@@ -193,8 +193,10 @@ unsafe extern "system" fn enum_windows_proc(hwnd: HWND, lparam: LPARAM) -> BOOL 
     }
     let name = String::from_utf16_lossy(&title[..len as usize]).to_string();
     let focused = GetForegroundWindow() == hwnd;
+    let mut pid = 0u32;
+    GetWindowThreadProcessId(hwnd, Some(&mut pid));
     let list = &mut *(lparam.0 as *mut Vec<WindowInfo>);
-    list.push(WindowInfo { name, pid: 0, focused, hwnd: hwnd.0 });
+    list.push(WindowInfo { name, pid, focused, hwnd: hwnd.0 });
     TRUE
 }
 
