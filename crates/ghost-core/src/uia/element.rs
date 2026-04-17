@@ -1,4 +1,5 @@
 use windows::Win32::UI::Accessibility::IUIAutomationElement;
+use windows::core::Interface;
 
 #[derive(Debug, Clone)]
 pub struct BoundingRect {
@@ -49,6 +50,23 @@ impl UiaElement {
     pub fn is_enabled(&self) -> bool {
         unsafe { self.0.CurrentIsEnabled().map(|b| b.as_bool()).unwrap_or(false) }
     }
+
+    /// Get the current text value. Tries ValuePattern first, falls back to element name.
+    pub fn get_text(&self) -> String {
+        use windows::Win32::UI::Accessibility::{
+            IUIAutomationValuePattern, UIA_ValuePatternId,
+        };
+        unsafe {
+            if let Ok(pattern) = self.0.GetCurrentPattern(UIA_ValuePatternId) {
+                if let Ok(vp) = pattern.cast::<IUIAutomationValuePattern>() {
+                    if let Ok(val) = vp.CurrentValue() {
+                        return val.to_string();
+                    }
+                }
+            }
+            self.name()
+        }
+    }
 }
 
 /// Map UIA control type IDs to human-readable role names.
@@ -67,6 +85,21 @@ pub fn role_id_to_name(id: u32) -> &'static str {
         50030 => "pane",
         _ => "unknown",
     }
+}
+
+/// Roles included in describe_screen output.
+pub const INTERACTIVE_ROLES: &[&str] = &[
+    "button", "edit", "checkbox", "menu", "tab", "list", "toolbar",
+];
+
+#[derive(Debug, Clone)]
+pub struct ElementDescriptor {
+    pub name: String,
+    pub role: String,
+    pub left: i32,
+    pub top: i32,
+    pub right: i32,
+    pub bottom: i32,
 }
 
 #[cfg(test)]
@@ -97,5 +130,11 @@ mod tests {
             bottom: 400,
         };
         assert_eq!(r.center(), (200, 300));
+    }
+
+    #[test]
+    fn interactive_roles_include_button_and_edit() {
+        assert!(INTERACTIVE_ROLES.contains(&"button"));
+        assert!(INTERACTIVE_ROLES.contains(&"edit"));
     }
 }

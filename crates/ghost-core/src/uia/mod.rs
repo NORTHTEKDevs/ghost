@@ -2,6 +2,9 @@ pub mod element;
 pub mod patterns;
 pub mod tree;
 
+pub use element::{BoundingRect, ElementDescriptor, UiaElement, INTERACTIVE_ROLES};
+pub use tree::{UiaTree, WindowInfo, WindowState, list_windows, focus_window, set_window_state};
+
 use crate::error::CoreError;
 use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
 
