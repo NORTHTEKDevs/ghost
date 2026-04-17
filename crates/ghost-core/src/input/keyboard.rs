@@ -78,6 +78,87 @@ pub fn press_key(vk: VIRTUAL_KEY) -> Result<(), CoreError> {
     Ok(())
 }
 
+/// Hold a key down without releasing (pair with key_up for held modifiers).
+pub fn key_down(vk: VIRTUAL_KEY) -> Result<(), CoreError> {
+    if is_stopped() {
+        return Err(CoreError::Win32 { code: 0, context: "stopped" });
+    }
+    let inputs = [key_event(vk, false)];
+    unsafe {
+        let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+        if sent != 1 {
+            tracing::warn!("key_down: failed to send for vk {:?}", vk.0);
+        }
+    }
+    Ok(())
+}
+
+/// Release a key held by key_down.
+pub fn key_up(vk: VIRTUAL_KEY) -> Result<(), CoreError> {
+    if is_stopped() {
+        return Err(CoreError::Win32 { code: 0, context: "stopped" });
+    }
+    let inputs = [key_event(vk, true)];
+    unsafe {
+        let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+        if sent != 1 {
+            tracing::warn!("key_up: failed to send for vk {:?}", vk.0);
+        }
+    }
+    Ok(())
+}
+
+/// Map a human-readable key name to a VIRTUAL_KEY constant.
+/// Case-insensitive. Returns None for unrecognized names.
+pub fn name_to_vk(name: &str) -> Option<VIRTUAL_KEY> {
+    match name.to_lowercase().as_str() {
+        "enter" | "return" => Some(VK_RETURN),
+        "tab" => Some(VK_TAB),
+        "escape" | "esc" => Some(VK_ESCAPE),
+        "backspace" => Some(VK_BACK),
+        "delete" | "del" => Some(VK_DELETE),
+        "home" => Some(VK_HOME),
+        "end" => Some(VK_END),
+        "pageup" => Some(VK_PRIOR),
+        "pagedown" => Some(VK_NEXT),
+        "arrowup" | "up" => Some(VK_UP),
+        "arrowdown" | "down" => Some(VK_DOWN),
+        "arrowleft" | "left" => Some(VK_LEFT),
+        "arrowright" | "right" => Some(VK_RIGHT),
+        "space" => Some(VK_SPACE),
+        "f1" => Some(VK_F1),
+        "f2" => Some(VK_F2),
+        "f3" => Some(VK_F3),
+        "f4" => Some(VK_F4),
+        "f5" => Some(VK_F5),
+        "f6" => Some(VK_F6),
+        "f7" => Some(VK_F7),
+        "f8" => Some(VK_F8),
+        "f9" => Some(VK_F9),
+        "f10" => Some(VK_F10),
+        "f11" => Some(VK_F11),
+        "f12" => Some(VK_F12),
+        "ctrl" | "control" => Some(VK_CONTROL),
+        "shift" => Some(VK_SHIFT),
+        "alt" => Some(VK_MENU),
+        "win" | "windows" => Some(VK_LWIN),
+        "a" => Some(VK_A), "b" => Some(VK_B), "c" => Some(VK_C),
+        "d" => Some(VK_D), "e" => Some(VK_E), "f" => Some(VK_F),
+        "g" => Some(VK_G), "h" => Some(VK_H), "i" => Some(VK_I),
+        "j" => Some(VK_J), "k" => Some(VK_K), "l" => Some(VK_L),
+        "m" => Some(VK_M), "n" => Some(VK_N), "o" => Some(VK_O),
+        "p" => Some(VK_P), "q" => Some(VK_Q), "r" => Some(VK_R),
+        "s" => Some(VK_S), "t" => Some(VK_T), "u" => Some(VK_U),
+        "v" => Some(VK_V), "w" => Some(VK_W), "x" => Some(VK_X),
+        "y" => Some(VK_Y), "z" => Some(VK_Z),
+        "0" => Some(VK_0), "1" => Some(VK_1), "2" => Some(VK_2),
+        "3" => Some(VK_3), "4" => Some(VK_4), "5" => Some(VK_5),
+        "6" => Some(VK_6), "7" => Some(VK_7), "8" => Some(VK_8),
+        "9" => Some(VK_9),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -109,5 +190,31 @@ mod tests {
     #[test]
     fn empty_text_produces_no_inputs() {
         assert_eq!(text_to_inputs("").len(), 0);
+    }
+
+    #[test]
+    fn name_to_vk_enter_maps_to_return() {
+        assert_eq!(name_to_vk("Enter"), Some(VK_RETURN));
+    }
+
+    #[test]
+    fn name_to_vk_is_case_insensitive() {
+        assert_eq!(name_to_vk("ESCAPE"), Some(VK_ESCAPE));
+    }
+
+    #[test]
+    fn name_to_vk_unknown_returns_none() {
+        assert_eq!(name_to_vk("blarg"), None);
+    }
+
+    #[test]
+    fn name_to_vk_f5_maps_correctly() {
+        assert_eq!(name_to_vk("F5"), Some(VK_F5));
+    }
+
+    #[test]
+    fn name_to_vk_arrow_aliases_work() {
+        assert_eq!(name_to_vk("up"), Some(VK_UP));
+        assert_eq!(name_to_vk("ArrowDown"), Some(VK_DOWN));
     }
 }
