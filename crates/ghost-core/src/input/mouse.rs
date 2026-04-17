@@ -72,6 +72,123 @@ pub fn move_to(x: i32, y: i32) -> Result<(), CoreError> {
     Ok(())
 }
 
+pub fn right_click_event(up: bool) -> INPUT {
+    INPUT {
+        r#type: INPUT_MOUSE,
+        Anonymous: INPUT_0 {
+            mi: MOUSEINPUT {
+                dwFlags: if up { MOUSEEVENTF_RIGHTUP } else { MOUSEEVENTF_RIGHTDOWN },
+                ..Default::default()
+            },
+        },
+    }
+}
+
+pub fn scroll_event(delta: i32, horizontal: bool) -> INPUT {
+    INPUT {
+        r#type: INPUT_MOUSE,
+        Anonymous: INPUT_0 {
+            mi: MOUSEINPUT {
+                mouseData: delta as u32,
+                dwFlags: if horizontal { MOUSEEVENTF_HWHEEL } else { MOUSEEVENTF_WHEEL },
+                ..Default::default()
+            },
+        },
+    }
+}
+
+/// Move mouse to coordinates without clicking. Triggers hover states and dropdown menus.
+pub fn hover(x: i32, y: i32) -> Result<(), CoreError> {
+    if is_stopped() {
+        return Err(CoreError::Win32 { code: 0, context: "stopped" });
+    }
+    let inputs = [move_event(x, y)];
+    unsafe {
+        let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+        if sent != 1 {
+            tracing::warn!("hover: failed to send");
+        }
+    }
+    Ok(())
+}
+
+/// Right-click at pixel coordinates.
+pub fn right_click(x: i32, y: i32) -> Result<(), CoreError> {
+    if is_stopped() {
+        return Err(CoreError::Win32 { code: 0, context: "stopped" });
+    }
+    let inputs = [move_event(x, y), right_click_event(false), right_click_event(true)];
+    unsafe {
+        let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+        if sent != inputs.len() as u32 {
+            tracing::warn!("right_click: sent {}/{}", sent, inputs.len());
+        }
+    }
+    Ok(())
+}
+
+/// Double-click at pixel coordinates.
+pub fn double_click(x: i32, y: i32) -> Result<(), CoreError> {
+    if is_stopped() {
+        return Err(CoreError::Win32 { code: 0, context: "stopped" });
+    }
+    let inputs = [
+        move_event(x, y),
+        click_event(false), click_event(true),
+        click_event(false), click_event(true),
+    ];
+    unsafe {
+        let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+        if sent != inputs.len() as u32 {
+            tracing::warn!("double_click: sent {}/{}", sent, inputs.len());
+        }
+    }
+    Ok(())
+}
+
+/// Click-hold at from, move to to, release. Used for drag-and-drop and selections.
+pub fn drag(from_x: i32, from_y: i32, to_x: i32, to_y: i32) -> Result<(), CoreError> {
+    if is_stopped() {
+        return Err(CoreError::Win32 { code: 0, context: "stopped" });
+    }
+    let inputs = [
+        move_event(from_x, from_y),
+        click_event(false),
+        move_event(to_x, to_y),
+        click_event(true),
+    ];
+    unsafe {
+        let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+        if sent != inputs.len() as u32 {
+            tracing::warn!("drag: sent {}/{}", sent, inputs.len());
+        }
+    }
+    Ok(())
+}
+
+/// Scroll wheel at (x, y). direction: "up"/"down"/"left"/"right". amount = notches (1 notch = 120 units).
+pub fn scroll(x: i32, y: i32, direction: &str, amount: i32) -> Result<(), CoreError> {
+    if is_stopped() {
+        return Err(CoreError::Win32 { code: 0, context: "stopped" });
+    }
+    let delta = match direction {
+        "up" => 120 * amount,
+        "down" => -(120 * amount),
+        "right" => 120 * amount,
+        "left" => -(120 * amount),
+        _ => return Err(CoreError::Win32 { code: 0, context: "invalid scroll direction" }),
+    };
+    let horizontal = direction == "left" || direction == "right";
+    let inputs = [move_event(x, y), scroll_event(delta, horizontal)];
+    unsafe {
+        let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+        if sent != inputs.len() as u32 {
+            tracing::warn!("scroll: sent {}/{}", sent, inputs.len());
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -107,5 +224,38 @@ mod tests {
         // (this tests the formula direction, not exact values since screen size varies)
         let (ax, _ay) = to_absolute(0, 0);
         assert_eq!(ax, 0);
+    }
+
+    #[test]
+    fn right_click_event_down_uses_rightdown_flag() {
+        let input = right_click_event(false);
+        unsafe {
+            assert!(input.Anonymous.mi.dwFlags.contains(MOUSEEVENTF_RIGHTDOWN));
+        }
+    }
+
+    #[test]
+    fn right_click_event_up_uses_rightup_flag() {
+        let input = right_click_event(true);
+        unsafe {
+            assert!(input.Anonymous.mi.dwFlags.contains(MOUSEEVENTF_RIGHTUP));
+        }
+    }
+
+    #[test]
+    fn scroll_event_vertical_uses_wheel_flag() {
+        let input = scroll_event(120, false);
+        unsafe {
+            assert!(input.Anonymous.mi.dwFlags.contains(MOUSEEVENTF_WHEEL));
+            assert_eq!(input.Anonymous.mi.mouseData, 120u32);
+        }
+    }
+
+    #[test]
+    fn scroll_event_horizontal_uses_hwheel_flag() {
+        let input = scroll_event(120, true);
+        unsafe {
+            assert!(input.Anonymous.mi.dwFlags.contains(MOUSEEVENTF_HWHEEL));
+        }
     }
 }
