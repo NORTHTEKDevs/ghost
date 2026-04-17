@@ -49,17 +49,21 @@ pub fn set_clipboard(text: &str) -> Result<(), CoreError> {
         OpenClipboard(HWND::default())
             .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "OpenClipboard" })?;
         let _ = EmptyClipboard();
-        let hmem = GlobalAlloc(GMEM_MOVEABLE, byte_len).map_err(|_| {
+        let hmem = GlobalAlloc(GMEM_MOVEABLE, byte_len).map_err(|e| {
             let _ = CloseClipboard();
-            CoreError::Win32 { code: 0, context: "GlobalAlloc" }
+            CoreError::Win32 { code: e.code().0 as u32, context: "GlobalAlloc" }
         })?;
         let ptr = GlobalLock(hmem) as *mut u16;
-        if !ptr.is_null() {
-            std::ptr::copy_nonoverlapping(wide.as_ptr(), ptr, wide.len());
-            let _ = GlobalUnlock(hmem);
+        if ptr.is_null() {
+            let _ = CloseClipboard();
+            return Err(CoreError::Win32 { code: 0, context: "GlobalLock" });
         }
-        let handle = windows::Win32::Foundation::HANDLE(hmem.0);
-        let _ = SetClipboardData(CF_UNICODETEXT, handle);
+        std::ptr::copy_nonoverlapping(wide.as_ptr(), ptr, wide.len());
+        let _ = GlobalUnlock(hmem);
+        SetClipboardData(CF_UNICODETEXT, windows::Win32::Foundation::HANDLE(hmem.0)).map_err(|e| {
+            let _ = CloseClipboard();
+            CoreError::Win32 { code: e.code().0 as u32, context: "SetClipboardData" }
+        })?;
         let _ = CloseClipboard();
     }
     Ok(())
