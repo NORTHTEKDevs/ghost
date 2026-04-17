@@ -50,6 +50,11 @@ impl GhostElement {
         }
         patterns::set_value(&self.inner, text).map_err(GhostError::Core)
     }
+
+    /// Get the current text value of this element.
+    pub fn get_text(&self) -> String {
+        self.inner.get_text()
+    }
 }
 
 // Note: GhostElement wraps live COM objects (IUIAutomationElement) which require a
