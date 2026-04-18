@@ -157,7 +157,8 @@ impl UiaCache {
             inner.stats.history_hits += 1;
             return Ok(SnapshotDelta { seq: current.seq, added: vec![], removed: vec![], updated: vec![] });
         }
-        if let Some(prev) = inner.history.iter().find(|s| s.seq == since) {
+        let prev = inner.history.iter().find(|s| s.seq == since).cloned();
+        if let Some(prev) = prev {
             inner.stats.history_hits += 1;
             return Ok(prev.diff(&current));
         }
