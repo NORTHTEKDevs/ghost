@@ -1,3 +1,5 @@
+#![recursion_limit = "512"]
+
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use ghost_session::GhostSession;
@@ -314,6 +316,74 @@ async fn handle(
             let resp_body = resp.text().await.map_err(|e| e.to_string())?;
             Ok(json!({ "status": status, "body": resp_body }))
         }
+        "ghost_wait_until" => {
+            let condition = p["condition"].clone();
+            let timeout_ms = p["timeout_ms"].as_u64().unwrap_or(5000);
+            let poll_ms = p["poll_ms"].as_u64().unwrap_or(50);
+            session.wait_until(condition, timeout_ms, poll_ms).await.map_err(|e| e.to_string())?;
+            Ok(json!({ "ok": true }))
+        }
+        "ghost_wait_for_idle" => {
+            let window = p["window"].as_str();
+            let stable_frames = p["stable_frames"].as_u64().unwrap_or(3) as u32;
+            let timeout_ms = p["timeout_ms"].as_u64().unwrap_or(5000);
+            session.wait_for_idle(window, stable_frames, timeout_ms).await.map_err(|e| e.to_string())?;
+            Ok(json!({ "ok": true }))
+        }
+        "ghost_navigate_and_wait" => {
+            let window = p["window"].as_str().ok_or("missing param: window")?;
+            let url = p["url"].as_str().ok_or("missing param: url")?;
+            let timeout_ms = p["timeout_ms"].as_u64().unwrap_or(10000);
+            session.navigate_and_wait(window, url, timeout_ms).await.map_err(|e| e.to_string())?;
+            Ok(json!({ "ok": true }))
+        }
+        "ghost_click_and_wait_for_text" => {
+            let by = parse_by(&p)?;
+            let text = p["text"].as_str().ok_or("missing param: text")?;
+            let appears = p["appears"].as_bool().unwrap_or(true);
+            let timeout_ms = p["timeout_ms"].as_u64().unwrap_or(5000);
+            session.click_and_wait_for_text(by, text, appears, timeout_ms).await.map_err(|e| e.to_string())?;
+            Ok(json!({ "ok": true }))
+        }
+        "ghost_fill_form" => {
+            let fields_val = p["fields"].as_array().ok_or("missing param: fields (array)")?;
+            let mut fields = Vec::with_capacity(fields_val.len());
+            for f in fields_val {
+                let by = parse_by(f)?;
+                let text = f["text"].as_str().ok_or("field missing 'text'")?.to_string();
+                fields.push((by, text));
+            }
+            let submit = if p.get("submit").is_some() { Some(parse_by(&p["submit"])?) } else { None };
+            let timeout_ms = p["idle_timeout_ms"].as_u64().unwrap_or(5000);
+            session.fill_form(&fields, submit, timeout_ms).await.map_err(|e| e.to_string())?;
+            Ok(json!({ "ok": true }))
+        }
+        "ghost_execute_intent" => {
+            let intent_json = p["intent"].to_string();
+            let result = session.execute_intent(&intent_json).await.map_err(|e| e.to_string())?;
+            Ok(serde_json::to_value(result).map_err(|e| e.to_string())?)
+        }
+        "ghost_describe_screen_delta" => {
+            let window = p["window"].as_str();
+            let since_seq = p["since_seq"].as_u64();
+            let delta = session.describe_screen_delta(window, since_seq).await.map_err(|e| e.to_string())?;
+            Ok(serde_json::to_value(delta).map_err(|e| e.to_string())?)
+        }
+        "ghost_click_background" => {
+            let window = p["window"].as_str().ok_or("missing param: window")?;
+            let x = p["x"].as_i64().ok_or("missing param: x")? as i32;
+            let y = p["y"].as_i64().ok_or("missing param: y")? as i32;
+            session.click_background(window, x, y).await.map_err(|e| e.to_string())?;
+            Ok(json!({ "ok": true }))
+        }
+        "ghost_cache_stats" => {
+            let stats = session.cache_stats();
+            Ok(serde_json::to_value(stats).map_err(|e| e.to_string())?)
+        }
+        "ghost_cache_invalidate" => {
+            session.cache_invalidate();
+            Ok(json!({ "ok": true }))
+        }
         _ => Err(format!("unknown method: {}", method)),
     }
 }
@@ -455,7 +525,71 @@ fn tools_schema() -> Value {
               "body": { "type": "string", "description": "Request body string" },
               "content_type": { "type": "string", "description": "Content-Type header (default: application/json)" },
               "headers": { "type": "object", "description": "Additional headers" }
-          }}}
+          }}},
+        { "name": "ghost_wait_until",
+          "description": "Poll a JSONLogic condition against session state until true or timeout. State: {cache_seq, last_error}.",
+          "inputSchema": { "type": "object", "required": ["condition"], "properties": {
+              "condition": { "type": "object", "description": "JSONLogic expression" },
+              "timeout_ms": { "type": "integer", "default": 5000 },
+              "poll_ms": { "type": "integer", "default": 50 }
+          }}},
+        { "name": "ghost_wait_for_idle",
+          "description": "Wait until the screen is visually stable for N consecutive frames.",
+          "inputSchema": { "type": "object", "properties": {
+              "window": { "type": "string" },
+              "stable_frames": { "type": "integer", "default": 3 },
+              "timeout_ms": { "type": "integer", "default": 5000 }
+          }}},
+        { "name": "ghost_navigate_and_wait",
+          "description": "Focus a browser window, navigate to URL, wait for page idle.",
+          "inputSchema": { "type": "object", "required": ["window", "url"], "properties": {
+              "window": { "type": "string" },
+              "url": { "type": "string" },
+              "timeout_ms": { "type": "integer", "default": 10000 }
+          }}},
+        { "name": "ghost_click_and_wait_for_text",
+          "description": "Click a target element, then wait for text to appear or disappear on screen.",
+          "inputSchema": { "type": "object", "required": ["text"], "properties": {
+              "name": { "type": "string" }, "role": { "type": "string" },
+              "text": { "type": "string" },
+              "appears": { "type": "boolean", "default": true },
+              "timeout_ms": { "type": "integer", "default": 5000 }
+          }}},
+        { "name": "ghost_fill_form",
+          "description": "Fill a series of form fields and optionally submit.",
+          "inputSchema": { "type": "object", "required": ["fields"], "properties": {
+              "fields": { "type": "array", "items": { "type": "object",
+                  "required": ["text"], "properties": {
+                      "name": { "type": "string" }, "role": { "type": "string" },
+                      "text": { "type": "string" }}}},
+              "submit": { "type": "object", "properties": {
+                  "name": { "type": "string" }, "role": { "type": "string" }}},
+              "idle_timeout_ms": { "type": "integer", "default": 5000 }
+          }}},
+        { "name": "ghost_execute_intent",
+          "description": "Compile and run a JSON intent (step list + abort_if/retry_if conditions) via the FSM executor.",
+          "inputSchema": { "type": "object", "required": ["intent"], "properties": {
+              "intent": { "type": "object", "description": "Intent JSON with 'steps' array" }
+          }}},
+        { "name": "ghost_describe_screen_delta",
+          "description": "Return only added/removed/updated elements since a prior snapshot sequence.",
+          "inputSchema": { "type": "object", "properties": {
+              "window": { "type": "string" },
+              "since_seq": { "type": "integer", "description": "Sequence number from a prior delta" }
+          }}},
+        { "name": "ghost_click_background",
+          "description": "PostMessage-based click that does not steal foreground focus.",
+          "inputSchema": { "type": "object", "required": ["window", "x", "y"], "properties": {
+              "window": { "type": "string" },
+              "x": { "type": "integer", "description": "Client-relative x" },
+              "y": { "type": "integer", "description": "Client-relative y" }
+          }}},
+        { "name": "ghost_cache_stats",
+          "description": "Return UIA cache statistics (snapshots served, history hit rate).",
+          "inputSchema": { "type": "object", "properties": {}}},
+        { "name": "ghost_cache_invalidate",
+          "description": "Clear the UIA mirror cache.",
+          "inputSchema": { "type": "object", "properties": {}}}
     ])
 }
 
@@ -564,10 +698,23 @@ mod tests {
     }
 
     #[test]
-    fn tools_schema_has_27_tools() {
+    fn tools_schema_has_37_tools() {
         let tools = tools_schema();
         let list = tools.as_array().unwrap();
-        assert_eq!(list.len(), 27, "expected 27 tools (25 original + ghost_http_get + ghost_http_post)");
+        assert_eq!(list.len(), 37, "expected 37 tools (27 pre-v0.3.0 + 10 v0.3.0)");
+    }
+
+    #[test]
+    fn all_v030_tools_registered() {
+        let tools = tools_schema();
+        let names: Vec<&str> = tools.as_array().unwrap().iter()
+            .filter_map(|t| t["name"].as_str()).collect();
+        for t in ["ghost_wait_until","ghost_wait_for_idle","ghost_navigate_and_wait",
+                  "ghost_click_and_wait_for_text","ghost_fill_form","ghost_execute_intent",
+                  "ghost_describe_screen_delta","ghost_click_background",
+                  "ghost_cache_stats","ghost_cache_invalidate"] {
+            assert!(names.contains(&t), "missing {t}");
+        }
     }
 
     #[test]
