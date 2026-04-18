@@ -15,3 +15,7 @@ image = { workspace = true }
 [[example]]
 name = "notepad_hello"
 path = "../../examples/notepad_hello.rs"
+
+[[example]]
+name = "diagnose"
+path = "../../examples/diagnose.rs"
