@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>ghost form fixture</title></head>
+<body>
+<h1>Login</h1>
+<form id="f">
+  <label>User <input type="text" name="u" id="u"></label>
+  <label>Pass <input type="password" name="p" id="p"></label>
+  <button type="button" id="go" onclick="document.getElementById('r').innerText='WELCOME'">Go</button>
+</form>
+<div id="r"></div>
+<script>
+setTimeout(() => {
+  const d = document.createElement('div');
+  d.id = 'async';
+  d.innerText = 'LOADED';
+  document.body.appendChild(d);
+}, 200);
+</script>
+</body>
+</html>
