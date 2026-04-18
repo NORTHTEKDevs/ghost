@@ -204,6 +204,14 @@ impl UiaCache {
         inner.current = Snapshot::default();
         inner.history.clear();
     }
+
+    /// Chaos hook: simulate a COM disconnect by wiping the current snapshot
+    /// without archiving it. Next delta will report a full add.
+    #[cfg(feature = "chaos")]
+    pub fn chaos_drop_events(&self) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.current = Snapshot::default();
+    }
 }
 
 impl Default for UiaCache {
