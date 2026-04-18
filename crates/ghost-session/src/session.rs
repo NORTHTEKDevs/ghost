@@ -386,6 +386,19 @@ impl GhostSession {
         Ok(())
     }
 
+    /// PostMessage-based background click: does not steal foreground focus.
+    /// Resolves `window_name` via `list_windows`, then sends WM_LBUTTONDOWN/UP to the HWND.
+    pub async fn click_background(&self, window_name: &str, client_x: i32, client_y: i32) -> Result<()> {
+        if is_stopped() { return Err(GhostError::Stopped); }
+        let windows = self.list_windows().await?;
+        let target = windows.into_iter()
+            .find(|w| w.name.contains(window_name))
+            .ok_or_else(|| GhostError::ProcessNotFound { name: window_name.into() })?;
+        let hwnd = windows::Win32::Foundation::HWND(target.hwnd);
+        ghost_core::input::BackgroundClicker::click(hwnd, (client_x, client_y))
+            .map_err(GhostError::Core)
+    }
+
     /// Compile a JSON intent and run it through the FsmExecutor, dispatching ops against
     /// this session. See `ghost-intent::compiler` for intent schema.
     pub async fn execute_intent(&self, json: &str) -> Result<IntentResult> {
