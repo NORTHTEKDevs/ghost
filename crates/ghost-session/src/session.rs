@@ -1,7 +1,11 @@
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::timeout;
+use async_trait::async_trait;
 use ghost_cache::uia_mirror::{UiaCache, SnapshotDelta, Snapshot, CacheStats};
+use ghost_intent::compiler::{CompiledIntent, IntentCompiler, Op};
+use ghost_intent::error::IntentError;
+use ghost_intent::executor::{FsmExecutor, IntentResult, IntentState, OpsDispatcher};
 use ghost_core::capture::idle::IdleDetector;
 use ghost_core::{
     capture::capture_screen,
@@ -378,6 +382,90 @@ impl GhostSession {
             let el = self.find(sub).await?;
             el.click()?;
             self.wait_for_idle(None, 3, idle_timeout_ms).await?;
+        }
+        Ok(())
+    }
+
+    /// Compile a JSON intent and run it through the FsmExecutor, dispatching ops against
+    /// this session. See `ghost-intent::compiler` for intent schema.
+    pub async fn execute_intent(&self, json: &str) -> Result<IntentResult> {
+        let intent: CompiledIntent = IntentCompiler::compile(json).map_err(GhostError::from)?;
+        let dispatcher = SessionOpsDispatcher { session: self };
+        let executor = FsmExecutor::new(&dispatcher);
+        Ok(executor.run(&intent).await)
+    }
+}
+
+/// Bridges `OpsDispatcher` to session primitives. Each `Op` maps to a session method.
+struct SessionOpsDispatcher<'a> {
+    session: &'a GhostSession,
+}
+
+#[async_trait(?Send)]
+impl<'a> OpsDispatcher for SessionOpsDispatcher<'a> {
+    async fn dispatch(&self, op: &Op, _state: &mut IntentState) -> std::result::Result<(), IntentError> {
+        match op {
+            Op::Click { target } => {
+                let el = self.session.find(By::Name(target.clone())).await
+                    .map_err(|e| IntentError::OpFailed(e.to_string()))?;
+                el.click().map_err(|e| IntentError::OpFailed(e.to_string()))?;
+            }
+            Op::Type { target, text } => {
+                let el = self.session.find(By::Name(target.clone())).await
+                    .map_err(|e| IntentError::OpFailed(e.to_string()))?;
+                el.type_text(text).map_err(|e| IntentError::OpFailed(e.to_string()))?;
+            }
+            Op::Press { key } => {
+                self.session.press(key).await
+                    .map_err(|e| IntentError::OpFailed(e.to_string()))?;
+            }
+            Op::Hotkey { modifiers, key } => {
+                let mods: Vec<&str> = modifiers.iter().map(|s| s.as_str()).collect();
+                self.session.hotkey(&mods, key).await
+                    .map_err(|e| IntentError::OpFailed(e.to_string()))?;
+            }
+            Op::WaitForText { text, appears, timeout_ms } => {
+                let start = std::time::Instant::now();
+                let deadline = Duration::from_millis(*timeout_ms);
+                loop {
+                    let descriptors = self.session.describe_screen(None).await
+                        .map_err(|e| IntentError::OpFailed(e.to_string()))?;
+                    let found = descriptors.iter().any(|d| d.name.contains(text));
+                    if found == *appears { break; }
+                    if start.elapsed() >= deadline {
+                        return Err(IntentError::OpFailed(format!("wait_for_text:{text}")));
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            }
+            Op::WaitUntil { condition, timeout_ms } => {
+                self.session.wait_until(condition.clone(), *timeout_ms, 50).await
+                    .map_err(|e| IntentError::OpFailed(e.to_string()))?;
+            }
+            Op::WaitForIdle { stable_frames, timeout_ms } => {
+                self.session.wait_for_idle(None, *stable_frames, *timeout_ms).await
+                    .map_err(|e| IntentError::OpFailed(e.to_string()))?;
+            }
+            Op::Navigate { url } => {
+                let target_name = {
+                    let windows = self.session.list_windows().await
+                        .map_err(|e| IntentError::OpFailed(e.to_string()))?;
+                    windows.iter()
+                        .find(|w| w.name.contains("Edge") || w.name.contains("Chrome") || w.name.contains("Firefox"))
+                        .map(|w| w.name.clone())
+                        .ok_or_else(|| IntentError::OpFailed("no browser window".into()))?
+                };
+                self.session.navigate_and_wait(&target_name, url, 10_000).await
+                    .map_err(|e| IntentError::OpFailed(e.to_string()))?;
+            }
+            Op::FocusWindow { name } => {
+                self.session.focus_window(name).await
+                    .map_err(|e| IntentError::OpFailed(e.to_string()))?;
+            }
+            Op::Screenshot => {
+                self.session.screenshot(Region::full()).await
+                    .map_err(|e| IntentError::OpFailed(e.to_string()))?;
+            }
         }
         Ok(())
     }
