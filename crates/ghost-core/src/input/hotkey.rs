@@ -1,7 +1,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
-use windows::Win32::Foundation::GetLastError;
 use crate::error::CoreError;
 
 pub static STOP_FLAG: AtomicBool = AtomicBool::new(false);
@@ -23,9 +22,13 @@ pub fn reset_stop() {
 /// On trigger: sets STOP_FLAG, releases all modifier keys.
 pub fn register_emergency_stop() -> Result<(), CoreError> {
     unsafe {
-        // ID=1 is globally reserved for this process. Call once per process only.
-        RegisterHotKey(None, 1, MOD_CONTROL | MOD_ALT, b'G' as u32)
-            .map_err(|_| CoreError::Win32 { code: GetLastError().0, context: "RegisterHotKey" })?;
+        // ID=1 is reserved for emergency stop. Idempotent: already registered = OK.
+        if let Err(e) = RegisterHotKey(None, 1, MOD_CONTROL | MOD_ALT, b'G' as u32) {
+            const ERROR_HOTKEY_ALREADY_REGISTERED: u32 = 1409;
+            if e.code().0 as u32 != ERROR_HOTKEY_ALREADY_REGISTERED {
+                return Err(CoreError::Win32 { code: e.code().0 as u32, context: "RegisterHotKey" });
+            }
+        }
     }
 
     std::thread::spawn(|| {

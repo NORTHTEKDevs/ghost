@@ -84,7 +84,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "image",
  "thiserror",
@@ -95,7 +95,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-mcp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ghost-session",
  "serde",
@@ -107,7 +107,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-session"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ghost-core",
  "image",

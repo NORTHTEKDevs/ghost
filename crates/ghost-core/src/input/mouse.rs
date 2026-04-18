@@ -51,7 +51,7 @@ pub fn click(x: i32, y: i32) -> Result<(), CoreError> {
     unsafe {
         let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
         if sent != inputs.len() as u32 {
-            tracing::warn!("click: sent {}/{} inputs", sent, inputs.len());
+            return Err(CoreError::Win32 { code: 0, context: "SendInput: click failed" });
         }
     }
     Ok(())
@@ -66,7 +66,7 @@ pub fn move_to(x: i32, y: i32) -> Result<(), CoreError> {
     unsafe {
         let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
         if sent != 1 {
-            tracing::warn!("move_to: failed to send mouse move");
+            return Err(CoreError::Win32 { code: 0, context: "SendInput: move_to failed" });
         }
     }
     Ok(())
@@ -106,7 +106,7 @@ pub fn hover(x: i32, y: i32) -> Result<(), CoreError> {
     unsafe {
         let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
         if sent != 1 {
-            tracing::warn!("hover: failed to send");
+            return Err(CoreError::Win32 { code: 0, context: "SendInput: hover failed" });
         }
     }
     Ok(())
@@ -121,7 +121,7 @@ pub fn right_click(x: i32, y: i32) -> Result<(), CoreError> {
     unsafe {
         let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
         if sent != inputs.len() as u32 {
-            tracing::warn!("right_click: sent {}/{}", sent, inputs.len());
+            return Err(CoreError::Win32 { code: 0, context: "SendInput: right_click failed" });
         }
     }
     Ok(())
@@ -140,7 +140,7 @@ pub fn double_click(x: i32, y: i32) -> Result<(), CoreError> {
     unsafe {
         let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
         if sent != inputs.len() as u32 {
-            tracing::warn!("double_click: sent {}/{}", sent, inputs.len());
+            return Err(CoreError::Win32 { code: 0, context: "SendInput: double_click failed" });
         }
     }
     Ok(())
@@ -160,7 +160,7 @@ pub fn drag(from_x: i32, from_y: i32, to_x: i32, to_y: i32) -> Result<(), CoreEr
     unsafe {
         let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
         if sent != inputs.len() as u32 {
-            tracing::warn!("drag: sent {}/{}", sent, inputs.len());
+            return Err(CoreError::Win32 { code: 0, context: "SendInput: drag failed" });
         }
     }
     Ok(())
@@ -183,7 +183,7 @@ pub fn scroll(x: i32, y: i32, direction: &str, amount: i32) -> Result<(), CoreEr
     unsafe {
         let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
         if sent != inputs.len() as u32 {
-            tracing::warn!("scroll: sent {}/{}", sent, inputs.len());
+            return Err(CoreError::Win32 { code: 0, context: "SendInput: scroll failed" });
         }
     }
     Ok(())

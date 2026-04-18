@@ -125,7 +125,7 @@ impl UiaTree {
         results: &mut Vec<ElementDescriptor>,
         depth: usize,
     ) -> Result<(), CoreError> {
-        if results.len() >= 200 || depth > 20 {
+        if results.len() >= 500 || depth > 50 {
             return Ok(());
         }
         let el = UiaElement(element.clone());

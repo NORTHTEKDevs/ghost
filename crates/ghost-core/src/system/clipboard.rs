@@ -1,4 +1,4 @@
-use windows::Win32::Foundation::{HWND, HGLOBAL};
+use windows::Win32::Foundation::{GlobalFree, HWND, HGLOBAL};
 use windows::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, GetClipboardData, OpenClipboard, SetClipboardData,
 };
@@ -22,7 +22,7 @@ pub fn get_clipboard() -> Result<String, CoreError> {
                     let ptr = GlobalLock(hglob) as *const u16;
                     let s = if !ptr.is_null() {
                         let mut len = 0usize;
-                        while *ptr.add(len) != 0 {
+                        while len < 10_000_000 && *ptr.add(len) != 0 {
                             len += 1;
                         }
                         let slice = std::slice::from_raw_parts(ptr, len);
@@ -48,19 +48,24 @@ pub fn set_clipboard(text: &str) -> Result<(), CoreError> {
     unsafe {
         OpenClipboard(HWND::default())
             .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "OpenClipboard" })?;
-        let _ = EmptyClipboard();
+        EmptyClipboard().map_err(|e| {
+            let _ = CloseClipboard();
+            CoreError::Win32 { code: e.code().0 as u32, context: "EmptyClipboard" }
+        })?;
         let hmem = GlobalAlloc(GMEM_MOVEABLE, byte_len).map_err(|e| {
             let _ = CloseClipboard();
             CoreError::Win32 { code: e.code().0 as u32, context: "GlobalAlloc" }
         })?;
         let ptr = GlobalLock(hmem) as *mut u16;
         if ptr.is_null() {
+            let _ = GlobalFree(hmem);
             let _ = CloseClipboard();
             return Err(CoreError::Win32 { code: 0, context: "GlobalLock" });
         }
         std::ptr::copy_nonoverlapping(wide.as_ptr(), ptr, wide.len());
         let _ = GlobalUnlock(hmem);
         SetClipboardData(CF_UNICODETEXT, windows::Win32::Foundation::HANDLE(hmem.0)).map_err(|e| {
+            let _ = GlobalFree(hmem);
             let _ = CloseClipboard();
             CoreError::Win32 { code: e.code().0 as u32, context: "SetClipboardData" }
         })?;

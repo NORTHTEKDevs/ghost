@@ -1,7 +1,13 @@
 [package]
 name = "ghost-core"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
+description = "Low-level Win32/UIA/SendInput/DXGI primitives for the Ghost desktop automation framework"
+keywords = ["automation", "windows", "win32", "desktop", "uia"]
+categories = ["os::windows-apis"]
+license = "MIT"
+repository = "https://github.com/FrostbyteDevTeam/ghost"
+readme = "../../README.md"
 
 [dependencies]
 windows = { workspace = true }

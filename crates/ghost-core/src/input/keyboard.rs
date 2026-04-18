@@ -56,7 +56,7 @@ pub fn type_text(text: &str) -> Result<(), CoreError> {
         unsafe {
             let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
             if sent != inputs.len() as u32 {
-                tracing::warn!("type_text: sent {}/{} inputs for char '{}'", sent, inputs.len(), ch);
+                return Err(CoreError::Win32 { code: 0, context: "SendInput: partial delivery" });
             }
         }
     }
@@ -72,7 +72,7 @@ pub fn press_key(vk: VIRTUAL_KEY) -> Result<(), CoreError> {
     unsafe {
         let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
         if sent != inputs.len() as u32 {
-            tracing::warn!("press_key: sent {}/{} inputs", sent, inputs.len());
+            return Err(CoreError::Win32 { code: 0, context: "SendInput: press_key failed" });
         }
     }
     Ok(())
@@ -87,7 +87,7 @@ pub fn key_down(vk: VIRTUAL_KEY) -> Result<(), CoreError> {
     unsafe {
         let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
         if sent != 1 {
-            tracing::warn!("key_down: failed to send for vk {:?}", vk.0);
+            return Err(CoreError::Win32 { code: 0, context: "SendInput: key_down failed" });
         }
     }
     Ok(())
@@ -102,7 +102,7 @@ pub fn key_up(vk: VIRTUAL_KEY) -> Result<(), CoreError> {
     unsafe {
         let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
         if sent != 1 {
-            tracing::warn!("key_up: failed to send for vk {:?}", vk.0);
+            return Err(CoreError::Win32 { code: 0, context: "SendInput: key_up failed" });
         }
     }
     Ok(())

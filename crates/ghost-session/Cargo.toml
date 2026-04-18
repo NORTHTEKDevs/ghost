@@ -1,7 +1,13 @@
 [package]
 name = "ghost-session"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
+description = "Safe async session API for Ghost Windows desktop automation"
+keywords = ["automation", "windows", "desktop", "mcp", "agent"]
+categories = ["os::windows-apis", "asynchronous"]
+license = "MIT"
+repository = "https://github.com/FrostbyteDevTeam/ghost"
+readme = "../../README.md"
 
 [dependencies]
 ghost-core = { path = "../ghost-core" }
