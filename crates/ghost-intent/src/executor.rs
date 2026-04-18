@@ -49,8 +49,8 @@ pub struct IntentResult {
     pub duration_ms: u64,
 }
 
-#[async_trait]
-pub trait OpsDispatcher: Send + Sync {
+#[async_trait(?Send)]
+pub trait OpsDispatcher {
     async fn dispatch(&self, op: &Op, state: &mut IntentState) -> Result<(), IntentError>;
 }
 
@@ -153,7 +153,7 @@ mod tests {
     use std::sync::Arc;
 
     struct OkDispatcher;
-    #[async_trait]
+    #[async_trait(?Send)]
     impl OpsDispatcher for OkDispatcher {
         async fn dispatch(&self, _op: &Op, _state: &mut IntentState) -> Result<(), IntentError> {
             Ok(())
@@ -161,7 +161,7 @@ mod tests {
     }
 
     struct ErrDispatcher { msg: String }
-    #[async_trait]
+    #[async_trait(?Send)]
     impl OpsDispatcher for ErrDispatcher {
         async fn dispatch(&self, _op: &Op, _state: &mut IntentState) -> Result<(), IntentError> {
             Err(IntentError::OpFailed(self.msg.clone()))
@@ -172,7 +172,7 @@ mod tests {
         fails: Arc<AtomicUsize>,
         until: usize,
     }
-    #[async_trait]
+    #[async_trait(?Send)]
     impl OpsDispatcher for FlakyDispatcher {
         async fn dispatch(&self, _op: &Op, _state: &mut IntentState) -> Result<(), IntentError> {
             let n = self.fails.fetch_add(1, Ordering::SeqCst);
@@ -220,7 +220,7 @@ mod tests {
     #[tokio::test]
     async fn enforces_max_duration_ms() {
         struct Slow;
-        #[async_trait]
+        #[async_trait(?Send)]
         impl OpsDispatcher for Slow {
             async fn dispatch(&self, _: &Op, _: &mut IntentState) -> Result<(), IntentError> {
                 tokio::time::sleep(Duration::from_millis(200)).await;
