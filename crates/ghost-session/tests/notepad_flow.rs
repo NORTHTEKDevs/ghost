@@ -4,7 +4,7 @@
 
 #![cfg(windows)]
 
-use ghost_session::{GhostSession, By};
+use ghost_session::GhostSession;
 
 async fn spawn_notepad() -> GhostSession {
     let s = GhostSession::new().unwrap().with_timeout(5000);
@@ -18,8 +18,8 @@ async fn spawn_notepad() -> GhostSession {
 async fn delta_describe_tracks_typed_text() {
     let s = spawn_notepad().await;
     let a = s.describe_screen_delta(Some("Notepad"), None).await.unwrap();
-    let edit = s.find(By::role("edit")).await.unwrap();
-    edit.type_text("hello delta").unwrap();
+    s.focus_window("Notepad").await.unwrap();
+    ghost_core::input::keyboard::type_text("hello delta").unwrap();
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     let b = s.describe_screen_delta(Some("Notepad"), Some(a.seq)).await.unwrap();
     assert!(b.seq >= a.seq);

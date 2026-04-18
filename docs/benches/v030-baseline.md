@@ -12,6 +12,15 @@ Run: `cargo bench -p ghost-intent`
 | Cached UIA tree walk (50 elements) | < 8 ms | Populates delta + locator cache |
 | sonic-rs encode (75 KB response) | < 3 ms (3-5x serde_json) | MCP stdout serialization |
 
+## Measured (2026-04-18, release profile)
+
+| Operation | Measured | Budget | Headroom |
+|-----------|----------|--------|----------|
+| `jsonlogic_eq_var` | **32.2 ns** | < 1 µs | 31x |
+| `intent_compile_3_ops` | **1.49 µs** | < 50 µs | 33x |
+
+Windows 11, `cargo bench -p ghost-intent`, 145M iters / 3.3M iters respectively.
+
 ## Regression Gate
 
 `scripts/bench-check.sh` (TBD) compares current run to committed `v030-baseline`
