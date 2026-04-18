@@ -1,5 +1,7 @@
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::timeout;
+use ghost_cache::uia_mirror::{UiaCache, SnapshotDelta, Snapshot, CacheStats};
 use ghost_core::{
     capture::capture_screen,
     input::hotkey::{register_emergency_stop, is_stopped, reset_stop},
@@ -32,6 +34,7 @@ impl Region {
 pub struct GhostSession {
     timeout_ms: u64,
     tree: UiaTree,
+    cache: Arc<UiaCache>,
 }
 
 impl GhostSession {
@@ -44,7 +47,33 @@ impl GhostSession {
         Ok(Self {
             timeout_ms: 5000,
             tree,
+            cache: Arc::new(UiaCache::new()),
         })
+    }
+
+    /// Return a structural delta between the current screen snapshot and `since_seq`.
+    /// Pass `since_seq = None` to get the full current snapshot as a delta.
+    pub async fn describe_screen_delta(
+        &self,
+        window: Option<&str>,
+        since_seq: Option<u64>,
+    ) -> Result<SnapshotDelta> {
+        self.cache.snapshot_delta(window, since_seq).map_err(Into::into)
+    }
+
+    /// Return cache statistics (snapshots served, history hit rate, etc).
+    pub fn cache_stats(&self) -> CacheStats {
+        self.cache.stats()
+    }
+
+    /// Invalidate the UIA cache. Next describe_screen_delta returns a full snapshot.
+    pub fn cache_invalidate(&self) {
+        self.cache.invalidate();
+    }
+
+    /// Apply a freshly walked snapshot into the cache. Used by walker-driven refresh paths.
+    pub fn apply_snapshot(&self, snap: Snapshot) {
+        self.cache.apply_snapshot(snap);
     }
 
     /// Override the per-action timeout (default: 5000ms).

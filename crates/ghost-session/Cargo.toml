@@ -11,7 +11,12 @@ readme = "../../README.md"
 
 [dependencies]
 ghost-core = { path = "../ghost-core" }
+ghost-cache = { path = "../ghost-cache" }
+ghost-intent = { path = "../ghost-intent" }
 tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = "0.1"
 thiserror = { workspace = true }
 tracing = { workspace = true }
 image = { workspace = true }
