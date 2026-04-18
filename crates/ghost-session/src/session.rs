@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::timeout;
 use ghost_cache::uia_mirror::{UiaCache, SnapshotDelta, Snapshot, CacheStats};
+use ghost_core::capture::idle::IdleDetector;
 use ghost_core::{
     capture::capture_screen,
     input::hotkey::{register_emergency_stop, is_stopped, reset_stop},
@@ -69,6 +70,51 @@ impl GhostSession {
     /// Invalidate the UIA cache. Next describe_screen_delta returns a full snapshot.
     pub fn cache_invalidate(&self) {
         self.cache.invalidate();
+    }
+
+    /// Poll `condition` (a JSONLogic expression) against session state every `poll_ms`
+    /// until it evaluates true or `timeout_ms` elapses.
+    ///
+    /// State exposed to the condition: `{ "cache_seq": u64, "last_error": Option<String> }`.
+    pub async fn wait_until(
+        &self,
+        condition: serde_json::Value,
+        timeout_ms: u64,
+        poll_ms: u64,
+    ) -> Result<()> {
+        if is_stopped() { return Err(GhostError::Stopped); }
+        let start = std::time::Instant::now();
+        let deadline = Duration::from_millis(timeout_ms);
+        let poll = Duration::from_millis(poll_ms.max(10));
+        loop {
+            if is_stopped() { return Err(GhostError::Stopped); }
+            let state = serde_json::json!({
+                "cache_seq": self.cache.seq(),
+                "last_error": serde_json::Value::Null,
+            });
+            let v = ghost_intent::jsonlogic::eval(&condition, &state)
+                .map_err(GhostError::from)?;
+            if v.as_bool() == Some(true) {
+                return Ok(());
+            }
+            if start.elapsed() >= deadline {
+                return Err(GhostError::Timeout { action: "wait_until".into(), ms: timeout_ms });
+            }
+            tokio::time::sleep(poll).await;
+        }
+    }
+
+    /// Wait for the screen to settle: `stable_frames` consecutive identical captures.
+    /// `window` is currently informational; DXGI duplication is full-desktop.
+    pub async fn wait_for_idle(
+        &self,
+        _window: Option<&str>,
+        stable_frames: u32,
+        timeout_ms: u64,
+    ) -> Result<()> {
+        if is_stopped() { return Err(GhostError::Stopped); }
+        let detector = IdleDetector::new().map_err(GhostError::Core)?;
+        detector.wait_stable(stable_frames, timeout_ms).await.map_err(GhostError::Core)
     }
 
     /// Apply a freshly walked snapshot into the cache. Used by walker-driven refresh paths.
