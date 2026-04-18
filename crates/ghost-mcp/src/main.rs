@@ -129,6 +129,118 @@ async fn handle(
             session.stop();
             Ok(json!({ "ok": true }))
         }
+        "ghost_press" => {
+            let key = p["key"].as_str().ok_or("missing param: key")?;
+            session.press(key).await.map_err(|e| e.to_string())?;
+            Ok(json!({ "ok": true }))
+        }
+        "ghost_hotkey" => {
+            let modifiers: Vec<&str> = p["modifiers"]
+                .as_array()
+                .ok_or("missing param: modifiers")?
+                .iter()
+                .filter_map(|v| v.as_str())
+                .collect();
+            let key = p["key"].as_str().ok_or("missing param: key")?;
+            session.hotkey(&modifiers, key).await.map_err(|e| e.to_string())?;
+            Ok(json!({ "ok": true }))
+        }
+        "ghost_key_down" => {
+            let key = p["key"].as_str().ok_or("missing param: key")?;
+            session.key_down(key).await.map_err(|e| e.to_string())?;
+            Ok(json!({ "ok": true }))
+        }
+        "ghost_key_up" => {
+            let key = p["key"].as_str().ok_or("missing param: key")?;
+            session.key_up(key).await.map_err(|e| e.to_string())?;
+            Ok(json!({ "ok": true }))
+        }
+        "ghost_hover" => {
+            let x = p["x"].as_i64().ok_or("missing param: x")? as i32;
+            let y = p["y"].as_i64().ok_or("missing param: y")? as i32;
+            session.hover(x, y).await.map_err(|e| e.to_string())?;
+            Ok(json!({ "ok": true }))
+        }
+        "ghost_right_click" => {
+            let x = p["x"].as_i64().ok_or("missing param: x")? as i32;
+            let y = p["y"].as_i64().ok_or("missing param: y")? as i32;
+            session.right_click_at(x, y).await.map_err(|e| e.to_string())?;
+            Ok(json!({ "ok": true }))
+        }
+        "ghost_double_click" => {
+            let x = p["x"].as_i64().ok_or("missing param: x")? as i32;
+            let y = p["y"].as_i64().ok_or("missing param: y")? as i32;
+            session.double_click_at(x, y).await.map_err(|e| e.to_string())?;
+            Ok(json!({ "ok": true }))
+        }
+        "ghost_drag" => {
+            let from_x = p["from_x"].as_i64().ok_or("missing param: from_x")? as i32;
+            let from_y = p["from_y"].as_i64().ok_or("missing param: from_y")? as i32;
+            let to_x = p["to_x"].as_i64().ok_or("missing param: to_x")? as i32;
+            let to_y = p["to_y"].as_i64().ok_or("missing param: to_y")? as i32;
+            session.drag(from_x, from_y, to_x, to_y).await.map_err(|e| e.to_string())?;
+            Ok(json!({ "ok": true }))
+        }
+        "ghost_scroll" => {
+            let x = p["x"].as_i64().ok_or("missing param: x")? as i32;
+            let y = p["y"].as_i64().ok_or("missing param: y")? as i32;
+            let direction = p["direction"].as_str().ok_or("missing param: direction")?;
+            let amount = p["amount"].as_i64().unwrap_or(3) as i32;
+            session.scroll(x, y, direction, amount).await.map_err(|e| e.to_string())?;
+            Ok(json!({ "ok": true }))
+        }
+        "ghost_get_clipboard" => {
+            let text = session.get_clipboard().await.map_err(|e| e.to_string())?;
+            Ok(json!({ "text": text }))
+        }
+        "ghost_set_clipboard" => {
+            let text = p["text"].as_str().ok_or("missing param: text")?;
+            session.set_clipboard(text).await.map_err(|e| e.to_string())?;
+            Ok(json!({ "ok": true }))
+        }
+        "ghost_list_windows" => {
+            let windows = session.list_windows().await.map_err(|e| e.to_string())?;
+            let list: Vec<serde_json::Value> = windows.iter().map(|w| json!({
+                "name": w.name,
+                "pid": w.pid,
+                "focused": w.focused,
+            })).collect();
+            Ok(json!({ "windows": list }))
+        }
+        "ghost_focus_window" => {
+            let name = p["name"].as_str().ok_or("missing param: name")?;
+            session.focus_window(name).await.map_err(|e| e.to_string())?;
+            Ok(json!({ "ok": true }))
+        }
+        "ghost_window_state" => {
+            let name = p["name"].as_str().ok_or("missing param: name")?;
+            let state = p["state"].as_str().ok_or("missing param: state")?;
+            session.window_state(name, state).await.map_err(|e| e.to_string())?;
+            Ok(json!({ "ok": true }))
+        }
+        "ghost_wait" => {
+            let ms = p["ms"].as_u64().ok_or("missing param: ms")?;
+            session.wait(ms).await;
+            Ok(json!({ "ok": true }))
+        }
+        "ghost_describe_screen" => {
+            let window = p["window"].as_str();
+            let elements = session.describe_screen(window).await.map_err(|e| e.to_string())?;
+            let list: Vec<serde_json::Value> = elements.iter().map(|e| json!({
+                "name": e.name,
+                "role": e.role,
+                "left": e.left,
+                "top": e.top,
+                "right": e.right,
+                "bottom": e.bottom,
+            })).collect();
+            Ok(json!({ "elements": list }))
+        }
+        "ghost_get_text" => {
+            let by = parse_by(&p)?;
+            let text = session.get_text(by).await.map_err(|e| e.to_string())?;
+            Ok(json!({ "text": text }))
+        }
         _ => Err(format!("unknown method: {}", method)),
     }
 }
