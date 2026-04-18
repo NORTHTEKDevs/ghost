@@ -20,4 +20,7 @@ pub enum CoreError {
 
     #[error("STA pool circuit breaker open after repeated panics")]
     CircuitOpen,
+
+    #[error("Target window is gone")]
+    WindowGone,
 }
