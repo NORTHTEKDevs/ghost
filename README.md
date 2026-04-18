@@ -62,7 +62,60 @@ Add to Claude Code settings:
 }
 ```
 
-Available tools: `ghost_find`, `ghost_click`, `ghost_type`, `ghost_click_at`, `ghost_screenshot`, `ghost_launch`, `ghost_stop`
+### Available Tools (24)
+
+**Element interaction**
+| Tool | Parameters | Description |
+|------|-----------|-------------|
+| `ghost_find` | `name` or `role` | Find element by accessible name or control type |
+| `ghost_click` | `name` or `role` | Find and click an element |
+| `ghost_type` | `name`/`role`, `text` | Find element and type text into it |
+| `ghost_click_at` | `x`, `y` | Left-click at absolute screen coordinates |
+| `ghost_get_text` | `name` or `role` | Read text value from a found element |
+
+**Keyboard**
+| Tool | Parameters | Description |
+|------|-----------|-------------|
+| `ghost_press` | `key` | Press a named key: Enter, Tab, Escape, F1-F12, ArrowUp, etc. |
+| `ghost_hotkey` | `modifiers[]`, `key` | Modifier combo: Ctrl+C, Alt+F4, Win+D |
+| `ghost_key_down` | `key` | Hold key down (for Ctrl+drag, Shift+click) |
+| `ghost_key_up` | `key` | Release held key |
+
+**Mouse**
+| Tool | Parameters | Description |
+|------|-----------|-------------|
+| `ghost_hover` | `x`, `y` | Move mouse without clicking (triggers dropdowns) |
+| `ghost_right_click` | `x`, `y` | Right-click at coordinates |
+| `ghost_double_click` | `x`, `y` | Double-click at coordinates |
+| `ghost_drag` | `from_x`, `from_y`, `to_x`, `to_y` | Click-hold, drag, release |
+| `ghost_scroll` | `x`, `y`, `direction`, `amount?` | Scroll up/down/left/right |
+
+**Clipboard**
+| Tool | Parameters | Description |
+|------|-----------|-------------|
+| `ghost_get_clipboard` | — | Read current clipboard text |
+| `ghost_set_clipboard` | `text` | Write text to clipboard |
+
+**Screen & perception**
+| Tool | Parameters | Description |
+|------|-----------|-------------|
+| `ghost_screenshot` | — | Capture screen as base64 PNG |
+| `ghost_describe_screen` | `window?` | List interactive elements with names, roles, positions |
+
+**Window management**
+| Tool | Parameters | Description |
+|------|-----------|-------------|
+| `ghost_list_windows` | — | All visible top-level windows with name, pid, focused |
+| `ghost_focus_window` | `name` | Bring window to foreground by partial name |
+| `ghost_window_state` | `name`, `state` | maximize / minimize / restore / close |
+
+**Process & control**
+| Tool | Parameters | Description |
+|------|-----------|-------------|
+| `ghost_launch` | `exe` | Launch process, returns pid |
+| `ghost_wait` | `ms` | Wait N milliseconds |
+| `ghost_stop` | — | Emergency stop: halt all automation |
+| `ghost_reset` | — | Resume after stop |
 
 ## Element Locators
 

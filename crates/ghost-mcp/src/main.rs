@@ -89,6 +89,18 @@ async fn handle(
     let p = params.cloned().unwrap_or(json!({}));
 
     match method {
+        // MCP protocol handshake
+        "initialize" => {
+            Ok(json!({
+                "protocolVersion": "2024-11-05",
+                "capabilities": { "tools": {} },
+                "serverInfo": { "name": "ghost", "version": "0.2.0" }
+            }))
+        }
+        "initialized" | "notifications/initialized" => Ok(json!({})),
+        "tools/list" => {
+            Ok(json!({ "tools": tools_schema() }))
+        }
         "ghost_find" => {
             let by = parse_by(&p)?;
             let el = session.find(by).await.map_err(|e| e.to_string())?;
@@ -127,6 +139,10 @@ async fn handle(
         }
         "ghost_stop" => {
             session.stop();
+            Ok(json!({ "ok": true }))
+        }
+        "ghost_reset" => {
+            session.reset();
             Ok(json!({ "ok": true }))
         }
         "ghost_press" => {
@@ -245,6 +261,133 @@ async fn handle(
     }
 }
 
+fn tools_schema() -> Value {
+    json!([
+        { "name": "ghost_find",
+          "description": "Find the first UI element matching name or role. Returns element name and bounding rect.",
+          "inputSchema": { "type": "object", "properties": {
+              "name": { "type": "string", "description": "Accessible name (case-insensitive substring)" },
+              "role": { "type": "string", "description": "Control type: button, edit, checkbox, list, menu, tab, toolbar" }
+          }}},
+        { "name": "ghost_click",
+          "description": "Find a UI element and click it.",
+          "inputSchema": { "type": "object", "properties": {
+              "name": { "type": "string" }, "role": { "type": "string" }
+          }}},
+        { "name": "ghost_type",
+          "description": "Find a UI element and type text into it.",
+          "inputSchema": { "type": "object", "required": ["text"], "properties": {
+              "name": { "type": "string" }, "role": { "type": "string" },
+              "text": { "type": "string", "description": "Text to type" }
+          }}},
+        { "name": "ghost_click_at",
+          "description": "Left-click at absolute screen pixel coordinates.",
+          "inputSchema": { "type": "object", "required": ["x","y"], "properties": {
+              "x": { "type": "integer" }, "y": { "type": "integer" }
+          }}},
+        { "name": "ghost_screenshot",
+          "description": "Capture the primary monitor as a base64-encoded PNG.",
+          "inputSchema": { "type": "object", "properties": {} }},
+        { "name": "ghost_launch",
+          "description": "Launch a process by executable name or path. Returns its PID.",
+          "inputSchema": { "type": "object", "required": ["exe"], "properties": {
+              "exe": { "type": "string", "description": "Executable name or full path" }
+          }}},
+        { "name": "ghost_stop",
+          "description": "Emergency stop: halts all automation and releases held modifier keys.",
+          "inputSchema": { "type": "object", "properties": {} }},
+        { "name": "ghost_reset",
+          "description": "Resume automation after ghost_stop. Clears the stop flag.",
+          "inputSchema": { "type": "object", "properties": {} }},
+        { "name": "ghost_press",
+          "description": "Press and release a named key: Enter, Tab, Escape, Backspace, Delete, Home, End, PageUp, PageDown, ArrowUp/Down/Left/Right, F1-F12, Space, Ctrl, Shift, Alt, Win, a-z, 0-9.",
+          "inputSchema": { "type": "object", "required": ["key"], "properties": {
+              "key": { "type": "string" }
+          }}},
+        { "name": "ghost_hotkey",
+          "description": "Press a modifier+key combo. Example: modifiers=[\"Ctrl\"], key=\"c\" for Ctrl+C.",
+          "inputSchema": { "type": "object", "required": ["modifiers","key"], "properties": {
+              "modifiers": { "type": "array", "items": { "type": "string" }, "description": "Modifier keys: Ctrl, Shift, Alt, Win" },
+              "key": { "type": "string" }
+          }}},
+        { "name": "ghost_key_down",
+          "description": "Hold a key down without releasing. Pair with ghost_key_up.",
+          "inputSchema": { "type": "object", "required": ["key"], "properties": {
+              "key": { "type": "string" }
+          }}},
+        { "name": "ghost_key_up",
+          "description": "Release a key held by ghost_key_down.",
+          "inputSchema": { "type": "object", "required": ["key"], "properties": {
+              "key": { "type": "string" }
+          }}},
+        { "name": "ghost_hover",
+          "description": "Move mouse to coordinates without clicking. Triggers hover states, dropdowns, tooltips.",
+          "inputSchema": { "type": "object", "required": ["x","y"], "properties": {
+              "x": { "type": "integer" }, "y": { "type": "integer" }
+          }}},
+        { "name": "ghost_right_click",
+          "description": "Right-click at absolute screen pixel coordinates.",
+          "inputSchema": { "type": "object", "required": ["x","y"], "properties": {
+              "x": { "type": "integer" }, "y": { "type": "integer" }
+          }}},
+        { "name": "ghost_double_click",
+          "description": "Double-click at absolute screen pixel coordinates.",
+          "inputSchema": { "type": "object", "required": ["x","y"], "properties": {
+              "x": { "type": "integer" }, "y": { "type": "integer" }
+          }}},
+        { "name": "ghost_drag",
+          "description": "Click-hold at from, move to to, release. For drag-and-drop and selections.",
+          "inputSchema": { "type": "object", "required": ["from_x","from_y","to_x","to_y"], "properties": {
+              "from_x": { "type": "integer" }, "from_y": { "type": "integer" },
+              "to_x": { "type": "integer" }, "to_y": { "type": "integer" }
+          }}},
+        { "name": "ghost_scroll",
+          "description": "Scroll wheel at coordinates. direction: up/down/left/right. amount = notches (default 3).",
+          "inputSchema": { "type": "object", "required": ["x","y","direction"], "properties": {
+              "x": { "type": "integer" }, "y": { "type": "integer" },
+              "direction": { "type": "string", "enum": ["up","down","left","right"] },
+              "amount": { "type": "integer", "default": 3 }
+          }}},
+        { "name": "ghost_get_clipboard",
+          "description": "Read current clipboard text. Returns empty string if clipboard has no text.",
+          "inputSchema": { "type": "object", "properties": {} }},
+        { "name": "ghost_set_clipboard",
+          "description": "Write text to the clipboard, replacing existing content.",
+          "inputSchema": { "type": "object", "required": ["text"], "properties": {
+              "text": { "type": "string" }
+          }}},
+        { "name": "ghost_list_windows",
+          "description": "List all visible top-level windows with name, pid, and focused state.",
+          "inputSchema": { "type": "object", "properties": {} }},
+        { "name": "ghost_focus_window",
+          "description": "Bring a window to the foreground by partial name match.",
+          "inputSchema": { "type": "object", "required": ["name"], "properties": {
+              "name": { "type": "string", "description": "Partial window title (case-insensitive)" }
+          }}},
+        { "name": "ghost_window_state",
+          "description": "Change window state.",
+          "inputSchema": { "type": "object", "required": ["name","state"], "properties": {
+              "name": { "type": "string" },
+              "state": { "type": "string", "enum": ["maximize","minimize","restore","close"] }
+          }}},
+        { "name": "ghost_wait",
+          "description": "Wait N milliseconds before the next action.",
+          "inputSchema": { "type": "object", "required": ["ms"], "properties": {
+              "ms": { "type": "integer", "minimum": 0 }
+          }}},
+        { "name": "ghost_describe_screen",
+          "description": "Return a structured list of interactive UI elements (buttons, inputs, menus) with names, roles, and positions. Scope to a window by partial title.",
+          "inputSchema": { "type": "object", "properties": {
+              "window": { "type": "string", "description": "Optional partial window title to scope the search" }
+          }}},
+        { "name": "ghost_get_text",
+          "description": "Get the text value or label of a found UI element.",
+          "inputSchema": { "type": "object", "properties": {
+              "name": { "type": "string" }, "role": { "type": "string" }
+          }}}
+    ])
+}
+
 fn parse_by(p: &Value) -> std::result::Result<ghost_session::By, String> {
     if let Some(n) = p["name"].as_str() {
         return Ok(ghost_session::By::name(n));
@@ -347,5 +490,50 @@ mod tests {
         let resp = McpResponse { id: json!(1), result: None, error: Some(json!({"message": "fail"})) };
         let s = serde_json::to_string(&resp).unwrap();
         assert!(!s.contains("result"));
+    }
+
+    #[test]
+    fn tools_schema_has_25_tools() {
+        let tools = tools_schema();
+        let list = tools.as_array().unwrap();
+        assert_eq!(list.len(), 25, "expected 25 tools (24 original + ghost_reset)");
+    }
+
+    #[test]
+    fn tools_schema_all_have_name_and_schema() {
+        let tools = tools_schema();
+        for tool in tools.as_array().unwrap() {
+            assert!(tool["name"].is_string(), "tool missing name field");
+            assert!(tool["description"].is_string(), "tool {:?} missing description", tool["name"]);
+            assert!(tool["inputSchema"].is_object(), "tool {:?} missing inputSchema", tool["name"]);
+        }
+    }
+
+    #[test]
+    fn tools_schema_contains_all_required_tools() {
+        let tools = tools_schema();
+        let names: Vec<&str> = tools.as_array().unwrap()
+            .iter()
+            .filter_map(|t| t["name"].as_str())
+            .collect();
+        for required in &["ghost_find","ghost_click","ghost_type","ghost_screenshot",
+                          "ghost_press","ghost_hotkey","ghost_scroll","ghost_describe_screen",
+                          "ghost_get_clipboard","ghost_set_clipboard","ghost_list_windows",
+                          "ghost_stop","ghost_reset","ghost_wait","ghost_get_text"] {
+            assert!(names.contains(required), "tools/list missing: {}", required);
+        }
+    }
+
+    #[test]
+    fn initialize_response_has_protocol_version() {
+        // Verify initialize response shape matches MCP 2024-11-05 spec
+        let resp = json!({
+            "protocolVersion": "2024-11-05",
+            "capabilities": { "tools": {} },
+            "serverInfo": { "name": "ghost", "version": "0.2.0" }
+        });
+        assert_eq!(resp["protocolVersion"], "2024-11-05");
+        assert!(resp["capabilities"]["tools"].is_object());
+        assert_eq!(resp["serverInfo"]["name"], "ghost");
     }
 }
