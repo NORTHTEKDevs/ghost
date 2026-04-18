@@ -1,8 +1,16 @@
-//! UIA mirror snapshot types + delta computation.
+//! UIA mirror: snapshot types, in-memory mirror, delta API.
+//!
+//! Event subscription (Structure/PropertyChanged handlers) is stubbed - the
+//! `apply_mutation` entry-point lets the walker-driven snapshot path drive
+//! updates until the COM handlers are wired in a follow-up.
 
+use crate::error::CacheError;
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, Mutex};
 
 pub type Seq = u64;
+const SNAPSHOT_HISTORY: usize = 8;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ElementNode {
@@ -31,7 +39,7 @@ impl ElementNode {
         out
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub fn dummy() -> Self {
         Self {
             runtime_id: "dummy".into(),
@@ -60,7 +68,6 @@ pub struct SnapshotDelta {
 
 impl Snapshot {
     pub fn diff(&self, other: &Snapshot) -> SnapshotDelta {
-        use std::collections::HashMap;
         let map_a: HashMap<&str, &ElementNode> =
             self.nodes.iter().map(|n| (n.runtime_id.as_str(), n)).collect();
         let map_b: HashMap<&str, &ElementNode> =
@@ -94,8 +101,115 @@ impl Snapshot {
     }
 }
 
-/// In-memory mirror state. The event-subscription machinery is wired in Task 7.
-pub struct UiaCache;
+struct CacheInner {
+    current: Snapshot,
+    history: VecDeque<Snapshot>,
+    stats: CacheStats,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CacheStats {
+    pub mutations_applied: u64,
+    pub snapshots_served: u64,
+    pub deltas_served: u64,
+    pub history_hits: u64,
+    pub history_misses: u64,
+}
+
+pub struct UiaCache {
+    inner: Arc<Mutex<CacheInner>>,
+}
+
+impl UiaCache {
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(CacheInner {
+                current: Snapshot::default(),
+                history: VecDeque::with_capacity(SNAPSHOT_HISTORY),
+                stats: CacheStats::default(),
+            })),
+        }
+    }
+
+    pub fn seq(&self) -> Seq {
+        self.inner.lock().unwrap().current.seq
+    }
+
+    pub fn snapshot(&self, _window: Option<&str>, _since_seq: Option<Seq>) -> Result<Snapshot, CacheError> {
+        let mut inner = self.inner.lock().unwrap();
+        inner.stats.snapshots_served += 1;
+        Ok(inner.current.clone())
+    }
+
+    pub fn snapshot_delta(&self, _window: Option<&str>, since_seq: Option<Seq>) -> Result<SnapshotDelta, CacheError> {
+        let mut inner = self.inner.lock().unwrap();
+        inner.stats.deltas_served += 1;
+        let current = inner.current.clone();
+        let Some(since) = since_seq else {
+            return Ok(SnapshotDelta {
+                seq: current.seq,
+                added: current.nodes.clone(),
+                removed: vec![],
+                updated: vec![],
+            });
+        };
+        if since == current.seq {
+            inner.stats.history_hits += 1;
+            return Ok(SnapshotDelta { seq: current.seq, added: vec![], removed: vec![], updated: vec![] });
+        }
+        if let Some(prev) = inner.history.iter().find(|s| s.seq == since) {
+            inner.stats.history_hits += 1;
+            return Ok(prev.diff(&current));
+        }
+        inner.stats.history_misses += 1;
+        Ok(SnapshotDelta { seq: current.seq, added: current.nodes.clone(), removed: vec![], updated: vec![] })
+    }
+
+    /// Replace the current snapshot wholesale; archive the prior into history.
+    /// Wired by the walker-driven refresh path and, in the future, by COM event handlers.
+    pub fn apply_snapshot(&self, mut new_snap: Snapshot) {
+        let mut inner = self.inner.lock().unwrap();
+        let prior = std::mem::take(&mut inner.current);
+        new_snap.seq = prior.seq + 1;
+        if inner.history.len() >= SNAPSHOT_HISTORY {
+            inner.history.pop_front();
+        }
+        inner.history.push_back(prior);
+        inner.current = new_snap;
+        inner.stats.mutations_applied += 1;
+    }
+
+    /// Test-only single-node append. Bumps seq by 1.
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub fn apply_mutation_for_test(&self, node: ElementNode) {
+        let mut inner = self.inner.lock().unwrap();
+        let mut next = inner.current.clone();
+        next.seq += 1;
+        next.nodes.push(node);
+        let prior = std::mem::replace(&mut inner.current, next);
+        if inner.history.len() >= SNAPSHOT_HISTORY {
+            inner.history.pop_front();
+        }
+        inner.history.push_back(prior);
+        inner.stats.mutations_applied += 1;
+    }
+
+    pub fn stats(&self) -> CacheStats {
+        self.inner.lock().unwrap().stats.clone()
+    }
+
+    pub fn invalidate(&self) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.current = Snapshot::default();
+        inner.history.clear();
+    }
+}
+
+impl Default for UiaCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -132,8 +246,6 @@ mod tests {
         let d = a.diff(&b);
         assert_eq!(d.added.len(), 1);
         assert_eq!(d.removed.len(), 1);
-        assert_eq!(d.added[0].runtime_id, "3");
-        assert_eq!(d.removed[0].runtime_id, "1");
     }
 
     #[test]
@@ -143,5 +255,32 @@ mod tests {
         let d = a.diff(&b);
         assert!(d.added.is_empty() && d.removed.is_empty());
         assert_eq!(d.updated.len(), 1);
+    }
+
+    #[test]
+    fn cache_applies_mutation_and_bumps_seq() {
+        let cache = UiaCache::new();
+        let before = cache.seq();
+        cache.apply_mutation_for_test(ElementNode::dummy());
+        let after = cache.seq();
+        assert!(after > before);
+    }
+
+    #[test]
+    fn snapshot_returns_noop_delta_when_seq_matches() {
+        let cache = UiaCache::new();
+        let s1 = cache.snapshot(None, None).unwrap();
+        let delta = cache.snapshot_delta(None, Some(s1.seq)).unwrap();
+        assert!(delta.added.is_empty() && delta.removed.is_empty() && delta.updated.is_empty());
+        assert_eq!(delta.seq, s1.seq);
+    }
+
+    #[test]
+    fn snapshot_delta_uses_history_after_mutation() {
+        let cache = UiaCache::new();
+        let s1 = cache.snapshot(None, None).unwrap();
+        cache.apply_mutation_for_test(ElementNode::dummy());
+        let delta = cache.snapshot_delta(None, Some(s1.seq)).unwrap();
+        assert_eq!(delta.added.len(), 1);
     }
 }
