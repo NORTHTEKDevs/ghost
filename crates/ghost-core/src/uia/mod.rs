@@ -1,5 +1,6 @@
 pub mod element;
 pub mod patterns;
+pub mod sta_pool;
 pub mod tree;
 
 pub use element::{BoundingRect, ElementDescriptor, UiaElement, INTERACTIVE_ROLES};
