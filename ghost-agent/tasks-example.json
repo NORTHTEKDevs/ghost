@@ -1,0 +1,17 @@
+[
+  {
+    "id": "1",
+    "title": "Open Windows Terminal",
+    "detail": "Launch Windows Terminal using ghost_launch with exe='wt.exe'. Wait for it to open fully before marking done."
+  },
+  {
+    "id": "2",
+    "title": "Navigate to projects directory",
+    "detail": "Click on the terminal window, set clipboard to 'cd C:\\Users\\Krist\\projects\\active', paste with Ctrl+V, then press Enter."
+  },
+  {
+    "id": "3",
+    "title": "List active projects",
+    "detail": "Set clipboard to 'ls', paste with Ctrl+V, press Enter. When you see the directory listing, task is done."
+  }
+]

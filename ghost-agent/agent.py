@@ -152,7 +152,7 @@ def fetch_tasks(ghost, source: str) -> list:
             return json.load(f)
 
 
-def run_task(ghost, client, task, dry_run=False):
+def run_task(ghost, client, task, dry_run=False, mock=False):
     title = task.get("title", "")
     detail = task.get("detail", "")
     print(f"\n--- TASK: {title} ---")
@@ -160,8 +160,12 @@ def run_task(ghost, client, task, dry_run=False):
 
     history = []
     for loop in range(MAX_LOOPS_PER_TASK):
-        screenshot = ghost.screenshot_b64()
-        action, history = ask_claude(client, title, detail, screenshot, history)
+        if mock:
+            action = {"thought": "mock: task looks done", "tool": None, "params": {}, "done": True}
+            history = []
+        else:
+            screenshot = ghost.screenshot_b64()
+            action, history = ask_claude(client, title, detail, screenshot, history)
 
         print(f"  [{loop+1}] {action.get('thought', '')}")
         print(f"       -> {action.get('tool')} {action.get('params', {})}")
@@ -183,9 +187,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--tasks", required=True, help="URL or local JSON file with task list")
     parser.add_argument("--dry-run", action="store_true", help="Print actions without executing")
+    parser.add_argument("--mock", action="store_true", help="Return canned actions instead of calling Claude (for testing)")
     args = parser.parse_args()
 
-    client = anthropic.Anthropic()
+    client = anthropic.Anthropic() if not args.mock else None
     ghost = Ghost()
 
     try:
@@ -195,7 +200,7 @@ def main():
 
         for i, task in enumerate(tasks):
             print(f"\n=== Task {i+1}/{len(tasks)} ===")
-            run_task(ghost, client, task, dry_run=args.dry_run)
+            run_task(ghost, client, task, dry_run=args.dry_run, mock=args.mock)
             time.sleep(1)
 
         print("\nAll tasks complete.")
