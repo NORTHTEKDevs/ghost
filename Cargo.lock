@@ -482,7 +482,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "blake3",
  "crossbeam-channel",
@@ -512,7 +512,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-mcp"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "ghost-session",
  "reqwest",
@@ -526,7 +526,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-session"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "ghost-cache",

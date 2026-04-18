@@ -1,6 +1,6 @@
 [package]
 name = "ghost-session"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "Safe async session API for Ghost Windows desktop automation"
 keywords = ["automation", "windows", "desktop", "mcp", "agent"]

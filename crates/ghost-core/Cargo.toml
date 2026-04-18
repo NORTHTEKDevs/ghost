@@ -1,6 +1,6 @@
 [package]
 name = "ghost-core"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "Low-level Win32/UIA/SendInput/DXGI primitives for the Ghost desktop automation framework"
 keywords = ["automation", "windows", "win32", "desktop", "uia"]

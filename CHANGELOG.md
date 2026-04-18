@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.3.0] - 2026-04-18 — Speed Overhaul
+
+### Added
+
+- **`ghost-cache` crate**: event-driven UIA mirror with snapshot/delta API, 8-slot
+  history ring, SQLite-backed `LocatorStore` with schema v1 and cold/warm/drift
+  lookup + eviction.
+- **`ghost-intent` crate**: JSON intent compiler, JSONLogic subset evaluator, FSM
+  executor with `abort_if` / `retry_if` + exponential backoff + deadline gate.
+- **`StaPool`**: STA-threaded UIA worker pool with `catch_unwind` panic recovery,
+  3-panics-in-60s circuit breaker, and per-job tokio timeout.
+- **`CachedTreeWalker`**: batched `IUIAutomationCacheRequest` + `FindAllBuildCache`
+  for 10 UIA properties in one round-trip.
+- **`IdleDetector`**: blake3-hashed frame capture with stable-frame detection.
+- **`BackgroundClicker`**: PostMessage-based `WM_LBUTTONDOWN/UP` with `IsWindow` gate.
+- 10 new MCP tools: `ghost_wait_until`, `ghost_wait_for_idle`, `ghost_navigate_and_wait`,
+  `ghost_click_and_wait_for_text`, `ghost_fill_form`, `ghost_execute_intent`,
+  `ghost_describe_screen_delta`, `ghost_click_background`, `ghost_cache_stats`,
+  `ghost_cache_invalidate` — total 37.
+- sonic-rs response encoder (3-5x faster on large payloads) with serde_json fallback.
+- Criterion benches (`cargo bench -p ghost-intent`) and `docs/benches/v030-baseline.md`.
+- `chaos` feature flag for failure-injection tests.
+
+### Changed
+
+- `OpsDispatcher` trait is `?Send` to accommodate `!Send` COM handles on `GhostSession`.
+- `ghost-mcp` `recursion_limit = "512"` to fit the 37-tool `json!` macro.
+
+### See
+
+- Design: `docs/2026-04-17-ghost-v030-speed-overhaul.md`
+- Plan: `docs/plans/2026-04-18-ghost-v030-speed-overhaul.md`
+
 ## [0.2.0] - 2026-04-17
 
 ### Added
