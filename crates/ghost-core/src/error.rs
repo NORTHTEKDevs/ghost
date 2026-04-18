@@ -11,4 +11,13 @@ pub enum CoreError {
 
     #[error("Process not found: {name}")]
     ProcessNotFound { name: String },
+
+    #[error("STA worker panicked: {0}")]
+    WorkerPanic(String),
+
+    #[error("STA job exceeded timeout")]
+    JobTimeout,
+
+    #[error("STA pool circuit breaker open after repeated panics")]
+    CircuitOpen,
 }
