@@ -1,0 +1,13 @@
+[package]
+name = "ghost-intent"
+version = "0.3.0"
+edition = "2021"
+
+[dependencies]
+ghost-core = { path = "../ghost-core" }
+ghost-cache = { path = "../ghost-cache" }
+tokio.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true

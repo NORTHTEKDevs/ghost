@@ -3,6 +3,8 @@ members = [
     "crates/ghost-core",
     "crates/ghost-session",
     "crates/ghost-mcp",
+    "crates/ghost-cache",
+    "crates/ghost-intent",
 ]
 resolver = "2"
 
@@ -31,3 +33,8 @@ windows = { version = "0.58", features = [
     "Win32_Graphics_Direct3D11",
     "Win32_Graphics_Direct3D",
 ] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+sonic-rs = "0.3"
+crossbeam-channel = "0.5"
+blake3 = "1.5"
+criterion = { version = "0.5", features = ["html_reports"] }
