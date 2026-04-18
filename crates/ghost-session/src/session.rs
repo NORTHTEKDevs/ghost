@@ -317,4 +317,68 @@ impl GhostSession {
         let el = self.find(by).await?;
         Ok(el.get_text())
     }
+
+    /// Focus a browser window, type a URL into the address bar, press Enter, then wait for idle.
+    pub async fn navigate_and_wait(
+        &self,
+        window_name: &str,
+        url: &str,
+        idle_timeout_ms: u64,
+    ) -> Result<()> {
+        self.focus_window(window_name).await?;
+        // Ctrl+L focuses the address bar in Edge/Chrome/Firefox.
+        self.hotkey(&["Ctrl"], "l").await?;
+        ghost_core::input::keyboard::type_text(url).map_err(GhostError::Core)?;
+        self.press("Enter").await?;
+        self.wait_for_idle(Some(window_name), 3, idle_timeout_ms).await
+    }
+
+    /// Click an element, then wait for `expected_text` to appear (or disappear) on screen.
+    pub async fn click_and_wait_for_text(
+        &self,
+        target: By,
+        expected_text: &str,
+        appears: bool,
+        timeout_ms: u64,
+    ) -> Result<()> {
+        let el = self.find(target).await?;
+        el.click()?;
+        let start = std::time::Instant::now();
+        let deadline = Duration::from_millis(timeout_ms);
+        loop {
+            if is_stopped() { return Err(GhostError::Stopped); }
+            let descriptors = self.describe_screen(None).await.unwrap_or_default();
+            let found = descriptors.iter().any(|d| d.name.contains(expected_text));
+            if found == appears {
+                return Ok(());
+            }
+            if start.elapsed() >= deadline {
+                return Err(GhostError::Timeout {
+                    action: format!("wait_for_text:{expected_text}"),
+                    ms: timeout_ms,
+                });
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    /// Fill each `(locator, text)` pair, optionally click submit, then wait for idle.
+    pub async fn fill_form(
+        &self,
+        fields: &[(By, String)],
+        submit: Option<By>,
+        idle_timeout_ms: u64,
+    ) -> Result<()> {
+        for (by, text) in fields {
+            let el = self.find(by.clone()).await?;
+            el.click()?;
+            ghost_core::input::keyboard::type_text(text).map_err(GhostError::Core)?;
+        }
+        if let Some(sub) = submit {
+            let el = self.find(sub).await?;
+            el.click()?;
+            self.wait_for_idle(None, 3, idle_timeout_ms).await?;
+        }
+        Ok(())
+    }
 }
