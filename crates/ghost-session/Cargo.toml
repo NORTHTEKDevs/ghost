@@ -23,6 +23,7 @@ tracing = { workspace = true }
 image = { workspace = true }
 
 [dev-dependencies]
+ghost-intent = { path = "../ghost-intent" }
 
 [[example]]
 name = "notepad_hello"
