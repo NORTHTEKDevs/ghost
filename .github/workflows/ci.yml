@@ -4,25 +4,64 @@ on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   test:
+    name: Test
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
 
-      - uses: Swatinem/rust-cache@v2
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
 
       - name: Build
-        run: cargo build --all
+        run: cargo build --workspace
 
-      - name: Unit tests (skip integration tests requiring display)
-        run: cargo test --all -- --skip test_notepad --skip test_calculator
+      - name: Test (unit only, skip display-dependent integration tests)
+        run: cargo test --workspace
 
-      - name: Build MCP release binary
-        run: cargo build -p ghost-mcp --release
+      - name: Clippy
+        run: cargo clippy --workspace -- -D warnings
+
+  release-build:
+    name: Release build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-release-
+
+      - name: Release build
+        run: cargo build --release --bin ghost-mcp
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghost-mcp-windows
+          path: target/release/ghost-mcp.exe

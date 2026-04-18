@@ -269,3 +269,83 @@ fn base64_encode(data: &[u8]) -> String {
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    // RFC 4648 base64 test vectors
+    #[test]
+    fn base64_empty() {
+        assert_eq!(base64_encode(b""), "");
+    }
+
+    #[test]
+    fn base64_one_byte() {
+        assert_eq!(base64_encode(b"f"), "Zg==");
+    }
+
+    #[test]
+    fn base64_two_bytes() {
+        assert_eq!(base64_encode(b"fo"), "Zm8=");
+    }
+
+    #[test]
+    fn base64_three_bytes() {
+        assert_eq!(base64_encode(b"foo"), "Zm9v");
+    }
+
+    #[test]
+    fn base64_man_rfc_vector() {
+        // "Man" -> "TWFu" (classic RFC 4648 example)
+        assert_eq!(base64_encode(b"Man"), "TWFu");
+    }
+
+    #[test]
+    fn base64_all_bytes_aligned() {
+        // 3 bytes that produce known output
+        assert_eq!(base64_encode(b"\x00\x00\x00"), "AAAA");
+        assert_eq!(base64_encode(b"\xff\xff\xff"), "////");
+    }
+
+    #[test]
+    fn base64_two_byte_padding() {
+        // 2 bytes: single = pad
+        assert_eq!(base64_encode(b"\xff\xff"), "//8=");
+    }
+
+    #[test]
+    fn parse_by_name() {
+        let p = json!({ "name": "OK" });
+        let by = parse_by(&p).unwrap();
+        assert_eq!(by.to_string(), "name=OK");
+    }
+
+    #[test]
+    fn parse_by_role() {
+        let p = json!({ "role": "button" });
+        let by = parse_by(&p).unwrap();
+        assert_eq!(by.to_string(), "role=button");
+    }
+
+    #[test]
+    fn parse_by_missing_returns_error() {
+        let p = json!({ "x": 100 });
+        assert!(parse_by(&p).is_err());
+    }
+
+    #[test]
+    fn mcp_response_ok_omits_error_field() {
+        let resp = McpResponse { id: json!(1), result: Some(json!({"ok": true})), error: None };
+        let s = serde_json::to_string(&resp).unwrap();
+        assert!(!s.contains("error"));
+    }
+
+    #[test]
+    fn mcp_response_err_omits_result_field() {
+        let resp = McpResponse { id: json!(1), result: None, error: Some(json!({"message": "fail"})) };
+        let s = serde_json::to_string(&resp).unwrap();
+        assert!(!s.contains("result"));
+    }
+}

@@ -216,5 +216,52 @@ mod tests {
     fn name_to_vk_arrow_aliases_work() {
         assert_eq!(name_to_vk("up"), Some(VK_UP));
         assert_eq!(name_to_vk("ArrowDown"), Some(VK_DOWN));
+        assert_eq!(name_to_vk("ArrowLeft"), Some(VK_LEFT));
+        assert_eq!(name_to_vk("ArrowRight"), Some(VK_RIGHT));
+    }
+
+    #[test]
+    fn name_to_vk_navigation_keys() {
+        assert_eq!(name_to_vk("Home"), Some(VK_HOME));
+        assert_eq!(name_to_vk("End"), Some(VK_END));
+        assert_eq!(name_to_vk("PageUp"), Some(VK_PRIOR));
+        assert_eq!(name_to_vk("PageDown"), Some(VK_NEXT));
+        assert_eq!(name_to_vk("Delete"), Some(VK_DELETE));
+        assert_eq!(name_to_vk("Del"), Some(VK_DELETE));
+        assert_eq!(name_to_vk("Backspace"), Some(VK_BACK));
+        assert_eq!(name_to_vk("Tab"), Some(VK_TAB));
+        assert_eq!(name_to_vk("Space"), Some(VK_SPACE));
+    }
+
+    #[test]
+    fn name_to_vk_modifiers() {
+        assert_eq!(name_to_vk("Ctrl"), Some(VK_CONTROL));
+        assert_eq!(name_to_vk("Control"), Some(VK_CONTROL));
+        assert_eq!(name_to_vk("Shift"), Some(VK_SHIFT));
+        assert_eq!(name_to_vk("Alt"), Some(VK_MENU));
+        assert_eq!(name_to_vk("Win"), Some(VK_LWIN));
+        assert_eq!(name_to_vk("Windows"), Some(VK_LWIN));
+    }
+
+    #[test]
+    fn name_to_vk_all_f_keys() {
+        assert_eq!(name_to_vk("F1"), Some(VK_F1));
+        assert_eq!(name_to_vk("F12"), Some(VK_F12));
+    }
+
+    #[test]
+    fn name_to_vk_alpha_and_digits() {
+        assert_eq!(name_to_vk("a"), Some(VK_A));
+        assert_eq!(name_to_vk("z"), Some(VK_Z));
+        assert_eq!(name_to_vk("0"), Some(VK_0));
+        assert_eq!(name_to_vk("9"), Some(VK_9));
+    }
+
+    #[test]
+    fn name_to_vk_return_alias() {
+        assert_eq!(name_to_vk("Return"), Some(VK_RETURN));
+        assert_eq!(name_to_vk("Enter"), Some(VK_RETURN));
+        assert_eq!(name_to_vk("Escape"), Some(VK_ESCAPE));
+        assert_eq!(name_to_vk("Esc"), Some(VK_ESCAPE));
     }
 }
