@@ -4,7 +4,10 @@
 
 ### Added
 
-- 17 new MCP tools bringing total to 24 (full human-input parity)
+- `ghost_reset` MCP tool: resume automation after `ghost_stop`
+- MCP protocol compliance: `initialize`, `initialized`, and `tools/list` methods
+- `tools/list` returns full inputSchema for all 25 tools (MCP 2024-11-05 spec)
+- 17 new MCP tools bringing total to 25 (full human-input parity)
 - **Input:** `ghost_press`, `ghost_hotkey`, `ghost_key_down`, `ghost_key_up`
 - **Mouse:** `ghost_hover`, `ghost_right_click`, `ghost_double_click`, `ghost_drag`, `ghost_scroll`
 - **Clipboard:** `ghost_get_clipboard`, `ghost_set_clipboard`
