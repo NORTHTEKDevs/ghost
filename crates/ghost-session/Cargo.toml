@@ -24,6 +24,11 @@ image = { workspace = true }
 
 [dev-dependencies]
 ghost-intent = { path = "../ghost-intent" }
+async-trait = "0.1"
+
+[features]
+default = []
+chaos = ["ghost-cache/chaos"]
 
 [[example]]
 name = "notepad_hello"
