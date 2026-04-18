@@ -2,10 +2,24 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use ghost_session::GhostSession;
 use std::io::{BufRead, Write};
+use std::sync::OnceLock;
+
+static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+fn http_client() -> &'static reqwest::Client {
+    HTTP_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .user_agent("ghost-mcp/0.2.0")
+            .build()
+            .expect("failed to build reqwest client")
+    })
+}
 
 #[derive(Deserialize)]
 struct McpRequest {
-    id: Value,
+    #[serde(default)]
+    id: Option<Value>,
     method: String,
     params: Option<Value>,
 }
@@ -65,12 +79,18 @@ async fn main() {
             }
         };
 
+        // notifications have no id — handle them but don't respond
+        let Some(id) = req.id else {
+            let _ = handle(&session, &req.method, req.params.as_ref()).await;
+            continue;
+        };
+
         let result = handle(&session, &req.method, req.params.as_ref()).await;
 
         let resp = match result {
-            Ok(v) => McpResponse { id: req.id, result: Some(v), error: None },
+            Ok(v) => McpResponse { id, result: Some(v), error: None },
             Err(e) => McpResponse {
-                id: req.id,
+                id,
                 result: None,
                 error: Some(json!({ "message": e })),
             },
@@ -257,6 +277,43 @@ async fn handle(
             let text = session.get_text(by).await.map_err(|e| e.to_string())?;
             Ok(json!({ "text": text }))
         }
+        "ghost_http_get" => {
+            let url = p["url"].as_str().ok_or("missing param: url")?;
+            let headers_val = p["headers"].as_object();
+            let mut req = http_client().get(url);
+            if let Some(hdrs) = headers_val {
+                for (k, v) in hdrs {
+                    if let Some(vs) = v.as_str() {
+                        req = req.header(k.as_str(), vs);
+                    }
+                }
+            }
+            let resp = req.send().await.map_err(|e| e.to_string())?;
+            let status = resp.status().as_u16();
+            let body = resp.text().await.map_err(|e| e.to_string())?;
+            Ok(json!({ "status": status, "body": body }))
+        }
+        "ghost_http_post" => {
+            let url = p["url"].as_str().ok_or("missing param: url")?;
+            let body = p["body"].as_str().unwrap_or("");
+            let content_type = p["content_type"].as_str().unwrap_or("application/json");
+            let headers_val = p["headers"].as_object();
+            let mut req = http_client()
+                .post(url)
+                .header("Content-Type", content_type)
+                .body(body.to_owned());
+            if let Some(hdrs) = headers_val {
+                for (k, v) in hdrs {
+                    if let Some(vs) = v.as_str() {
+                        req = req.header(k.as_str(), vs);
+                    }
+                }
+            }
+            let resp = req.send().await.map_err(|e| e.to_string())?;
+            let status = resp.status().as_u16();
+            let resp_body = resp.text().await.map_err(|e| e.to_string())?;
+            Ok(json!({ "status": status, "body": resp_body }))
+        }
         _ => Err(format!("unknown method: {}", method)),
     }
 }
@@ -384,6 +441,20 @@ fn tools_schema() -> Value {
           "description": "Get the text value or label of a found UI element.",
           "inputSchema": { "type": "object", "properties": {
               "name": { "type": "string" }, "role": { "type": "string" }
+          }}},
+        { "name": "ghost_http_get",
+          "description": "Make an HTTP GET request. Returns status code and response body as text.",
+          "inputSchema": { "type": "object", "required": ["url"], "properties": {
+              "url": { "type": "string", "description": "Full URL to fetch" },
+              "headers": { "type": "object", "description": "Optional request headers as key-value pairs" }
+          }}},
+        { "name": "ghost_http_post",
+          "description": "Make an HTTP POST request with a string body. Returns status code and response body.",
+          "inputSchema": { "type": "object", "required": ["url"], "properties": {
+              "url": { "type": "string" },
+              "body": { "type": "string", "description": "Request body string" },
+              "content_type": { "type": "string", "description": "Content-Type header (default: application/json)" },
+              "headers": { "type": "object", "description": "Additional headers" }
           }}}
     ])
 }
@@ -493,10 +564,10 @@ mod tests {
     }
 
     #[test]
-    fn tools_schema_has_25_tools() {
+    fn tools_schema_has_27_tools() {
         let tools = tools_schema();
         let list = tools.as_array().unwrap();
-        assert_eq!(list.len(), 25, "expected 25 tools (24 original + ghost_reset)");
+        assert_eq!(list.len(), 27, "expected 27 tools (25 original + ghost_http_get + ghost_http_post)");
     }
 
     #[test]
@@ -519,7 +590,8 @@ mod tests {
         for required in &["ghost_find","ghost_click","ghost_type","ghost_screenshot",
                           "ghost_press","ghost_hotkey","ghost_scroll","ghost_describe_screen",
                           "ghost_get_clipboard","ghost_set_clipboard","ghost_list_windows",
-                          "ghost_stop","ghost_reset","ghost_wait","ghost_get_text"] {
+                          "ghost_stop","ghost_reset","ghost_wait","ghost_get_text",
+                          "ghost_http_get","ghost_http_post"] {
             assert!(names.contains(required), "tools/list missing: {}", required);
         }
     }
