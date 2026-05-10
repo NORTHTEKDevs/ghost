@@ -17,16 +17,38 @@ pub fn reset_stop() {
     STOP_FLAG.store(false, Ordering::Release);
 }
 
+/// Detect if the current process is running in Session 0 (SYSTEM service, no interactive desktop).
+/// Checks for the presence of a foreground window; Session 0 has none.
+fn is_session_zero() -> bool {
+    use windows::Win32::Foundation::HWND;
+    unsafe {
+        let fg_window = GetForegroundWindow();
+        fg_window == HWND::default()
+    }
+}
+
 /// Register Ctrl+Alt+G as a global hotkey (ID=1).
 /// Spawns a background thread that listens for WM_HOTKEY messages.
 /// On trigger: sets STOP_FLAG, releases all modifier keys.
+///
+/// Note: Skips hotkey registration if running in Session 0 (SYSTEM service with no interactive desktop).
+/// The MCP server can still function without the emergency-stop hotkey.
 pub fn register_emergency_stop() -> Result<(), CoreError> {
+    if is_session_zero() {
+        tracing::info!("Running in Session 0 (SYSTEM service); skipping global hotkey registration");
+        return Ok(());
+    }
+
     unsafe {
         // ID=1 is reserved for emergency stop. Idempotent: already registered = OK.
         if let Err(e) = RegisterHotKey(None, 1, MOD_CONTROL | MOD_ALT, b'G' as u32) {
             const ERROR_HOTKEY_ALREADY_REGISTERED: u32 = 1409;
             if e.code().0 as u32 != ERROR_HOTKEY_ALREADY_REGISTERED {
-                return Err(CoreError::Win32 { code: e.code().0 as u32, context: "RegisterHotKey" });
+                tracing::warn!(
+                    "RegisterHotKey failed with code {}: continuing without hotkey",
+                    e.code().0
+                );
+                return Ok(());
             }
         }
     }

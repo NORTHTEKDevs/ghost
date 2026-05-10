@@ -5,6 +5,8 @@ members = [
     "crates/ghost-mcp",
     "crates/ghost-cache",
     "crates/ghost-intent",
+    "crates/ghost-cli",
+    "crates/ghost-http",
 ]
 resolver = "2"
 
@@ -38,3 +40,7 @@ sonic-rs = "0.3"
 crossbeam-channel = "0.5"
 blake3 = "1.5"
 criterion = { version = "0.5", features = ["html_reports"] }
+clap = { version = "4", features = ["derive"] }
+axum = { version = "0.7", features = ["macros"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
