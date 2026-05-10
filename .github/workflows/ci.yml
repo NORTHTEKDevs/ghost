@@ -58,10 +58,13 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-release-
 
       - name: Release build
-        run: cargo build --release --bin ghost-mcp
+        run: cargo build --release --bin ghost --bin ghost-http --bin ghost-mcp
 
-      - name: Upload binary artifact
+      - name: Upload binary artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ghost-mcp-windows
-          path: target/release/ghost-mcp.exe
+          name: ghost-windows
+          path: |
+            target/release/ghost.exe
+            target/release/ghost-http.exe
+            target/release/ghost-mcp.exe
