@@ -28,6 +28,7 @@ struct McpRequest {
 
 #[derive(Serialize)]
 struct McpResponse {
+    jsonrpc: &'static str,
     id: Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     result: Option<Value>,
@@ -72,6 +73,7 @@ async fn main() {
                     out,
                     "{}",
                     serde_json::to_string(&json!({
+                        "jsonrpc": "2.0",
                         "id": null,
                         "error": { "message": format!("parse error: {}", e) }
                     })).unwrap()
@@ -90,8 +92,9 @@ async fn main() {
         let result = handle(&session, &req.method, req.params.as_ref()).await;
 
         let resp = match result {
-            Ok(v) => McpResponse { id, result: Some(v), error: None },
+            Ok(v) => McpResponse { jsonrpc: "2.0", id, result: Some(v), error: None },
             Err(e) => McpResponse {
+                jsonrpc: "2.0",
                 id,
                 result: None,
                 error: Some(json!({ "message": e })),
@@ -166,6 +169,27 @@ async fn handle(
         "ghost_screenshot" => {
             let png = session.screenshot(ghost_session::session::Region::full()).await.map_err(|e| e.to_string())?;
             Ok(json!({ "png_base64": base64_encode(&png) }))
+        }
+        "ghost_screenshot_region" => {
+            let rect = if p.get("rect").is_some() {
+                let arr = p["rect"].as_array().ok_or("rect must be [left,top,right,bottom]")?;
+                if arr.len() != 4 { return Err("rect must have exactly 4 values".into()); }
+                Some((
+                    arr[0].as_i64().ok_or("rect[0] not int")? as i32,
+                    arr[1].as_i64().ok_or("rect[1] not int")? as i32,
+                    arr[2].as_i64().ok_or("rect[2] not int")? as i32,
+                    arr[3].as_i64().ok_or("rect[3] not int")? as i32,
+                ))
+            } else if p["foreground"].as_bool().unwrap_or(false) {
+                session.foreground_window_rect()
+            } else {
+                None
+            };
+            let max_dim = p["max_dim"].as_u64().map(|n| n as u32);
+            let jpeg_quality = p["jpeg_quality"].as_u64().map(|n| n.min(100) as u8);
+            let bytes = session.screenshot_region(rect, max_dim, jpeg_quality).await.map_err(|e| e.to_string())?;
+            let key = if jpeg_quality.is_some() { "jpeg_base64" } else { "png_base64" };
+            Ok(json!({ key: base64_encode(&bytes), "size_bytes": bytes.len() }))
         }
         "ghost_launch" => {
             let exe = p["exe"].as_str().ok_or("missing param: exe")?;
@@ -287,6 +311,41 @@ async fn handle(
             })).collect();
             Ok(json!({ "elements": list }))
         }
+        "ghost_describe_screen_fast" => {
+            let elements = session.describe_screen_fast().await.map_err(|e| e.to_string())?;
+            let list: Vec<serde_json::Value> = elements.iter().map(|e| json!({
+                "name": e.name,
+                "role": e.role,
+                "left": e.left,
+                "top": e.top,
+                "right": e.right,
+                "bottom": e.bottom,
+            })).collect();
+            Ok(json!({ "elements": list }))
+        }
+        "ghost_batch_actions" => {
+            let actions = p["actions"].as_array().ok_or("missing param: actions (array)")?;
+            let stop_on_error = p["stop_on_error"].as_bool().unwrap_or(true);
+            let mut results = Vec::with_capacity(actions.len());
+            let mut errors: Vec<Value> = Vec::new();
+            for (i, action) in actions.iter().enumerate() {
+                let op = action["op"].as_str().ok_or_else(|| format!("action {i}: missing 'op'"))?;
+                let outcome: std::result::Result<Value, String> = run_batch_op(session, op, action).await;
+                match outcome {
+                    Ok(v) => results.push(v),
+                    Err(e) => {
+                        errors.push(json!({ "index": i, "op": op, "error": e }));
+                        results.push(json!({ "ok": false, "error_index": errors.len() - 1 }));
+                        if stop_on_error { break; }
+                    }
+                }
+            }
+            Ok(json!({
+                "results": results,
+                "completed": results.len(),
+                "errors": errors,
+            }))
+        }
         "ghost_get_text" => {
             let by = parse_by(&p)?;
             let text = session.get_text(by).await.map_err(|e| e.to_string())?;
@@ -397,6 +456,48 @@ async fn handle(
             session.cache_invalidate();
             Ok(json!({ "ok": true }))
         }
+        "ghost_event_seq" => {
+            Ok(json!({ "seq": session.event_seq() }))
+        }
+        "ghost_locate_by_description" => {
+            let description = p["description"].as_str().ok_or("missing param: description")?;
+            let (x, y) = session.locate_by_description(description).await.map_err(|e| e.to_string())?;
+            Ok(json!({ "x": x, "y": y }))
+        }
+        "ghost_click_by_description" => {
+            let description = p["description"].as_str().ok_or("missing param: description")?;
+            session.click_by_description(description).await.map_err(|e| e.to_string())?;
+            Ok(json!({ "ok": true }))
+        }
+        "ghost_type_by_description" => {
+            let description = p["description"].as_str().ok_or("missing param: description")?;
+            let text = p["text"].as_str().ok_or("missing param: text")?;
+            session.type_by_description(description, text).await.map_err(|e| e.to_string())?;
+            Ok(json!({ "ok": true }))
+        }
+        "ghost_find_text_local" => {
+            let needle = p["text"].as_str().ok_or("missing param: text")?;
+            let foreground = p["foreground"].as_bool().unwrap_or(true);
+            let coords = session.find_text_local(needle, foreground).await.map_err(|e| e.to_string())?;
+            match coords {
+                Some((x, y)) => Ok(json!({ "found": true, "x": x, "y": y })),
+                None => Ok(json!({ "found": false })),
+            }
+        }
+        "ghost_click_text_local" => {
+            let needle = p["text"].as_str().ok_or("missing param: text")?;
+            let timeout_ms = p["timeout_ms"].as_u64().unwrap_or(5000);
+            session.click_text_local(needle, timeout_ms).await.map_err(|e| e.to_string())?;
+            Ok(json!({ "ok": true }))
+        }
+        "ghost_wait_for_event" => {
+            let since_seq = p["since_seq"].as_u64().unwrap_or(0);
+            let timeout_ms = p["timeout_ms"].as_u64().unwrap_or(5000);
+            match session.wait_for_event(since_seq, timeout_ms).await {
+                Ok(seq) => Ok(json!({ "seq": seq, "timed_out": false })),
+                Err(_) => Ok(json!({ "seq": session.event_seq(), "timed_out": true })),
+            }
+        }
         _ => Err(format!("unknown method: {}", method)),
     }
 }
@@ -426,8 +527,16 @@ fn tools_schema() -> Value {
               "x": { "type": "integer" }, "y": { "type": "integer" }
           }}},
         { "name": "ghost_screenshot",
-          "description": "Capture the primary monitor as a base64-encoded PNG.",
+          "description": "Capture the primary monitor as a base64-encoded PNG (full screen, lossless).",
           "inputSchema": { "type": "object", "properties": {} }},
+        { "name": "ghost_screenshot_region",
+          "description": "Capture a screen region with optional downscale and PNG/JPEG encoding. For vision payloads, use foreground=true + max_dim=768 + jpeg_quality=75 (10-50x smaller than full PNG, 3-5x faster vision inference).",
+          "inputSchema": { "type": "object", "properties": {
+              "rect": { "type": "array", "items": { "type": "integer" }, "minItems": 4, "maxItems": 4, "description": "[left, top, right, bottom] in pixels" },
+              "foreground": { "type": "boolean", "description": "If true and rect is omitted, crop to the foreground window's bounding rect" },
+              "max_dim": { "type": "integer", "description": "Longest-edge size after downscale (e.g. 768)" },
+              "jpeg_quality": { "type": "integer", "minimum": 0, "maximum": 100, "description": "If set, encode as JPEG at this quality; else PNG" }
+          }}},
         { "name": "ghost_launch",
           "description": "Launch a process by executable name or path. Returns its PID.",
           "inputSchema": { "type": "object", "required": ["exe"], "properties": {
@@ -516,9 +625,20 @@ fn tools_schema() -> Value {
               "ms": { "type": "integer", "minimum": 0 }
           }}},
         { "name": "ghost_describe_screen",
-          "description": "Return a structured list of interactive UI elements (buttons, inputs, menus) with names, roles, and positions. Scope to a window by partial title.",
+          "description": "Return a structured list of interactive UI elements (buttons, inputs, menus) with names, roles, and positions. Scope to a window by partial title. SLOW (full desktop walk if no window). Prefer ghost_describe_screen_fast.",
           "inputSchema": { "type": "object", "properties": {
               "window": { "type": "string", "description": "Optional partial window title to scope the search" }
+          }}},
+        { "name": "ghost_describe_screen_fast",
+          "description": "Fast describe scoped to the foreground window only. 5-50x faster than ghost_describe_screen. Recommended default for agent loops.",
+          "inputSchema": { "type": "object", "properties": {} }},
+        { "name": "ghost_batch_actions",
+          "description": "Run a sequence of actions in a single MCP round-trip. Each action: {op, ...args}. Ops: click, type, find, press, hotkey, click_at, right_click, double_click, hover, drag, scroll, wait, wait_for_idle, wait_for_text, describe, screenshot, focus_window, get_clipboard, set_clipboard, get_text, key_down, key_up, navigate. Use this instead of multiple separate tool calls when running a known sequence.",
+          "inputSchema": { "type": "object", "required": ["actions"], "properties": {
+              "actions": { "type": "array", "items": { "type": "object", "required": ["op"], "properties": {
+                  "op": { "type": "string" }
+              }}, "description": "Ordered list of actions to run" },
+              "stop_on_error": { "type": "boolean", "default": true, "description": "If true, halt batch on first error; if false, continue and collect all errors" }
           }}},
         { "name": "ghost_get_text",
           "description": "Get the text value or label of a found UI element.",
@@ -602,8 +722,98 @@ fn tools_schema() -> Value {
           "inputSchema": { "type": "object", "properties": {}}},
         { "name": "ghost_cache_invalidate",
           "description": "Clear the UIA mirror cache.",
-          "inputSchema": { "type": "object", "properties": {}}}
+          "inputSchema": { "type": "object", "properties": {}}},
+        { "name": "ghost_event_seq",
+          "description": "Read the current system-event sequence counter (foreground changes). Capture this before performing an action, then pass it as since_seq to ghost_wait_for_event for race-free event-driven waits.",
+          "inputSchema": { "type": "object", "properties": {}}},
+        { "name": "ghost_locate_by_description",
+          "description": "Vision fallback: locate a UI element by natural-language description (e.g. 'the blue Submit button'). Captures foreground window, asks Claude (Haiku by default) for center pixel. Requires ANTHROPIC_API_KEY env var. Set GHOST_VISION_MODEL to override model. Use only when UIA-based ghost_find misses (e.g. canvas-rendered apps, custom-drawn UIs).",
+          "inputSchema": { "type": "object", "required": ["description"], "properties": {
+              "description": { "type": "string", "description": "Natural-language description of the target element" }
+          }}},
+        { "name": "ghost_click_by_description",
+          "description": "Vision fallback locate + click in one MCP round-trip. Same auth requirements as ghost_locate_by_description.",
+          "inputSchema": { "type": "object", "required": ["description"], "properties": {
+              "description": { "type": "string" }
+          }}},
+        { "name": "ghost_type_by_description",
+          "description": "Vision fallback locate + click + type. For form fields with unstable UIA names.",
+          "inputSchema": { "type": "object", "required": ["description","text"], "properties": {
+              "description": { "type": "string" },
+              "text": { "type": "string" }
+          }}},
+        { "name": "ghost_find_text_local",
+          "description": "Local OCR text search via Windows.Media.Ocr (free, on-device, ~50-200ms). Searches for `text` (case-insensitive contains) in foreground window or full screen. Returns first match center pixel. Use BEFORE ghost_locate_by_description for plain-text cases — no API call, no token cost.",
+          "inputSchema": { "type": "object", "required": ["text"], "properties": {
+              "text": { "type": "string", "description": "Text to find (case-insensitive contains match)" },
+              "foreground": { "type": "boolean", "default": true, "description": "Scope to foreground window (default true) vs full screen" }
+          }}},
+        { "name": "ghost_click_text_local",
+          "description": "Local OCR + click. Polls foreground via Windows OCR until `text` appears (or timeout), then clicks the matched word's center. No API calls. ~10-100x cheaper than vision-based for plain-text waits.",
+          "inputSchema": { "type": "object", "required": ["text"], "properties": {
+              "text": { "type": "string" },
+              "timeout_ms": { "type": "integer", "default": 5000 }
+          }}},
+        { "name": "ghost_wait_for_event",
+          "description": "Wait for the next system event (foreground/window change) or timeout. Event-driven, no polling: wakes within ~5ms of the event firing. Replaces sleep-based waits in agent loops.",
+          "inputSchema": { "type": "object", "properties": {
+              "since_seq": { "type": "integer", "description": "Last seen event seq (from ghost_event_seq); waits for any seq > this" },
+              "timeout_ms": { "type": "integer", "default": 5000 }
+          }}}
     ])
+}
+
+/// Dispatch a single batch action against the session.
+/// Reuses existing handle() dispatch logic by re-routing op names to method names.
+async fn run_batch_op(
+    session: &GhostSession,
+    op: &str,
+    params: &Value,
+) -> std::result::Result<Value, String> {
+    // Map batch op names (short form) to handle() method names.
+    // Most ops pass through directly: click, type, press, hotkey, etc.
+    let method = match op {
+        "click" => "ghost_click",
+        "type" => "ghost_type",
+        "find" => "ghost_find",
+        "press" => "ghost_press",
+        "hotkey" => "ghost_hotkey",
+        "click_at" => "ghost_click_at",
+        "right_click" => "ghost_right_click",
+        "double_click" => "ghost_double_click",
+        "hover" => "ghost_hover",
+        "drag" => "ghost_drag",
+        "scroll" => "ghost_scroll",
+        "wait" => "ghost_wait",
+        "wait_for_idle" => "ghost_wait_for_idle",
+        "wait_for_text" => "ghost_click_and_wait_for_text",
+        "describe" => {
+            let m = if params["fast"].as_bool().unwrap_or(true) {
+                "ghost_describe_screen_fast"
+            } else {
+                "ghost_describe_screen"
+            };
+            return Box::pin(handle(session, m, Some(params))).await;
+        }
+        "screenshot" => "ghost_screenshot",
+        "focus_window" => "ghost_focus_window",
+        "get_clipboard" => "ghost_get_clipboard",
+        "set_clipboard" => "ghost_set_clipboard",
+        "get_text" => "ghost_get_text",
+        "key_down" => "ghost_key_down",
+        "key_up" => "ghost_key_up",
+        "navigate" => "ghost_navigate_and_wait",
+        "click_by_description" => "ghost_click_by_description",
+        "type_by_description" => "ghost_type_by_description",
+        "locate_by_description" => "ghost_locate_by_description",
+        "find_text_local" => "ghost_find_text_local",
+        "click_text_local" => "ghost_click_text_local",
+        "wait_for_event" => "ghost_wait_for_event",
+        "screenshot_region" => "ghost_screenshot_region",
+        "describe_screen_fast" => "ghost_describe_screen_fast",
+        other => return Err(format!("unknown batch op: {other}")),
+    };
+    Box::pin(handle(session, method, Some(params))).await
 }
 
 fn parse_by(p: &Value) -> std::result::Result<ghost_session::By, String> {
@@ -698,23 +908,36 @@ mod tests {
 
     #[test]
     fn mcp_response_ok_omits_error_field() {
-        let resp = McpResponse { id: json!(1), result: Some(json!({"ok": true})), error: None };
+        let resp = McpResponse { jsonrpc: "2.0", id: json!(1), result: Some(json!({"ok": true})), error: None };
         let s = serde_json::to_string(&resp).unwrap();
         assert!(!s.contains("error"));
+        assert!(s.contains("\"jsonrpc\":\"2.0\""));
     }
 
     #[test]
     fn mcp_response_err_omits_result_field() {
-        let resp = McpResponse { id: json!(1), result: None, error: Some(json!({"message": "fail"})) };
+        let resp = McpResponse { jsonrpc: "2.0", id: json!(1), result: None, error: Some(json!({"message": "fail"})) };
         let s = serde_json::to_string(&resp).unwrap();
         assert!(!s.contains("result"));
+        assert!(s.contains("\"jsonrpc\":\"2.0\""));
     }
 
     #[test]
-    fn tools_schema_has_37_tools() {
+    fn tools_schema_has_expected_tool_count() {
         let tools = tools_schema();
         let list = tools.as_array().unwrap();
-        assert_eq!(list.len(), 37, "expected 37 tools (27 pre-v0.3.0 + 10 v0.3.0)");
+        assert_eq!(list.len(), 47, "expected 47 tools (27 pre-v0.3.0 + 10 v0.3.0 + 5 v0.4 perf + 3 v0.4 vision + 2 v0.5 ocr)");
+    }
+
+    #[test]
+    fn v04_perf_tools_registered() {
+        let tools = tools_schema();
+        let names: Vec<&str> = tools.as_array().unwrap().iter()
+            .filter_map(|t| t["name"].as_str()).collect();
+        for t in ["ghost_describe_screen_fast", "ghost_batch_actions",
+                  "ghost_screenshot_region", "ghost_event_seq", "ghost_wait_for_event"] {
+            assert!(names.contains(&t), "missing v0.4 perf tool: {t}");
+        }
     }
 
     #[test]
