@@ -10,7 +10,7 @@ use ghost_intent::error::IntentError;
 use ghost_intent::executor::{FsmExecutor, IntentResult, IntentState, OpsDispatcher};
 use ghost_core::capture::idle::IdleDetector;
 use ghost_core::{
-    capture::capture_screen,
+    capture::{capture_screen, capture_region_raw, compute_verification},
     input::hotkey::{register_emergency_stop, is_stopped, reset_stop},
     input::keyboard::{key_down as core_key_down, key_up as core_key_up, name_to_vk, press_key},
     input::mouse::{
@@ -729,6 +729,11 @@ impl GhostSession {
         let _ = el.set_focus();
         let name = el.name();
         let rect = el.bounding_rect();
+
+        // Capture BEFORE frame (raw RGBA of element rect, or foreground window).
+        let target_rect = rect.or_else(|| self.foreground_window_rect());
+        let before_capture = capture_region_raw(target_rect).ok();
+
         match action {
             "click" => {
                 el.click()?;
@@ -741,9 +746,30 @@ impl GhostSession {
                 return Err(GhostError::Vision(format!("ghost_act: unknown action '{other}'; use click or type")));
             }
         }
+
+        // Capture AFTER frame and compute screen-delta verification.
+        // Small delay to allow the action to render.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let after_capture = capture_region_raw(target_rect).ok();
+
+        let verification = match (before_capture, after_capture) {
+            (Some((before, bw, bh)), Some((after, aw, ah))) if bw == aw && bh == ah => {
+                let fg_ok = self.foreground_window_rect().is_some();
+                Some(compute_verification(&before, &after, bw, bh, fg_ok))
+            }
+            _ => None,
+        };
+
         let rect_json = rect.map(|(l, t, r, b)| serde_json::json!({"left": l, "top": t, "right": r, "bottom": b}))
             .unwrap_or(serde_json::Value::Null);
-        Ok(serde_json::json!({ "ok": true, "name": name, "rect": rect_json }))
+        let verification_json = verification.map(|v| serde_json::to_value(v).unwrap_or(serde_json::Value::Null))
+            .unwrap_or(serde_json::Value::Null);
+        Ok(serde_json::json!({
+            "ok": true,
+            "name": name,
+            "rect": rect_json,
+            "verification": verification_json,
+        }))
     }
 
     /// Compile a JSON intent and run it through the FsmExecutor, dispatching ops against
