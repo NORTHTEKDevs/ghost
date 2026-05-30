@@ -47,7 +47,9 @@ impl UiaTree {
         unsafe {
             let root = self.automation.GetRootElement()
                 .map_err(|e| CoreError::ComInit(e.to_string()))?;
-            self.search_subtree_by_name(&root, &name_lower)
+            // Acquire the walker once for the whole search (was N+1 COM proxies).
+            let walker = self.get_walker()?;
+            self.search_subtree_by_name(&root, &name_lower, &walker)
         }
     }
 
@@ -57,7 +59,8 @@ impl UiaTree {
         unsafe {
             let root = self.automation.GetRootElement()
                 .map_err(|e| CoreError::ComInit(e.to_string()))?;
-            self.search_subtree_by_role(&root, role)
+            let walker = self.get_walker()?;
+            self.search_subtree_by_role(&root, role, &walker)
         }
     }
 
@@ -67,7 +70,8 @@ impl UiaTree {
         unsafe {
             let root = self.automation.ElementFromHandle(hwnd)
                 .map_err(|e| CoreError::ComInit(e.to_string()))?;
-            self.search_subtree_by_name(&root, &name_lower)
+            let walker = self.get_walker()?;
+            self.search_subtree_by_name(&root, &name_lower, &walker)
         }
     }
 
@@ -76,7 +80,8 @@ impl UiaTree {
         unsafe {
             let root = self.automation.ElementFromHandle(hwnd)
                 .map_err(|e| CoreError::ComInit(e.to_string()))?;
-            self.search_subtree_by_role(&root, role)
+            let walker = self.get_walker()?;
+            self.search_subtree_by_role(&root, role, &walker)
         }
     }
 
@@ -112,19 +117,20 @@ impl UiaTree {
             .map_err(|e| CoreError::ComInit(e.to_string()))
     }
 
+    /// Recursive name search. `walker` is acquired once by the caller (see `find_by_name`).
     unsafe fn search_subtree_by_name(
         &self,
         element: &IUIAutomationElement,
         name: &str,
+        walker: &IUIAutomationTreeWalker,
     ) -> Result<Option<UiaElement>, CoreError> {
         let el = UiaElement(element.clone());
         if el.name().to_lowercase().contains(name) {
             return Ok(Some(el));
         }
-        let walker = self.get_walker()?;
         let mut child = walker.GetFirstChildElement(element).ok();
         while let Some(c) = child {
-            if let Some(found) = self.search_subtree_by_name(&c, name)? {
+            if let Some(found) = self.search_subtree_by_name(&c, name, walker)? {
                 return Ok(Some(found));
             }
             child = walker.GetNextSiblingElement(&c).ok();
@@ -132,20 +138,21 @@ impl UiaTree {
         Ok(None)
     }
 
+    /// Recursive role search. `walker` is acquired once by the caller (see `find_by_role`).
     unsafe fn search_subtree_by_role(
         &self,
         element: &IUIAutomationElement,
         role: &str,
+        walker: &IUIAutomationTreeWalker,
     ) -> Result<Option<UiaElement>, CoreError> {
         let el = UiaElement(element.clone());
         let el_role = role_id_to_name(el.control_type());
         if el_role == role || role_alias_matches(role, el_role) {
             return Ok(Some(el));
         }
-        let walker = self.get_walker()?;
         let mut child = walker.GetFirstChildElement(element).ok();
         while let Some(c) = child {
-            if let Some(found) = self.search_subtree_by_role(&c, role)? {
+            if let Some(found) = self.search_subtree_by_role(&c, role, walker)? {
                 return Ok(Some(found));
             }
             child = walker.GetNextSiblingElement(&c).ok();
@@ -163,8 +170,10 @@ impl UiaTree {
             }
             let root = self.automation.ElementFromHandle(fg)
                 .map_err(|e| CoreError::ComInit(e.to_string()))?;
+            // Acquire walker once for the entire collect pass.
+            let walker = self.get_walker()?;
             let mut results = Vec::new();
-            self.collect_interactive(&root, &mut results, 0)?;
+            self.collect_interactive(&root, &mut results, 0, &walker)?;
             Ok(results)
         }
     }
@@ -172,11 +181,12 @@ impl UiaTree {
     /// Return structured list of interactive elements. Optionally scoped to a window by partial name.
     pub fn describe_screen(&self, window_name: Option<&str>) -> Result<Vec<ElementDescriptor>, CoreError> {
         unsafe {
+            // Acquire walker once — used for both the window-title scan and the collect pass.
+            let walker = self.get_walker()?;
             let root = if let Some(wname) = window_name {
                 let wname_lower = wname.to_lowercase();
                 let desktop = self.automation.GetRootElement()
                     .map_err(|e| CoreError::ComInit(e.to_string()))?;
-                let walker = self.get_walker()?;
                 let mut child = walker.GetFirstChildElement(&desktop).ok();
                 let mut found = None;
                 while let Some(c) = child {
@@ -193,16 +203,18 @@ impl UiaTree {
                     .map_err(|e| CoreError::ComInit(e.to_string()))?
             };
             let mut results = Vec::new();
-            self.collect_interactive(&root, &mut results, 0)?;
+            self.collect_interactive(&root, &mut results, 0, &walker)?;
             Ok(results)
         }
     }
 
+    /// Recursive interactive-element collector. `walker` is acquired once by the caller.
     unsafe fn collect_interactive(
         &self,
         element: &IUIAutomationElement,
         results: &mut Vec<ElementDescriptor>,
         depth: usize,
+        walker: &IUIAutomationTreeWalker,
     ) -> Result<(), CoreError> {
         if results.len() >= 500 || depth > 50 {
             return Ok(());
@@ -224,10 +236,9 @@ impl UiaTree {
                 }
             }
         }
-        let walker = self.get_walker()?;
         let mut child = walker.GetFirstChildElement(element).ok();
         while let Some(c) = child {
-            self.collect_interactive(&c, results, depth + 1)?;
+            self.collect_interactive(&c, results, depth + 1, walker)?;
             child = walker.GetNextSiblingElement(&c).ok();
         }
         Ok(())
