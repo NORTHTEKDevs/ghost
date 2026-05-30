@@ -11,9 +11,14 @@ use crate::error::CoreError;
 //   don't change while the session is valid; reusing it saves CreateTexture2D
 //   on every call.
 //
-// Re-acquire path: on DXGI_ERROR_ACCESS_LOST (0x887A0026) or
-// DXGI_ERROR_ACCESS_DENIED (0x887A002B) the duplication is dropped and
-// recreated exactly once before returning an error.
+// Re-acquire path: on DXGI_ERROR_ACCESS_LOST (0x887A0026),
+// DXGI_ERROR_ACCESS_DENIED (0x887A002B), or DXGI_ERROR_INVALID_CALL
+// (0x887A0001 — returned when a frame was not released before the next
+// AcquireNextFrame) the duplication is dropped and recreated exactly once.
+// DXGI_ERROR_INVALID_CALL is added so a previously-wedged session self-heals.
+//
+// Frame release: a FrameGuard RAII type ensures ReleaseFrame is called on
+// every exit path after AcquireNextFrame succeeds, preventing the wedge.
 //
 // Thread-safety note: all capture functions hold CAPTURE_STATE mutex for the
 // entire duration of the capture, so only one thread uses the DXGI session
@@ -29,6 +34,9 @@ struct CaptureContext {
     duplication: Option<windows::Win32::Graphics::Dxgi::IDXGIOutputDuplication>,
     /// Cached staging texture and its dimensions. None until first frame.
     staging: Option<(windows::Win32::Graphics::Direct3D11::ID3D11Texture2D, usize, usize)>,
+    /// Last successfully captured frame. Returned on DXGI_ERROR_WAIT_TIMEOUT so
+    /// callers never block longer than the reduced AcquireNextFrame timeout.
+    last_frame: Option<(Vec<u8>, usize, usize)>,
     /// How many times the duplication has been re-acquired (telemetry / cfg(test)).
     #[cfg(test)]
     pub reacquire_count: u32,
@@ -230,6 +238,7 @@ fn init_capture_state() -> Result<CaptureContext, CoreError> {
             output1,
             duplication: None,  // acquired lazily on first capture_rgba call
             staging: None,
+            last_frame: None,
             #[cfg(test)]
             reacquire_count: 0,
             #[cfg(not(test))]
@@ -262,6 +271,15 @@ fn capture_rgba(ctx: &mut CaptureContext) -> Result<(Vec<u8>, usize, usize), Cor
     unsafe { capture_rgba_inner(ctx, true) }
 }
 
+/// RAII guard: calls ReleaseFrame on every exit path after AcquireNextFrame succeeds.
+/// Prevents the DXGI_ERROR_INVALID_CALL wedge caused by early-return ? ops holding a frame.
+struct FrameGuard<'a>(&'a windows::Win32::Graphics::Dxgi::IDXGIOutputDuplication);
+impl Drop for FrameGuard<'_> {
+    fn drop(&mut self) {
+        let _ = unsafe { self.0.ReleaseFrame() };
+    }
+}
+
 unsafe fn capture_rgba_inner(
     ctx: &mut CaptureContext,
     allow_retry: bool,
@@ -278,20 +296,33 @@ unsafe fn capture_rgba_inner(
 
     let mut frame_info = DXGI_OUTDUPL_FRAME_INFO::default();
     let mut resource: Option<IDXGIResource> = None;
-    let acquire_result = dup.AcquireNextFrame(500, &mut frame_info, &mut resource);
+    // Reduced from 500ms to 50ms: on static screens we return last_frame instead of blocking.
+    let acquire_result = dup.AcquireNextFrame(50, &mut frame_info, &mut resource);
 
     if let Err(ref e) = acquire_result {
         let hr = e.code();
-        // Compare against windows-rs HRESULT constants for access-lost errors.
-        let is_access_error = hr == windows::Win32::Graphics::Dxgi::DXGI_ERROR_ACCESS_LOST
-            || hr == windows::Win32::Graphics::Dxgi::DXGI_ERROR_ACCESS_DENIED;
+        // DXGI_ERROR_WAIT_TIMEOUT: no new frame within the window — return cached frame.
+        if hr == DXGI_ERROR_WAIT_TIMEOUT {
+            if let Some(ref cached) = ctx.last_frame {
+                return Ok(cached.clone());
+            }
+            // No prior frame; re-try once with a fresh acquire (session just started).
+            return Err(CoreError::Win32 { code: hr.0 as u32, context: "AcquireNextFrame timeout, no cached frame" });
+        }
+        // Access-lost / invalid-call (wedged): drop + recreate + retry once.
+        let is_access_error = hr == DXGI_ERROR_ACCESS_LOST
+            || hr == DXGI_ERROR_ACCESS_DENIED
+            || hr == DXGI_ERROR_INVALID_CALL;
         if allow_retry && is_access_error {
-            // Drop the bad session and retry once with a fresh duplication.
             acquire_duplication(ctx)?;
             return capture_rgba_inner(ctx, false);
         }
         return Err(CoreError::Win32 { code: hr.0 as u32, context: "AcquireNextFrame" });
     }
+
+    // Frame acquired — RAII guard ensures ReleaseFrame runs on every exit path below.
+    let dup_ref = ctx.duplication.as_ref().unwrap();
+    let _frame_guard = FrameGuard(dup_ref);
 
     let resource = resource.ok_or(CoreError::Win32 { code: 0, context: "frame resource null" })?;
     let texture: ID3D11Texture2D = resource.cast()
@@ -338,10 +369,10 @@ unsafe fn capture_rgba_inner(
     let rgba = bgra_to_rgba(data, width, height, pitch);
 
     ctx.context.Unmap(&staging_view, 0);
-    // Release the frame back to the duplication — keep the session alive for next call.
-    let dup = ctx.duplication.as_ref().unwrap();
-    dup.ReleaseFrame()
-        .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "ReleaseFrame" })?;
+    // FrameGuard drop releases the frame — do NOT call ReleaseFrame explicitly here.
+
+    // Cache the frame so DXGI_ERROR_WAIT_TIMEOUT on static screens returns it.
+    ctx.last_frame = Some((rgba.clone(), width, height));
 
     Ok((rgba, width, height))
 }
@@ -475,10 +506,17 @@ mod tests {
     /// Verify DXGI error constants have the expected raw HRESULT values.
     #[test]
     fn dxgi_error_constants_have_correct_values() {
-        use windows::Win32::Graphics::Dxgi::{DXGI_ERROR_ACCESS_LOST, DXGI_ERROR_ACCESS_DENIED};
+        use windows::Win32::Graphics::Dxgi::{
+            DXGI_ERROR_ACCESS_LOST, DXGI_ERROR_ACCESS_DENIED,
+            DXGI_ERROR_WAIT_TIMEOUT, DXGI_ERROR_INVALID_CALL,
+        };
         // 0x887A0026 and 0x887A002B are the canonical DXGI access-lost HRESULTs.
         assert_eq!(DXGI_ERROR_ACCESS_LOST.0 as u32, 0x887A_0026);
         assert_eq!(DXGI_ERROR_ACCESS_DENIED.0 as u32, 0x887A_002B);
+        // 0x887A0027 = DXGI_ERROR_WAIT_TIMEOUT (static screen, no new frame).
+        assert_eq!(DXGI_ERROR_WAIT_TIMEOUT.0 as u32, 0x887A_0027);
+        // 0x887A0001 = DXGI_ERROR_INVALID_CALL (wedged session — frame not released).
+        assert_eq!(DXGI_ERROR_INVALID_CALL.0 as u32, 0x887A_0001);
     }
 
     /// Live test: repeated captures reuse the duplication session (reacquire_count stays low).
