@@ -5,9 +5,12 @@ use windows::Win32::Foundation::{BOOL, HWND, LPARAM, WPARAM, TRUE, FALSE};
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetForegroundWindow, GetWindowTextW, IsWindowVisible,
     PostMessageW, SetForegroundWindow, ShowWindow, GetWindowThreadProcessId,
-    BringWindowToTop,
+    BringWindowToTop, GetAncestor,
     SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, WM_CLOSE,
+    GA_ROOT,
 };
+use windows::Win32::Foundation::POINT;
+use windows::Win32::UI::WindowsAndMessaging::WindowFromPoint;
 use windows::Win32::System::Threading::{GetCurrentThreadId, AttachThreadInput};
 use super::element::{UiaElement, role_id_to_name, ElementDescriptor, INTERACTIVE_ROLES};
 use crate::error::CoreError;
@@ -259,7 +262,6 @@ impl UiaTree {
     /// center of the cached rect still matches the expected name/role, the cache
     /// hit is valid. Returns None if no element is found (minimized window, etc).
     pub fn element_from_point(&self, x: i32, y: i32) -> Result<Option<UiaElement>, CoreError> {
-        use windows::Win32::Foundation::POINT;
         unsafe {
             let pt = POINT { x, y };
             match self.automation.ElementFromPoint(pt) {
@@ -378,6 +380,33 @@ pub fn ensure_foreground(hwnd: HWND, timeout_ms: u64) -> Result<bool, CoreError>
     }
 }
 
+/// Bring the top-level window that contains the screen point (x, y) to the foreground.
+///
+/// Steps:
+///   1. `WindowFromPoint` → child HWND at coordinates.
+///   2. `GetAncestor(GA_ROOT)` → top-level owner.
+///   3. `ensure_foreground(hwnd, 600)`.
+///
+/// Returns `Ok(true)` if foreground was confirmed, `Ok(false)` on timeout
+/// (callers should warn and continue — consistent with the tolerant act strategy).
+/// Returns `Err` only when Windows APIs are unavailable (not on focus timeout).
+///
+/// # Safety
+/// Calls Win32 functions that require no special thread affinity.
+pub fn focus_window_under_point(x: i32, y: i32) -> Result<bool, CoreError> {
+    unsafe {
+        let pt = POINT { x, y };
+        let child = WindowFromPoint(pt);
+        if child.is_invalid() {
+            return Ok(false);
+        }
+        // Walk to the top-level owner window.
+        let root = GetAncestor(child, GA_ROOT);
+        let hwnd = if root.is_invalid() { child } else { root };
+        ensure_foreground(hwnd, 600)
+    }
+}
+
 pub fn focus_window(name: &str) -> Result<(), CoreError> {
     let name_lower = name.to_lowercase();
     let windows = list_windows()?;
@@ -455,6 +484,25 @@ mod tests {
         // The actual guard is `if depth > 50 { return Ok(None) }`.
         const MAX_DEPTH: usize = 50;
         assert!(MAX_DEPTH == 50, "depth limit must be 50 per spec");
+    }
+
+    /// HIGH-1: focus_window_under_point with an off-screen coord returns Ok (not an error).
+    /// The helper is tolerant — it returns Ok(false) for invalid/off-screen points.
+    #[test]
+    fn focus_window_under_point_off_screen_coord_returns_ok() {
+        // A point far off-screen (negative, or beyond any reasonable monitor) should not
+        // panic or return Err — it should return Ok(false) (no window found there).
+        // This exercises the invalid-HWND code path without a live window.
+        let result = focus_window_under_point(-99999, -99999);
+        assert!(result.is_ok(), "focus_window_under_point must not error on off-screen coord");
+        // May be Ok(true) if somehow a window exists there, but most likely Ok(false).
+    }
+
+    /// HIGH-1: focus_window_under_point with an absurdly negative coord returns Ok.
+    #[test]
+    fn focus_window_under_point_large_negative_returns_ok() {
+        let result = focus_window_under_point(i32::MIN, i32::MIN);
+        assert!(result.is_ok(), "focus_window_under_point must not error on i32::MIN coords");
     }
 
     // LOW-9: ensure_foreground must not panic on the current foreground window.
