@@ -70,26 +70,57 @@ impl UiaElement {
 }
 
 /// Map UIA control type IDs to human-readable role names.
+/// Real UIA control-type IDs (UIA_*ControlTypeId constants).
 pub fn role_id_to_name(id: u32) -> &'static str {
     match id {
-        50 => "button",
-        42 => "edit",
-        50023 => "document",
-        50004 => "checkbox",
-        50034 => "list",
-        50008 => "menu",
-        50020 => "tab",
-        50033 => "toolbar",
-        50021 => "text",
-        50025 => "window",
-        50030 => "pane",
+        50000 => "button",
+        50001 => "calendar",
+        50002 => "checkbox",
+        50003 => "combobox",
+        50004 => "edit",
+        50005 => "hyperlink",
+        50006 => "image",
+        50007 => "listitem",
+        50008 => "list",
+        50009 => "menu",
+        50010 => "menubar",
+        50011 => "menuitem",
+        50012 => "progressbar",
+        50013 => "radiobutton",
+        50014 => "scrollbar",
+        50015 => "slider",
+        50016 => "spinner",
+        50017 => "statusbar",
+        50018 => "tab",
+        50019 => "tabitem",
+        50020 => "text",
+        50021 => "toolbar",
+        50022 => "tooltip",
+        50023 => "tree",
+        50024 => "treeitem",
+        50025 => "custom",
+        50026 => "group",
+        50027 => "thumb",
+        50028 => "datagrid",
+        50029 => "dataitem",
+        50030 => "document",
+        50031 => "splitbutton",
+        50032 => "window",
+        50033 => "pane",
+        50034 => "header",
+        50035 => "headeritem",
+        50036 => "table",
+        50037 => "titlebar",
+        50038 => "separator",
         _ => "unknown",
     }
 }
 
 /// Roles included in describe_screen output.
 pub const INTERACTIVE_ROLES: &[&str] = &[
-    "button", "edit", "checkbox", "menu", "tab", "list", "toolbar",
+    "button", "edit", "checkbox", "combobox", "menu", "menuitem",
+    "tab", "tabitem", "list", "listitem", "toolbar", "radiobutton",
+    "hyperlink", "treeitem", "document",
 ];
 
 #[derive(Debug, Clone)]
@@ -106,19 +137,56 @@ pub struct ElementDescriptor {
 mod tests {
     use super::*;
 
+    // Corrected role ID tests (real UIA control-type IDs)
     #[test]
-    fn role_id_button_maps_correctly() {
-        assert_eq!(role_id_to_name(50), "button");
+    fn role_button_is_50000() {
+        assert_eq!(role_id_to_name(50000), "button");
     }
 
     #[test]
-    fn role_id_edit_maps_correctly() {
-        assert_eq!(role_id_to_name(42), "edit");
+    fn role_edit_is_50004() {
+        assert_eq!(role_id_to_name(50004), "edit");
+    }
+
+    #[test]
+    fn role_checkbox_is_50002() {
+        assert_eq!(role_id_to_name(50002), "checkbox");
+    }
+
+    #[test]
+    fn role_tabitem_is_50019() {
+        assert_eq!(role_id_to_name(50019), "tabitem");
+    }
+
+    #[test]
+    fn role_legacy_50_is_unknown() {
+        // Old bogus ID must now return unknown
+        assert_eq!(role_id_to_name(50), "unknown");
     }
 
     #[test]
     fn unknown_role_returns_unknown() {
         assert_eq!(role_id_to_name(99999), "unknown");
+    }
+
+    #[test]
+    fn role_combobox_is_50003() {
+        assert_eq!(role_id_to_name(50003), "combobox");
+    }
+
+    #[test]
+    fn role_radiobutton_is_50013() {
+        assert_eq!(role_id_to_name(50013), "radiobutton");
+    }
+
+    #[test]
+    fn role_document_is_50030() {
+        assert_eq!(role_id_to_name(50030), "document");
+    }
+
+    #[test]
+    fn role_window_is_50032() {
+        assert_eq!(role_id_to_name(50032), "window");
     }
 
     #[test]
@@ -136,5 +204,17 @@ mod tests {
     fn interactive_roles_include_button_and_edit() {
         assert!(INTERACTIVE_ROLES.contains(&"button"));
         assert!(INTERACTIVE_ROLES.contains(&"edit"));
+    }
+
+    #[test]
+    fn interactive_roles_include_new_types() {
+        assert!(INTERACTIVE_ROLES.contains(&"combobox"));
+        assert!(INTERACTIVE_ROLES.contains(&"radiobutton"));
+        assert!(INTERACTIVE_ROLES.contains(&"hyperlink"));
+        assert!(INTERACTIVE_ROLES.contains(&"listitem"));
+        assert!(INTERACTIVE_ROLES.contains(&"menuitem"));
+        assert!(INTERACTIVE_ROLES.contains(&"tabitem"));
+        assert!(INTERACTIVE_ROLES.contains(&"treeitem"));
+        assert!(INTERACTIVE_ROLES.contains(&"document"));
     }
 }
