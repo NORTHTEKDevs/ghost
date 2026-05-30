@@ -75,7 +75,7 @@ async fn main() {
                     serde_json::to_string(&json!({
                         "jsonrpc": "2.0",
                         "id": null,
-                        "error": { "message": format!("parse error: {}", e) }
+                        "error": { "code": -32700i64, "message": format!("parse error: {}", e) }
                     })).unwrap()
                 );
                 let _ = out.flush();
@@ -97,7 +97,7 @@ async fn main() {
                 jsonrpc: "2.0",
                 id,
                 result: None,
-                error: Some(json!({ "message": e })),
+                error: Some(json!({ "code": -32603i64, "message": e })),
             },
         };
 
@@ -119,6 +119,29 @@ fn encode_response<T: Serialize>(value: &T) -> Vec<u8> {
     }
 }
 
+/// Wrap a tool dispatch result into an MCP content[] envelope.
+/// On success: {content:[{type:"text",text:<pretty json>}]}
+/// On error:   {content:[{type:"text",text:<msg>}], isError:true}
+fn wrap_tool_result(r: std::result::Result<Value, (i64, String)>) -> Value {
+    match r {
+        Ok(v) => {
+            let text = serde_json::to_string_pretty(&v).unwrap_or_else(|_| v.to_string());
+            json!({ "content": [{ "type": "text", "text": text }] })
+        }
+        Err((_code, msg)) => {
+            json!({ "content": [{ "type": "text", "text": msg }], "isError": true })
+        }
+    }
+}
+
+async fn dispatch_tool(
+    session: &GhostSession,
+    name: &str,
+    args: &Value,
+) -> std::result::Result<Value, String> {
+    handle_tool(session, name, args).await
+}
+
 async fn handle(
     session: &GhostSession,
     method: &str,
@@ -132,13 +155,31 @@ async fn handle(
             Ok(json!({
                 "protocolVersion": "2024-11-05",
                 "capabilities": { "tools": {} },
-                "serverInfo": { "name": "ghost", "version": "0.2.0" }
+                "serverInfo": { "name": "ghost", "version": "0.6.0" }
             }))
         }
         "initialized" | "notifications/initialized" => Ok(json!({})),
         "tools/list" => {
             Ok(json!({ "tools": tools_schema() }))
         }
+        // MCP spec-compliant tools/call
+        "tools/call" => {
+            let name = p["name"].as_str().ok_or("tools/call missing 'name'")?.to_string();
+            let args = p.get("arguments").cloned().unwrap_or(json!({}));
+            let out = dispatch_tool(session, &name, &args).await;
+            Ok(wrap_tool_result(out.map_err(|e| (-32000i64, e))))
+        }
+        // Legacy raw-name dispatch (comet-mcp and existing tests depend on this)
+        other => dispatch_tool(session, other, &p).await,
+    }
+}
+
+async fn handle_tool(
+    session: &GhostSession,
+    method: &str,
+    p: &Value,
+) -> std::result::Result<Value, String> {
+    match method {
         "ghost_find" => {
             let by = parse_by(&p)?;
             let el = session.find(by).await.map_err(|e| e.to_string())?;
@@ -502,6 +543,7 @@ async fn handle(
     }
 }
 
+
 fn tools_schema() -> Value {
     json!([
         { "name": "ghost_find",
@@ -793,7 +835,7 @@ async fn run_batch_op(
             } else {
                 "ghost_describe_screen"
             };
-            return Box::pin(handle(session, m, Some(params))).await;
+            return Box::pin(handle_tool(session, m, params)).await;
         }
         "screenshot" => "ghost_screenshot",
         "focus_window" => "ghost_focus_window",
@@ -813,7 +855,7 @@ async fn run_batch_op(
         "describe_screen_fast" => "ghost_describe_screen_fast",
         other => return Err(format!("unknown batch op: {other}")),
     };
-    Box::pin(handle(session, method, Some(params))).await
+    Box::pin(handle_tool(session, method, params)).await
 }
 
 fn parse_by(p: &Value) -> std::result::Result<ghost_session::By, String> {
@@ -981,14 +1023,44 @@ mod tests {
 
     #[test]
     fn initialize_response_has_protocol_version() {
-        // Verify initialize response shape matches MCP 2024-11-05 spec
         let resp = json!({
             "protocolVersion": "2024-11-05",
             "capabilities": { "tools": {} },
-            "serverInfo": { "name": "ghost", "version": "0.2.0" }
+            "serverInfo": { "name": "ghost", "version": "0.6.0" }
         });
         assert_eq!(resp["protocolVersion"], "2024-11-05");
         assert!(resp["capabilities"]["tools"].is_object());
         assert_eq!(resp["serverInfo"]["name"], "ghost");
+    }
+
+    // T0.1 — tools/call wrapping
+    #[test]
+    fn tools_call_success_wraps_in_content_text() {
+        let v = wrap_tool_result(Ok(json!({"ok": true})));
+        assert_eq!(v["content"][0]["type"], "text");
+        assert!(v["content"][0]["text"].as_str().unwrap().contains("ok"));
+        assert!(v["isError"].is_null() || v["isError"] == json!(false));
+    }
+
+    #[test]
+    fn tools_call_error_wraps_as_iserror_content_not_transport_err() {
+        let v = wrap_tool_result(Err((-32000i64, "boom".to_string())));
+        assert_eq!(v["isError"], json!(true));
+        assert!(v["content"][0]["text"].as_str().unwrap().contains("boom"));
+    }
+
+    // T0.2 — JSON-RPC errors have integer code
+    #[test]
+    fn jsonrpc_error_has_integer_code() {
+        let resp = McpResponse {
+            jsonrpc: "2.0",
+            id: json!(1),
+            result: None,
+            error: Some(json!({"code": -32603i64, "message": "x"})),
+        };
+        let s = serde_json::to_string(&resp).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&s).unwrap();
+        assert!(v["error"]["code"].is_i64(), "error.code must be an integer, got: {}", v["error"]["code"]);
+        assert_eq!(v["error"]["code"].as_i64().unwrap(), -32603);
     }
 }
