@@ -18,7 +18,7 @@ use ghost_core::{
     process::launch as proc_launch,
     system::{get_clipboard as core_get_clipboard, set_clipboard as core_set_clipboard},
     uia::{
-        init_com, EventBus,
+        init_com, ComGuard, EventBus,
         tree::{UiaTree, WindowInfo, WindowState, list_windows as core_list_windows,
                focus_window as core_focus_window, set_window_state},
     },
@@ -40,13 +40,15 @@ pub struct GhostSession {
     timeout_ms: u64,
     tree: UiaTree,
     cache: Arc<UiaCache>,
+    /// Keeps COM initialized for the session lifetime — calls CoUninitialize on drop.
+    _com_guard: ComGuard,
 }
 
 impl GhostSession {
     /// Create a new automation session.
     /// Initializes COM, registers the Ctrl+Alt+G emergency stop hotkey, and creates the UIA tree.
     pub fn new() -> Result<Self> {
-        init_com().map_err(GhostError::Core)?;
+        let com_guard = init_com().map_err(GhostError::Core)?;
         register_emergency_stop().map_err(GhostError::Core)?;
         let tree = UiaTree::new().map_err(GhostError::Core)?;
 
@@ -69,6 +71,7 @@ impl GhostSession {
             timeout_ms: 5000,
             tree,
             cache: Arc::new(UiaCache::new()),
+            _com_guard: com_guard,
         })
     }
 
@@ -538,7 +541,16 @@ impl GhostSession {
         url: &str,
         idle_timeout_ms: u64,
     ) -> Result<()> {
-        self.focus_window(window_name).await?;
+        // Tolerate transient FocusFailed — the navigation action itself will surface a real
+        // error if the window is truly unreachable. Other errors (ProcessNotFound, etc.) still propagate.
+        if let Err(e) = self.focus_window(window_name).await {
+            match e {
+                GhostError::Core(ghost_core::error::CoreError::FocusFailed { .. }) => {
+                    tracing::warn!("focus not confirmed for '{}', proceeding", window_name);
+                }
+                other => return Err(other),
+            }
+        }
         // Ctrl+L focuses the address bar in Edge/Chrome/Firefox.
         self.hotkey(&["Ctrl"], "l").await?;
         ghost_core::input::keyboard::type_text(url).map_err(GhostError::Core)?;

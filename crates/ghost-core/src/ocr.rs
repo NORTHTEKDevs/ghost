@@ -16,7 +16,54 @@ use windows::Graphics::Imaging::{BitmapPixelFormat, SoftwareBitmap};
 use windows::Media::Ocr::OcrEngine;
 use windows::Storage::Streams::Buffer;
 use windows::Win32::System::WinRT::IBufferByteAccess;
-use windows::core::Interface;
+use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
+use windows::core::{Interface, HRESULT};
+
+/// RAII guard that calls CoInitializeEx(MTA) on construction and CoUninitialize on drop.
+/// S_FALSE (0x00000001) means "already initialized on this thread" — still success.
+/// RPC_E_CHANGED_MODE (0x80010106) means a different apartment type is already set —
+/// acceptable, we must NOT uninit in that case to avoid corrupting the existing state.
+struct ComMtaGuard {
+    should_uninit: bool,
+}
+
+impl ComMtaGuard {
+    fn new() -> Result<Self, CoreError> {
+        // RPC_E_CHANGED_MODE: different apartment already initialized — do not uninit
+        const RPC_E_CHANGED_MODE: u32 = 0x80010106;
+        let hr: HRESULT = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+        if hr.is_ok() {
+            // S_OK (0) or S_FALSE (1): we initialized, so we must uninit
+            Ok(Self { should_uninit: true })
+        } else if hr.0 as u32 == RPC_E_CHANGED_MODE {
+            // Already initialized with a different apartment type — just proceed
+            Ok(Self { should_uninit: false })
+        } else {
+            Err(CoreError::Win32 {
+                code: hr.0 as u32,
+                context: "CoInitializeEx(MTA) for OCR thread",
+            })
+        }
+    }
+}
+
+impl Drop for ComMtaGuard {
+    fn drop(&mut self) {
+        if self.should_uninit {
+            unsafe { CoUninitialize() };
+        }
+    }
+}
+
+/// Execute `f` inside a COM MTA apartment, scoped to the current (blocking-pool) thread.
+/// Necessary for WinRT OcrEngine/SoftwareBitmap on threads that have not called CoInitializeEx.
+pub fn run_with_com<T, F>(f: F) -> Result<T, CoreError>
+where
+    F: FnOnce() -> Result<T, CoreError>,
+{
+    let _guard = ComMtaGuard::new()?;
+    f()
+}
 
 /// One OCR-detected word with its on-screen bounding rect.
 #[derive(Debug, Clone)]
@@ -70,18 +117,23 @@ pub fn capture_and_ocr(region: Option<(i32, i32, i32, i32)>) -> Result<Vec<OcrWo
 
 /// Find the first OCR word whose text contains `needle` (case-insensitive).
 /// Returns the screen-pixel center of the matched word, or None if not found.
+///
+/// Ensures a COM MTA apartment on the calling thread (required for WinRT OcrEngine
+/// on blocking-pool threads that have not called CoInitializeEx).
 pub fn find_text_local(
     needle: &str,
     region: Option<(i32, i32, i32, i32)>,
 ) -> Result<Option<(i32, i32)>, CoreError> {
-    let needle_lower = needle.to_lowercase();
-    let words = capture_and_ocr(region)?;
-    for w in words {
-        if w.text.to_lowercase().contains(&needle_lower) {
-            return Ok(Some(w.rect.center()));
+    run_with_com(|| {
+        let needle_lower = needle.to_lowercase();
+        let words = capture_and_ocr(region)?;
+        for w in words {
+            if w.text.to_lowercase().contains(&needle_lower) {
+                return Ok(Some(w.rect.center()));
+            }
         }
-    }
-    Ok(None)
+        Ok(None)
+    })
 }
 
 /// Wrap raw BGRA bytes as a SoftwareBitmap for OCR.
