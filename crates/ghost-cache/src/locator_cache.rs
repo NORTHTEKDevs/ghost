@@ -15,17 +15,24 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-/// Key for the in-memory locator cache: (role, name) pair.
-/// `app_hint` is optional — None means "any app".
+/// Key for the in-memory locator cache: (hwnd, role, name) triple.
+/// `hwnd` is the foreground HWND at lookup time (as isize, 0 = any window).
+/// Scoping by HWND prevents cross-window false hits when different windows
+/// have elements with the same name/role.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LocatorKey {
+    pub hwnd: isize,
     pub role: String,
     pub name: String,
 }
 
 impl LocatorKey {
     pub fn new(role: impl Into<String>, name: impl Into<String>) -> Self {
-        Self { role: role.into(), name: name.into() }
+        Self { hwnd: 0, role: role.into(), name: name.into() }
+    }
+
+    pub fn with_hwnd(hwnd: isize, role: impl Into<String>, name: impl Into<String>) -> Self {
+        Self { hwnd, role: role.into(), name: name.into() }
     }
 }
 
