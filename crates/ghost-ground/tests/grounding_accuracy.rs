@@ -228,7 +228,7 @@ fn vlm_parser_accuracy_on_fixtures() {
 /// The actual hit-rate for production tiers is measured via live integration tests.
 /// This test verifies that the fixture format is parseable and the hit-check logic works.
 #[test]
-fn grounding_fixtures_are_valid_and_hit_check_works() {
+fn fixture_format_and_hit_helper_sanity() {
     let fixtures = load_grounding_fixtures();
     assert!(!fixtures.is_empty(), "grounding_golden.json must have at least one fixture");
 
