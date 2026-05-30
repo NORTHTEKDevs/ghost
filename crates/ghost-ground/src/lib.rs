@@ -14,5 +14,5 @@ pub mod types;
 pub mod yolo;
 
 pub use types::{CoordNorm, Grounded, Target, Tier};
-pub use engine::{GroundingEngine, GroundingStats, LocateMode};
+pub use engine::{GroundingEngine, GroundingStats, LocateMode, TierResult, GroundingTier};
 pub use parser::{ParsedVlmResponse, parse_vlm_response};
