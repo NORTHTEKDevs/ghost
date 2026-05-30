@@ -23,4 +23,7 @@ pub enum CoreError {
 
     #[error("Target window is gone")]
     WindowGone,
+
+    #[error("Could not confirm foreground for window: {window}")]
+    FocusFailed { window: String },
 }
