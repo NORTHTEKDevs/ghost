@@ -1,0 +1,80 @@
+[
+  {
+    "id": "uitars_click_submit",
+    "description": "UI-TARS style click on Submit button",
+    "vlm_response": "click(start_box='(500, 875)')",
+    "expected_norm": [500, 875],
+    "expected_action": "click"
+  },
+  {
+    "id": "uitars_click_center",
+    "description": "UI-TARS click at image center",
+    "vlm_response": "click(start_box='(500, 500)')",
+    "expected_norm": [500, 500],
+    "expected_action": "click"
+  },
+  {
+    "id": "uitars_double_click",
+    "description": "UI-TARS double-click",
+    "vlm_response": "double_click(start_box='(320, 240)')",
+    "expected_norm": [320, 240],
+    "expected_action": "double_click"
+  },
+  {
+    "id": "uitars_type",
+    "description": "UI-TARS type action with content",
+    "vlm_response": "type(start_box='(400, 300)', content='hello world')",
+    "expected_norm": [400, 300],
+    "expected_action": "type",
+    "expected_type_text": "hello world"
+  },
+  {
+    "id": "bare_json_xy",
+    "description": "Bare JSON {x,y} pixel coords",
+    "vlm_response": "{\"x\": 960, \"y\": 540}",
+    "expected_pixels": [960, 540],
+    "expected_action": null
+  },
+  {
+    "id": "fenced_json",
+    "description": "Code-fenced JSON",
+    "vlm_response": "```json\n{\"x\": 250, \"y\": 750}\n```",
+    "expected_pixels": [250, 750],
+    "expected_action": null
+  },
+  {
+    "id": "prose_json",
+    "description": "Prose-wrapped JSON",
+    "vlm_response": "The target element is located at {\"x\": 123, \"y\": 456} in the image.",
+    "expected_pixels": [123, 456],
+    "expected_action": null
+  },
+  {
+    "id": "bare_tuple",
+    "description": "Bare (x,y) tuple",
+    "vlm_response": "(320, 240)",
+    "expected_norm": [320, 240],
+    "expected_action": null
+  },
+  {
+    "id": "not_found_explicit",
+    "description": "Model says element not found",
+    "vlm_response": "The element is not found in the current screenshot.",
+    "expected_not_found": true
+  },
+  {
+    "id": "not_visible",
+    "description": "Model says element not visible",
+    "vlm_response": "Element not visible in the current view.",
+    "expected_not_found": true
+  },
+  {
+    "id": "uitars_scroll_down",
+    "description": "UI-TARS scroll action",
+    "vlm_response": "scroll(start_box='(500,500)', direction='down', amount=3)",
+    "expected_norm": [500, 500],
+    "expected_action": "scroll",
+    "expected_scroll_direction": "down",
+    "expected_scroll_amount": 3
+  }
+]
