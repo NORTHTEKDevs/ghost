@@ -44,6 +44,9 @@ pub struct GhostSession {
     cache: Arc<UiaCache>,
     /// In-session in-memory locator cache. Validated via ElementFromPoint on hit.
     locator_cache: LocatorCache,
+    /// Reflection ring buffer: records recent grounding/action failures so the
+    /// next VLM prompt can be prefixed with a negative hint.
+    pub reflection: crate::reflection::ReflectionBuffer,
     /// Keeps COM initialized for the session lifetime — calls CoUninitialize on drop.
     _com_guard: ComGuard,
 }
@@ -76,6 +79,7 @@ impl GhostSession {
             tree,
             cache: Arc::new(UiaCache::new()),
             locator_cache: LocatorCache::new(),
+            reflection: crate::reflection::ReflectionBuffer::default(),
             _com_guard: com_guard,
         })
     }
@@ -302,6 +306,10 @@ impl GhostSession {
     /// asks Claude for the center pixel, and returns absolute screen coords.
     /// Requires `ANTHROPIC_API_KEY` env var. Override model via `GHOST_VISION_MODEL`
     /// (default: claude-haiku-4-5; ~5x faster than Opus for "where is X" queries).
+    ///
+    /// If the reflection buffer contains previous failures, a negative hint is
+    /// prepended to the description before sending to the VLM so the model
+    /// avoids repeating the same mistake.
     #[tracing::instrument(skip(self), fields(desc = %description))]
     pub async fn locate_by_description(&self, description: &str) -> Result<(i32, i32)> {
         let rect = self.foreground_window_rect()
@@ -331,7 +339,18 @@ impl GhostSession {
             original,
             final_size,
         };
-        let coords = crate::vision::vision_locate(description, &jpeg, final_size).await?;
+
+        // Prefix the description with a reflection hint if there are recent failures.
+        // This steers the VLM away from repeating the same coordinate mistake.
+        let augmented_description: String;
+        let effective_description = if let Some(hint) = self.reflection.failure_hint() {
+            augmented_description = format!("{hint}\n\nTarget: {description}");
+            &augmented_description
+        } else {
+            description
+        };
+
+        let coords = crate::vision::vision_locate(effective_description, &jpeg, final_size).await?;
         match coords {
             Some((vx, vy)) => Ok(crop.to_screen(vx, vy)),
             None => Err(GhostError::ElementNotFound {
