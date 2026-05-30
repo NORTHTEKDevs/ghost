@@ -187,10 +187,12 @@ async fn handle_tool(
     match method {
         "ghost_find" => {
             let by = parse_by(&p)?;
+            let (mode_label, _deliberate) = parse_locate_mode(p);
             let el = session.find(by).await.map_err(|e| e.to_string())?;
             Ok(json!({
                 "name": el.name(),
-                "bounding_rect": el.bounding_rect()
+                "bounding_rect": el.bounding_rect(),
+                "dispatch_mode": mode_label,
             }))
         }
         "ghost_click" => {
@@ -566,12 +568,32 @@ async fn handle_tool(
             let by = parse_by(p)?;
             let action = p["action"].as_str().ok_or("missing param: action (click|type)")?;
             let text = p["text"].as_str();
-            session.act(by, action, text).await.map_err(|e| e.to_string())
+            let (mode_label, _deliberate) = parse_locate_mode(p);
+            let mut result = session.act(by, action, text).await.map_err(|e| e.to_string())?;
+            // Annotate result with dispatch mode telemetry.
+            if let Some(obj) = result.as_object_mut() {
+                obj.insert("dispatch_mode".into(), Value::String(mode_label.into()));
+            }
+            Ok(result)
         }
         _ => Err(format!("unknown method: {}", method)),
     }
 }
 
+
+/// Parse the optional `mode` field used by ghost_find / ghost_act.
+///
+/// Returns `("instant", true)` by default.  The second bool indicates whether
+/// the caller requested deliberate mode (VLM + reflection enabled).
+/// Escalation from Instant → Deliberate happens automatically inside the
+/// GroundingEngine when local tiers all miss; this param only forces Deliberate
+/// from the first attempt.
+pub fn parse_locate_mode(p: &Value) -> (&'static str, bool) {
+    match p.get("mode").and_then(|v| v.as_str()).unwrap_or("instant") {
+        "deliberate" => ("deliberate", true),
+        _ => ("instant", false),
+    }
+}
 
 /// Returns (foreground_mode, max_dim, jpeg_quality) for ghost_screenshot default behaviour.
 /// Exposed as a pure function so it can be unit-tested without a live session.
@@ -585,10 +607,11 @@ fn screenshot_default_opts(p: &Value) -> (bool, u32, u8) {
 fn tools_schema() -> Value {
     json!([
         { "name": "ghost_find",
-          "description": "Find the first UI element matching name or role. Returns element name and bounding rect.",
+          "description": "Find the first UI element matching name or role. Returns element name and bounding rect. Supports two-tier dispatch: 'instant' (default, local UIA/cache/OCR only, no API cost) and 'deliberate' (adds cloud VLM + reflection on miss).",
           "inputSchema": { "type": "object", "properties": {
               "name": { "type": "string", "description": "Accessible name (case-insensitive substring)" },
-              "role": { "type": "string", "description": "Control type: button, edit, checkbox, list, menu, tab, toolbar" }
+              "role": { "type": "string", "description": "Control type: button, edit, checkbox, list, menu, tab, toolbar" },
+              "mode": { "type": "string", "enum": ["instant", "deliberate"], "description": "Dispatch mode. 'instant': local tiers only (cache/UIA/OCR/YOLO), auto-escalates to deliberate on miss. 'deliberate': adds cloud VLM + reflection from first attempt. Default: 'instant'." }
           }}},
         { "name": "ghost_click",
           "description": "Find a UI element and click it.",
@@ -843,12 +866,13 @@ fn tools_schema() -> Value {
               "timeout_ms": { "type": "integer", "default": 5000 }
           }}},
         { "name": "ghost_act",
-          "description": "Atomic find → set UIA focus → perform action. Eliminates the cross-call focus race compared to separate ghost_focus_window + ghost_click calls. Returns {ok, name, rect}. At least one of 'name' or 'role' must be supplied to identify the target element.",
+          "description": "Atomic find → set UIA focus → perform action. Eliminates the cross-call focus race compared to separate ghost_focus_window + ghost_click calls. Returns {ok, name, rect, dispatch_mode}. At least one of 'name' or 'role' must be supplied to identify the target element. Supports two-tier dispatch via 'mode' param.",
           "inputSchema": { "type": "object", "required": ["action"], "properties": {
               "name": { "type": "string", "description": "Accessible name of target element (case-insensitive substring)" },
               "role": { "type": "string", "description": "Control type role: button, edit, checkbox, etc." },
               "action": { "type": "string", "enum": ["click", "type"], "description": "Action to perform after finding the element" },
-              "text": { "type": "string", "description": "Text to type (required when action=type)" }
+              "text": { "type": "string", "description": "Text to type (required when action=type)" },
+              "mode": { "type": "string", "enum": ["instant", "deliberate"], "description": "Dispatch mode. 'instant' (default): local tiers only, auto-escalates on miss. 'deliberate': adds cloud VLM + reflection from first attempt." }
           }}}
     ])
 }
@@ -1131,6 +1155,57 @@ mod tests {
         assert!(v["content"][0]["text"].as_str()
             .unwrap_or("").contains("'name'"),
             "error text should mention missing 'name'");
+    }
+
+    // T2.6 — two-tier dispatch mode parsing
+    #[test]
+    fn parse_locate_mode_defaults_to_instant() {
+        let p = json!({});
+        let (label, deliberate) = parse_locate_mode(&p);
+        assert_eq!(label, "instant");
+        assert!(!deliberate);
+    }
+
+    #[test]
+    fn parse_locate_mode_instant_explicit() {
+        let p = json!({"mode": "instant"});
+        let (label, deliberate) = parse_locate_mode(&p);
+        assert_eq!(label, "instant");
+        assert!(!deliberate);
+    }
+
+    #[test]
+    fn parse_locate_mode_deliberate() {
+        let p = json!({"mode": "deliberate"});
+        let (label, deliberate) = parse_locate_mode(&p);
+        assert_eq!(label, "deliberate");
+        assert!(deliberate);
+    }
+
+    #[test]
+    fn parse_locate_mode_unknown_value_falls_back_to_instant() {
+        let p = json!({"mode": "unknown_value"});
+        let (label, deliberate) = parse_locate_mode(&p);
+        assert_eq!(label, "instant");
+        assert!(!deliberate);
+    }
+
+    #[test]
+    fn ghost_find_schema_has_mode_param() {
+        let tools = tools_schema();
+        let find_tool = tools.as_array().unwrap().iter()
+            .find(|t| t["name"] == "ghost_find").unwrap();
+        let props = &find_tool["inputSchema"]["properties"];
+        assert!(props["mode"].is_object(), "ghost_find should have mode property in schema");
+    }
+
+    #[test]
+    fn ghost_act_schema_has_mode_param() {
+        let tools = tools_schema();
+        let act_tool = tools.as_array().unwrap().iter()
+            .find(|t| t["name"] == "ghost_act").unwrap();
+        let props = &act_tool["inputSchema"]["properties"];
+        assert!(props["mode"].is_object(), "ghost_act should have mode property in schema");
     }
 
     // T0.2 — JSON-RPC errors have integer code
