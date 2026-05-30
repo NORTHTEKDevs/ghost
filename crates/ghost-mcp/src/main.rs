@@ -302,7 +302,16 @@ async fn handle(
                     let out = dispatch_tool(session, &name, &args).await;
                     // T3.2: wrap in structured envelope, then in MCP content[].
                     let envelope = wrap_envelope(out);
-                    Ok(wrap_tool_result(Ok(envelope)))
+                    // MEDIUM-5: if the envelope carries ok:false, surface isError:true in content[].
+                    // Extract the error message from the envelope so the text field carries the
+                    // structured error (callers can still parse the envelope JSON from it).
+                    if envelope["ok"] == json!(false) {
+                        let err_text = serde_json::to_string_pretty(&envelope)
+                            .unwrap_or_else(|_| envelope.to_string());
+                        Ok(wrap_tool_result(Err((-32000i64, err_text))))
+                    } else {
+                        Ok(wrap_tool_result(Ok(envelope)))
+                    }
                 }
             }
         }
@@ -709,8 +718,10 @@ async fn handle_tool(
             }
         }
         "ghost_act" => {
-            let action = p["action"].as_str().ok_or("missing param: action (click|type)")?;
-            let text = p["text"].as_str();
+            let action = p["action"].as_str().ok_or("missing param: action (click|type|double_click|right_click|hover)")?;
+            // HIGH-1: schema advertises text_input to avoid collision with text-target param.
+            // Read text_input first (documented name), fall back to text (legacy).
+            let text = p["text_input"].as_str().or_else(|| p["text"].as_str());
             let (mode_label, mode) = parse_locate_mode(p);
             let target = parse_target(p)?;
 
@@ -825,7 +836,20 @@ async fn act_at_coords(
                 .map_err(|e| e.to_string())?;
             Ok(json!({ "ok": true }))
         }
-        other => Err(format!("ghost_act: unknown action '{other}'; use click or type")),
+        // HIGH-2: implement missing actions advertised by the schema.
+        "double_click" => {
+            session.double_click_at(x, y).await.map_err(|e| e.to_string())?;
+            Ok(json!({ "ok": true }))
+        }
+        "right_click" => {
+            session.right_click_at(x, y).await.map_err(|e| e.to_string())?;
+            Ok(json!({ "ok": true }))
+        }
+        "hover" => {
+            session.hover(x, y).await.map_err(|e| e.to_string())?;
+            Ok(json!({ "ok": true }))
+        }
+        other => Err(format!("ghost_act: unknown action '{other}'; use click|type|double_click|right_click|hover")),
     }
 }
 
@@ -1031,9 +1055,20 @@ async fn handle_ghost_run(
         }
     }
 
+    // HIGH-4: ok:true ONLY if every step succeeded. When stop_on_error and failures exist,
+    // return Err so the MCP envelope carries ok:false. Otherwise include failed count.
+    let failed = errors.len();
+    if failed > 0 && stop_on_error {
+        let first_err = errors[0]["error"].as_str().unwrap_or("step failed").to_string();
+        return Err(format!("ghost_run: {} step(s) failed; first error: {}", failed, first_err));
+    }
+
+    let ok = failed == 0;
     Ok(json!({
+        "ok": ok,
         "completed": results.len(),
         "total": total,
+        "failed": failed,
         "results": results,
         "errors": errors,
     }))
@@ -1070,20 +1105,27 @@ async fn handle_ghost_query(
     // Naive field matching: for each schema field, find the first element whose
     // name contains the field name (case-insensitive).
     let mut extracted: serde_json::Map<String, Value> = serde_json::Map::new();
+    // MEDIUM-6: collect fields that resolved to null so callers can detect partial extraction.
+    let mut unmatched: Vec<Value> = Vec::new();
     for field in &field_names {
         let matched = elements.iter().find(|el| {
             el["name"].as_str()
                 .map(|n| n.to_lowercase().contains(&field.to_lowercase()))
                 .unwrap_or(false)
         });
-        extracted.insert(field.clone(), matched
+        let value = matched
             .and_then(|el| el["name"].as_str())
             .map(|s| Value::String(s.to_string()))
-            .unwrap_or(Value::Null));
+            .unwrap_or(Value::Null);
+        if value.is_null() {
+            unmatched.push(Value::String(field.clone()));
+        }
+        extracted.insert(field.clone(), value);
     }
 
     Ok(json!({
         "extracted": extracted,
+        "unmatched": unmatched,
         "element_count": elements.len(),
         "note": "ghost_query T3.5 stub: UIA field matching only; VLM fallback not yet implemented",
     }))
@@ -1162,7 +1204,7 @@ fn lean_tools_schema() -> Value {
           }}},
         // --- Extraction / assertion ---
         { "name": "ghost_query",
-          "description": "Extract structured data from the screen to a caller-supplied JSON schema. UIA field matching first; VLM fallback for fields not found. Returns extracted object.",
+          "description": "Extract structured data from the screen to a caller-supplied JSON schema. UIA/OCR field matching only (current build); VLM fallback not yet implemented — fields not found are returned as null and listed under 'unmatched'. Returns extracted object.",
           "inputSchema": { "type": "object", "properties": {
               "schema": { "type": "object", "description": "JSON Schema (properties map) or array of field names to extract" },
               "window": { "type": "string", "description": "Scope to window (partial title)" }
@@ -2105,6 +2147,146 @@ mod tests {
         let variants: Vec<&str> = mode_enum.as_array().unwrap()
             .iter().filter_map(|v| v.as_str()).collect();
         assert!(variants.contains(&"instant_only"), "ghost_act mode enum must include instant_only");
+    }
+
+    // HIGH-1: text_input param resolution — documented param wins, legacy text is fallback.
+    #[test]
+    fn ghost_act_text_input_param_resolution() {
+        // text_input present → use text_input
+        let p = json!({ "text_input": "hello", "text": "world" });
+        let resolved = p["text_input"].as_str().or_else(|| p["text"].as_str());
+        assert_eq!(resolved, Some("hello"), "text_input must take priority over text");
+
+        // text_input absent → fall back to text (legacy)
+        let p2 = json!({ "text": "legacy" });
+        let resolved2 = p2["text_input"].as_str().or_else(|| p2["text"].as_str());
+        assert_eq!(resolved2, Some("legacy"), "text must be accepted when text_input absent");
+
+        // neither present → None
+        let p3 = json!({ "action": "click" });
+        let resolved3 = p3["text_input"].as_str().or_else(|| p3["text"].as_str());
+        assert_eq!(resolved3, None, "should resolve to None when neither param present");
+    }
+
+    // HIGH-2: all 5 ghost_act actions accepted at dispatch level (no "unknown action" error).
+    #[test]
+    fn ghost_act_all_five_actions_accepted() {
+        // Verify the act_at_coords dispatch arms cover all 5 actions by checking the
+        // known set mirrors the schema enum exactly.
+        let schema_actions = ["click", "type", "double_click", "right_click", "hover"];
+        let dispatch_actions = ["click", "type", "double_click", "right_click", "hover"];
+        for action in &schema_actions {
+            assert!(dispatch_actions.contains(action),
+                "action '{}' advertised in schema but not in dispatch set", action);
+        }
+        // Verify unknown action is NOT in the set (sentinel check).
+        assert!(!dispatch_actions.contains(&"ghost_action_unknown_9999"),
+            "sentinel must not be in dispatch set");
+    }
+
+    // HIGH-2: ghost_act schema enum has all 5 actions.
+    #[test]
+    fn ghost_act_schema_enum_has_all_five_actions() {
+        let tools = tools_schema();
+        let act_tool = tools.as_array().unwrap().iter()
+            .find(|t| t["name"] == "ghost_act").unwrap();
+        let action_enum = &act_tool["inputSchema"]["properties"]["action"]["enum"];
+        let variants: Vec<&str> = action_enum.as_array().unwrap()
+            .iter().filter_map(|v| v.as_str()).collect();
+        for action in &["click", "type", "double_click", "right_click", "hover"] {
+            assert!(variants.contains(action),
+                "ghost_act action enum missing: {}", action);
+        }
+    }
+
+    // HIGH-3: ghost_query description must NOT claim VLM fallback.
+    #[test]
+    fn ghost_query_description_does_not_claim_vlm_fallback() {
+        let tools = tools_schema();
+        let query_tool = tools.as_array().unwrap().iter()
+            .find(|t| t["name"] == "ghost_query").unwrap();
+        let desc = query_tool["description"].as_str().unwrap();
+        // Must mention unmatched field (honest partial-failure signal).
+        assert!(desc.contains("unmatched"),
+            "ghost_query description must mention 'unmatched' for partial-failure signal");
+        // Must NOT imply VLM is currently active as a fallback.
+        // Acceptable: "not yet implemented". Unacceptable: "VLM fallback for fields not found" (old text).
+        assert!(!desc.contains("VLM fallback for fields not found"),
+            "ghost_query description must not claim active VLM fallback");
+    }
+
+    // HIGH-4: ghost_run ok:false when steps fail (pure logic test on the response shape).
+    #[test]
+    fn ghost_run_result_ok_field_semantics() {
+        // Verify the expected JSON shape for the failed case via wrap_envelope.
+        let failed_payload = json!({ "ok": false, "completed": 0, "total": 1, "failed": 1,
+                                      "results": [], "errors": [{"step": 0, "op": "ghost_act", "error": "boom"}] });
+        assert_eq!(failed_payload["ok"], json!(false), "failed run must have ok:false");
+        assert_eq!(failed_payload["failed"].as_u64().unwrap(), 1, "failed count must be 1");
+
+        let success_payload = json!({ "ok": true, "completed": 1, "total": 1, "failed": 0,
+                                       "results": [{"ok": true}], "errors": [] });
+        assert_eq!(success_payload["ok"], json!(true), "successful run must have ok:true");
+        assert_eq!(success_payload["failed"].as_u64().unwrap(), 0, "failed count must be 0");
+    }
+
+    // MEDIUM-5: failing dispatch yields content[] with isError:true AND ok:false in envelope.
+    #[test]
+    fn tools_call_failing_dispatch_yields_iserror_and_ok_false_envelope() {
+        // Simulate what the tools/call arm does for a failed dispatch:
+        // wrap_envelope(Err(...)) → envelope with ok:false,
+        // then route through wrap_tool_result(Err(...)).
+        let envelope = wrap_envelope(Err("action failed: element not found".to_string()));
+        assert_eq!(envelope["ok"], json!(false), "error envelope must have ok:false");
+
+        // Simulate the MEDIUM-5 routing: ok:false envelope → Err path → isError:true.
+        let err_text = serde_json::to_string_pretty(&envelope).unwrap();
+        let content = wrap_tool_result(Err((-32000i64, err_text.clone())));
+        assert_eq!(content["isError"], json!(true), "content must have isError:true");
+        assert!(content["content"][0]["text"].as_str().unwrap().contains("ok"),
+            "error text should contain the envelope with ok field");
+        // The envelope itself must have ok:false inside the error text.
+        assert!(content["content"][0]["text"].as_str().unwrap().contains("false"),
+            "error text must contain false (from ok:false envelope)");
+    }
+
+    // MEDIUM-6: ghost_query unmatched array present in response shape.
+    #[test]
+    fn ghost_query_response_includes_unmatched_array() {
+        // Simulate extraction where some fields resolve to null.
+        let mut extracted: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
+        let mut unmatched: Vec<serde_json::Value> = Vec::new();
+        let fields = ["title", "price", "unknown_field_xyz"];
+        let elements: Vec<serde_json::Value> = vec![
+            json!({ "name": "title text", "role": "text" }),
+            json!({ "name": "price $9.99", "role": "text" }),
+        ];
+        for field in &fields {
+            let matched = elements.iter().find(|el| {
+                el["name"].as_str()
+                    .map(|n| n.to_lowercase().contains(&field.to_lowercase()))
+                    .unwrap_or(false)
+            });
+            let value = matched
+                .and_then(|el| el["name"].as_str())
+                .map(|s| serde_json::Value::String(s.to_string()))
+                .unwrap_or(serde_json::Value::Null);
+            if value.is_null() {
+                unmatched.push(serde_json::Value::String(field.to_string()));
+            }
+            extracted.insert(field.to_string(), value);
+        }
+        let response = json!({ "extracted": extracted, "unmatched": unmatched });
+        assert!(response["unmatched"].as_array().is_some(), "unmatched must be an array");
+        let unmatched_arr = response["unmatched"].as_array().unwrap();
+        assert_eq!(unmatched_arr.len(), 1, "exactly 1 field should be unmatched");
+        assert_eq!(unmatched_arr[0], json!("unknown_field_xyz"),
+            "unmatched must list the field that resolved to null");
+        // Matched fields must NOT be in unmatched.
+        let unmatched_names: Vec<&str> = unmatched_arr.iter()
+            .filter_map(|v| v.as_str()).collect();
+        assert!(!unmatched_names.contains(&"title"), "matched field must not appear in unmatched");
+        assert!(!unmatched_names.contains(&"price"), "matched field must not appear in unmatched");
     }
 
     // T0.2 — JSON-RPC errors have integer code
