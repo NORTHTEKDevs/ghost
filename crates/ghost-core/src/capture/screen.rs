@@ -1,22 +1,50 @@
 use std::sync::Mutex;
 use crate::error::CoreError;
 
-// Cached D3D11 device, context, and output. Created once on first screenshot,
-// reused on all subsequent calls. DuplicateOutput is still acquired per call
-// because IDXGIOutputDuplication is tied to a single frame-capture session.
-struct CachedCapture {
+// DESIGN: CaptureContext caches the full DXGI duplication session.
+//
+// D3D11 device + context are initialized once and reused across all captures.
+// IDXGIOutputDuplication + the matching staging texture are also cached:
+// - DuplicateOutput is expensive (~15ms) and creates a persistent "desktop
+//   duplication session" that should be held open between frames.
+// - The staging texture dimensions are tied to the duplication session and
+//   don't change while the session is valid; reusing it saves CreateTexture2D
+//   on every call.
+//
+// Re-acquire path: on DXGI_ERROR_ACCESS_LOST (0x887A0026) or
+// DXGI_ERROR_ACCESS_DENIED (0x887A002B) the duplication is dropped and
+// recreated exactly once before returning an error.
+//
+// Thread-safety note: all capture functions hold CAPTURE_STATE mutex for the
+// entire duration of the capture, so only one thread uses the DXGI session
+// at a time. COM is MTA (COINIT_MULTITHREADED) which is correct for D3D11/DXGI.
+// IUIAutomation uses STA on the same OS thread (the tokio main thread); DXGI
+// capture is MTA-safe and does not interact with the STA apartment.
+
+struct CaptureContext {
     device: windows::Win32::Graphics::Direct3D11::ID3D11Device,
     context: windows::Win32::Graphics::Direct3D11::ID3D11DeviceContext,
     output1: windows::Win32::Graphics::Dxgi::IDXGIOutput1,
+    /// Cached duplication session. None means it must be (re-)acquired.
+    duplication: Option<windows::Win32::Graphics::Dxgi::IDXGIOutputDuplication>,
+    /// Cached staging texture and its dimensions. None until first frame.
+    staging: Option<(windows::Win32::Graphics::Direct3D11::ID3D11Texture2D, usize, usize)>,
+    /// How many times the duplication has been re-acquired (telemetry / cfg(test)).
+    #[cfg(test)]
+    pub reacquire_count: u32,
+    #[cfg(not(test))]
+    _reacquire_count: u32,
 }
 
-// Safety: D3D11 uses COM's internal reference counting with thread-safe
-// AddRef/Release, and we initialized COM with COINIT_MULTITHREADED. All
-// D3D11 interfaces are designed for concurrent use from MTA apartments.
-unsafe impl Send for CachedCapture {}
-unsafe impl Sync for CachedCapture {}
+// Safety: same as before — D3D11 COM objects use internal ref-counting safe
+// across threads; only one thread holds the mutex at a time.
+unsafe impl Send for CaptureContext {}
+unsafe impl Sync for CaptureContext {}
 
-static CAPTURE_STATE: Mutex<Option<CachedCapture>> = Mutex::new(None);
+static CAPTURE_STATE: Mutex<Option<CaptureContext>> = Mutex::new(None);
+
+// DXGI_ERROR_ACCESS_LOST / DXGI_ERROR_ACCESS_DENIED are used via
+// windows::Win32::Graphics::Dxgi directly in capture_rgba_inner.
 
 /// Image output format for `capture_screen_region`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,7 +60,7 @@ pub fn capture_screen() -> Result<Vec<u8>, CoreError> {
     if guard.is_none() {
         *guard = Some(init_capture_state()?);
     }
-    let (rgba, w, h) = capture_rgba(guard.as_ref().unwrap())?;
+    let (rgba, w, h) = capture_rgba(guard.as_mut().unwrap())?;
     encode_png_rgba(&rgba, w as u32, h as u32)
 }
 
@@ -43,7 +71,7 @@ pub fn capture_screen_full_rgba() -> Result<(Vec<u8>, usize, usize), CoreError> 
     if guard.is_none() {
         *guard = Some(init_capture_state()?);
     }
-    capture_rgba(guard.as_ref().unwrap())
+    capture_rgba(guard.as_mut().unwrap())
 }
 
 /// Capture the primary monitor, downsample to `target_dim x target_dim` cells,
@@ -55,7 +83,7 @@ pub fn capture_screen_downsample_raw(target_dim: usize) -> Result<Vec<u8>, CoreE
     if guard.is_none() {
         *guard = Some(init_capture_state()?);
     }
-    let (rgba, w, h) = capture_rgba(guard.as_ref().unwrap())?;
+    let (rgba, w, h) = capture_rgba(guard.as_mut().unwrap())?;
     // Downsample to target_dim x target_dim by averaging cells.
     let dim = target_dim.max(1);
     let channels = 4usize;
@@ -116,7 +144,7 @@ pub fn capture_screen_region(
     if guard.is_none() {
         *guard = Some(init_capture_state()?);
     }
-    let (full_rgba, full_w, full_h) = capture_rgba(guard.as_ref().unwrap())?;
+    let (full_rgba, full_w, full_h) = capture_rgba(guard.as_mut().unwrap())?;
 
     let (rgba, w, h) = if let Some((l, t, r, b)) = rect {
         let l = l.max(0) as usize;
@@ -163,7 +191,7 @@ pub fn capture_screen_region(
     }
 }
 
-fn init_capture_state() -> Result<CachedCapture, CoreError> {
+fn init_capture_state() -> Result<CaptureContext, CoreError> {
     unsafe {
         use windows::Win32::Graphics::Direct3D::*;
         use windows::Win32::Graphics::Direct3D11::*;
@@ -196,35 +224,90 @@ fn init_capture_state() -> Result<CachedCapture, CoreError> {
         let output1: IDXGIOutput1 = output.cast()
             .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "IDXGIOutput1 cast" })?;
 
-        Ok(CachedCapture { device, context, output1 })
+        Ok(CaptureContext {
+            device,
+            context,
+            output1,
+            duplication: None,  // acquired lazily on first capture_rgba call
+            staging: None,
+            #[cfg(test)]
+            reacquire_count: 0,
+            #[cfg(not(test))]
+            _reacquire_count: 0,
+        })
     }
 }
 
+/// Acquire (or re-acquire) `IDXGIOutputDuplication` on `ctx`.
+/// Called when `ctx.duplication` is None or after an access-lost error.
+unsafe fn acquire_duplication(ctx: &mut CaptureContext) -> Result<(), CoreError> {
+    use windows::Win32::Graphics::Dxgi::IDXGIOutputDuplication;
+    // Drop any stale duplication before creating a new one.
+    ctx.duplication = None;
+    ctx.staging = None;
+    let dup: IDXGIOutputDuplication = ctx.output1.DuplicateOutput(&ctx.device)
+        .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "DuplicateOutput" })?;
+    ctx.duplication = Some(dup);
+    #[cfg(test)]
+    { ctx.reacquire_count += 1; }
+    #[cfg(not(test))]
+    { ctx._reacquire_count += 1; }
+    Ok(())
+}
+
 /// Capture the primary monitor as a tightly-packed RGBA buffer plus dimensions.
-/// Shared between `capture_screen` (full PNG) and `capture_screen_region` (region/format).
-fn capture_rgba(s: &CachedCapture) -> Result<(Vec<u8>, usize, usize), CoreError> {
-    unsafe {
-        use windows::Win32::Graphics::Direct3D11::*;
-        use windows::Win32::Graphics::Dxgi::*;
-        use windows::core::Interface;
+/// Reuses the cached IDXGIOutputDuplication and staging texture where possible.
+/// Re-acquires on DXGI_ERROR_ACCESS_LOST / DXGI_ERROR_ACCESS_DENIED (once per call).
+fn capture_rgba(ctx: &mut CaptureContext) -> Result<(Vec<u8>, usize, usize), CoreError> {
+    unsafe { capture_rgba_inner(ctx, true) }
+}
 
-        let duplication = s.output1.DuplicateOutput(&s.device)
-            .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "DuplicateOutput" })?;
+unsafe fn capture_rgba_inner(
+    ctx: &mut CaptureContext,
+    allow_retry: bool,
+) -> Result<(Vec<u8>, usize, usize), CoreError> {
+    use windows::Win32::Graphics::Direct3D11::*;
+    use windows::Win32::Graphics::Dxgi::*;
+    use windows::core::Interface;
 
-        let mut frame_info = DXGI_OUTDUPL_FRAME_INFO::default();
-        let mut resource: Option<IDXGIResource> = None;
-        duplication.AcquireNextFrame(500, &mut frame_info, &mut resource)
-            .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "AcquireNextFrame" })?;
+    // Ensure duplication is acquired.
+    if ctx.duplication.is_none() {
+        acquire_duplication(ctx)?;
+    }
+    let dup = ctx.duplication.as_ref().unwrap();
 
-        let resource = resource.ok_or(CoreError::Win32 { code: 0, context: "frame resource null" })?;
-        let texture: ID3D11Texture2D = resource.cast()
-            .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "texture cast" })?;
+    let mut frame_info = DXGI_OUTDUPL_FRAME_INFO::default();
+    let mut resource: Option<IDXGIResource> = None;
+    let acquire_result = dup.AcquireNextFrame(500, &mut frame_info, &mut resource);
 
-        let mut desc = D3D11_TEXTURE2D_DESC::default();
-        texture.GetDesc(&mut desc);
-        let width = desc.Width as usize;
-        let height = desc.Height as usize;
+    if let Err(ref e) = acquire_result {
+        let hr = e.code();
+        // Compare against windows-rs HRESULT constants for access-lost errors.
+        let is_access_error = hr == windows::Win32::Graphics::Dxgi::DXGI_ERROR_ACCESS_LOST
+            || hr == windows::Win32::Graphics::Dxgi::DXGI_ERROR_ACCESS_DENIED;
+        if allow_retry && is_access_error {
+            // Drop the bad session and retry once with a fresh duplication.
+            acquire_duplication(ctx)?;
+            return capture_rgba_inner(ctx, false);
+        }
+        return Err(CoreError::Win32 { code: hr.0 as u32, context: "AcquireNextFrame" });
+    }
 
+    let resource = resource.ok_or(CoreError::Win32 { code: 0, context: "frame resource null" })?;
+    let texture: ID3D11Texture2D = resource.cast()
+        .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "texture cast" })?;
+
+    let mut desc = D3D11_TEXTURE2D_DESC::default();
+    texture.GetDesc(&mut desc);
+    let width = desc.Width as usize;
+    let height = desc.Height as usize;
+
+    // Reuse or create the staging texture. Invalidate if dimensions changed (monitor config change).
+    let need_new_staging = match &ctx.staging {
+        Some((_, sw, sh)) => *sw != width || *sh != height,
+        None => true,
+    };
+    if need_new_staging {
         let staging_desc = D3D11_TEXTURE2D_DESC {
             Usage: D3D11_USAGE_STAGING,
             BindFlags: 0,
@@ -232,31 +315,35 @@ fn capture_rgba(s: &CachedCapture) -> Result<(Vec<u8>, usize, usize), CoreError>
             MiscFlags: 0,
             ..desc
         };
-        let mut staging: Option<ID3D11Texture2D> = None;
-        s.device.CreateTexture2D(&staging_desc, None, Some(&mut staging))
+        let mut new_staging: Option<ID3D11Texture2D> = None;
+        ctx.device.CreateTexture2D(&staging_desc, None, Some(&mut new_staging))
             .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "CreateTexture2D staging" })?;
-        let staging = staging.ok_or(CoreError::Win32 { code: 0, context: "staging texture null" })?;
-
-        let resource_view: ID3D11Resource = texture.cast()
-            .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "texture resource cast" })?;
-        let staging_view: ID3D11Resource = staging.cast()
-            .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "staging resource cast" })?;
-        s.context.CopyResource(&staging_view, &resource_view);
-
-        let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-        s.context.Map(&staging_view, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
-            .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "Map" })?;
-
-        let pitch = mapped.RowPitch as usize;
-        let data = std::slice::from_raw_parts(mapped.pData as *const u8, pitch * height);
-        let rgba = bgra_to_rgba(data, width, height, pitch);
-
-        s.context.Unmap(&staging_view, 0);
-        duplication.ReleaseFrame()
-            .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "ReleaseFrame" })?;
-
-        Ok((rgba, width, height))
+        let s = new_staging.ok_or(CoreError::Win32 { code: 0, context: "staging texture null" })?;
+        ctx.staging = Some((s, width, height));
     }
+    let (staging, _, _) = ctx.staging.as_ref().unwrap();
+
+    let resource_view: ID3D11Resource = texture.cast()
+        .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "texture resource cast" })?;
+    let staging_view: ID3D11Resource = staging.cast()
+        .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "staging resource cast" })?;
+    ctx.context.CopyResource(&staging_view, &resource_view);
+
+    let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+    ctx.context.Map(&staging_view, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
+        .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "Map" })?;
+
+    let pitch = mapped.RowPitch as usize;
+    let data = std::slice::from_raw_parts(mapped.pData as *const u8, pitch * height);
+    let rgba = bgra_to_rgba(data, width, height, pitch);
+
+    ctx.context.Unmap(&staging_view, 0);
+    // Release the frame back to the duplication — keep the session alive for next call.
+    let dup = ctx.duplication.as_ref().unwrap();
+    dup.ReleaseFrame()
+        .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "ReleaseFrame" })?;
+
+    Ok((rgba, width, height))
 }
 
 /// Convert BGRA pixel data (with row pitch) to tightly-packed RGBA.
@@ -383,5 +470,32 @@ mod tests {
         let h = u32::from_be_bytes([png[20], png[21], png[22], png[23]]);
         assert_eq!(w, 4);
         assert_eq!(h, 3);
+    }
+
+    /// Verify DXGI error constants have the expected raw HRESULT values.
+    #[test]
+    fn dxgi_error_constants_have_correct_values() {
+        use windows::Win32::Graphics::Dxgi::{DXGI_ERROR_ACCESS_LOST, DXGI_ERROR_ACCESS_DENIED};
+        // 0x887A0026 and 0x887A002B are the canonical DXGI access-lost HRESULTs.
+        assert_eq!(DXGI_ERROR_ACCESS_LOST.0 as u32, 0x887A_0026);
+        assert_eq!(DXGI_ERROR_ACCESS_DENIED.0 as u32, 0x887A_002B);
+    }
+
+    /// Live test: repeated captures reuse the duplication session (reacquire_count stays low).
+    /// Marked ignore because it requires a real display/GPU.
+    #[test]
+    #[ignore]
+    fn repeated_captures_reuse_duplication_session() {
+        // First capture initializes + acquires duplication (count: 1).
+        // Subsequent captures must NOT re-acquire (count stays 1).
+        let _ = capture_screen().expect("first capture");
+        let _ = capture_screen().expect("second capture");
+        let _ = capture_screen().expect("third capture");
+        let guard = CAPTURE_STATE.lock().unwrap();
+        if let Some(ctx) = guard.as_ref() {
+            // reacquire_count should be 1 (one initial acquire, no re-acquires).
+            assert_eq!(ctx.reacquire_count, 1,
+                "expected exactly 1 duplication acquire; repeated captures must reuse the session");
+        }
     }
 }
