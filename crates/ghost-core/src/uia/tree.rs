@@ -1,12 +1,14 @@
 use windows::Win32::UI::Accessibility::*;
 use windows::Win32::System::Com::CoCreateInstance;
 use windows::Win32::System::Com::CLSCTX_INPROC_SERVER;
-use windows::Win32::Foundation::{BOOL, HWND, LPARAM, WPARAM, TRUE};
+use windows::Win32::Foundation::{BOOL, HWND, LPARAM, WPARAM, TRUE, FALSE};
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetForegroundWindow, GetWindowTextW, IsWindowVisible,
     PostMessageW, SetForegroundWindow, ShowWindow, GetWindowThreadProcessId,
-    SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, WM_CLOSE,
+    BringWindowToTop,
+    SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, WM_CLOSE,
 };
+use windows::Win32::System::Threading::{GetCurrentThreadId, AttachThreadInput};
 use super::element::{UiaElement, role_id_to_name, ElementDescriptor, INTERACTIVE_ROLES};
 use crate::error::CoreError;
 
@@ -288,14 +290,45 @@ pub fn list_windows() -> Result<Vec<WindowInfo>, CoreError> {
     Ok(list)
 }
 
+/// Attempt to bring `hwnd` to the foreground using the AttachThreadInput workaround.
+/// Returns Ok(true) if foreground confirmed within `timeout_ms`, Ok(false) if timed out.
+pub fn ensure_foreground(hwnd: HWND, timeout_ms: u64) -> Result<bool, CoreError> {
+    unsafe {
+        if GetForegroundWindow() == hwnd {
+            return Ok(true);
+        }
+        let fg = GetForegroundWindow();
+        let cur_tid = GetCurrentThreadId();
+        let fg_tid = GetWindowThreadProcessId(fg, None);
+        let tgt_tid = GetWindowThreadProcessId(hwnd, None);
+        let _ = AttachThreadInput(cur_tid, fg_tid, TRUE);
+        let _ = AttachThreadInput(cur_tid, tgt_tid, TRUE);
+        let _ = ShowWindow(hwnd, SW_SHOW);
+        let _ = BringWindowToTop(hwnd);
+        let _ = SetForegroundWindow(hwnd);
+        let _ = AttachThreadInput(cur_tid, fg_tid, FALSE);
+        let _ = AttachThreadInput(cur_tid, tgt_tid, FALSE);
+        let start = std::time::Instant::now();
+        while start.elapsed().as_millis() < timeout_ms as u128 {
+            if GetForegroundWindow() == hwnd {
+                return Ok(true);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(15));
+        }
+        Ok(GetForegroundWindow() == hwnd)
+    }
+}
+
 pub fn focus_window(name: &str) -> Result<(), CoreError> {
     let name_lower = name.to_lowercase();
     let windows = list_windows()?;
     let win = windows.iter()
         .find(|w| w.name.to_lowercase().contains(&name_lower))
         .ok_or_else(|| CoreError::ProcessNotFound { name: name.to_string() })?;
-    unsafe {
-        let _ = SetForegroundWindow(HWND(win.hwnd));
+    let hwnd = HWND(win.hwnd);
+    let confirmed = ensure_foreground(hwnd, 600)?;
+    if !confirmed {
+        return Err(CoreError::FocusFailed { window: name.to_string() });
     }
     Ok(())
 }
@@ -331,5 +364,26 @@ mod tests {
         assert!(matches!(WindowState::from_str("restore"), Some(WindowState::Restore)));
         assert!(matches!(WindowState::from_str("close"), Some(WindowState::Close)));
         assert!(WindowState::from_str("invalid").is_none());
+    }
+
+    #[test]
+    fn focus_window_name_not_found_returns_process_not_found() {
+        let result = focus_window("__ghost_nonexistent_window_xyzzy__");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, CoreError::ProcessNotFound { .. }),
+            "expected ProcessNotFound, got: {:?}", err);
+    }
+
+    #[test]
+    fn role_alias_tab_matches_tabitem() {
+        assert!(role_alias_matches("tab", "tabitem"));
+        assert!(!role_alias_matches("tab", "button"));
+    }
+
+    #[test]
+    fn role_alias_list_matches_listitem() {
+        assert!(role_alias_matches("list", "listitem"));
+        assert!(!role_alias_matches("list", "menu"));
     }
 }
