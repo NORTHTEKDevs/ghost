@@ -16,7 +16,9 @@ use tokio::sync::Notify;
 use tokio::time::{timeout, Duration};
 use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook};
 use windows::Win32::UI::WindowsAndMessaging::{
-    DispatchMessageW, GetMessageW, TranslateMessage, EVENT_SYSTEM_FOREGROUND,
+    DispatchMessageW, GetMessageW, TranslateMessage,
+    EVENT_OBJECT_FOCUS, EVENT_OBJECT_STATECHANGE,
+    EVENT_SYSTEM_FOREGROUND,
     MSG, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
 };
 use windows::Win32::Foundation::HWND;
@@ -96,9 +98,34 @@ unsafe extern "system" fn win_event_proc(
 
 fn pump_thread(_bus: &'static EventBus) {
     unsafe {
-        let _hook = SetWinEventHook(
+        // Hook 1: foreground window changes (was already present).
+        let _hook_fg = SetWinEventHook(
             EVENT_SYSTEM_FOREGROUND,
             EVENT_SYSTEM_FOREGROUND,
+            None,
+            Some(win_event_proc),
+            0,
+            0,
+            WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS,
+        );
+
+        // Hook 2: focus changes within the active window (e.g., tab, click-to-field).
+        // EVENT_OBJECT_FOCUS fires when keyboard focus moves to any accessible object.
+        let _hook_focus = SetWinEventHook(
+            EVENT_OBJECT_FOCUS,
+            EVENT_OBJECT_FOCUS,
+            None,
+            Some(win_event_proc),
+            0,
+            0,
+            WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS,
+        );
+
+        // Hook 3: object state changes (e.g., button enabled/disabled, checkbox toggled,
+        // dialog open/close). Fires on STATE_SYSTEM_* changes via EVENT_OBJECT_STATECHANGE.
+        let _hook_state = SetWinEventHook(
+            EVENT_OBJECT_STATECHANGE,
+            EVENT_OBJECT_STATECHANGE,
             None,
             Some(win_event_proc),
             0,
