@@ -74,11 +74,15 @@ pub struct Grounded {
     /// Bounding rect of the element: (left, top, right, bottom) in absolute screen pixels.
     pub rect: (i32, i32, i32, i32),
     /// Center of the bounding rect in absolute screen pixels.
+    /// Always valid regardless of source tier.
     pub center: (i32, i32),
     /// Confidence score in 0.0..=1.0. Tier defaults: cache=0.95, uia=0.90, ocr=0.70, yolo=0.75, vlm=0.60.
     pub confidence: f32,
     /// Which tier produced this result.
     pub source: Tier,
+    /// Accessible name of the element, if known at grounding time.
+    /// Populated by Cache and UIA tiers; `None` for OCR, VLM, and YOLO tiers.
+    pub name: Option<String>,
 }
 
 impl Grounded {
@@ -86,7 +90,7 @@ impl Grounded {
     pub fn from_rect(rect: (i32, i32, i32, i32), confidence: f32, source: Tier) -> Self {
         let cx = (rect.0 + rect.2) / 2;
         let cy = (rect.1 + rect.3) / 2;
-        Self { rect, center: (cx, cy), confidence, source }
+        Self { rect, center: (cx, cy), confidence, source, name: None }
     }
 
     /// Construct from a center point (e.g. VLM or coord target), using a 1x1 rect.
@@ -96,7 +100,14 @@ impl Grounded {
             center,
             confidence,
             source,
+            name: None,
         }
+    }
+
+    /// Returns true when the rect is meaningful (Cache/UIA tiers produce real bounding rects).
+    /// Returns false for point-only tiers (OCR, VLM, YOLO) where only center is valid.
+    pub fn has_rect(&self) -> bool {
+        !matches!(self.source, Tier::Ocr | Tier::Vlm | Tier::Yolo)
     }
 }
 
@@ -273,6 +284,7 @@ mod tests {
     fn grounded_from_rect_computes_center() {
         let g = Grounded::from_rect((100, 200, 300, 400), 0.9, Tier::Uia);
         assert_eq!(g.center, (200, 300));
+        assert!(g.name.is_none());
     }
 
     #[test]
@@ -280,6 +292,34 @@ mod tests {
         let g = Grounded::from_point((640, 480), 0.6, Tier::Vlm);
         assert_eq!(g.center, (640, 480));
         assert_eq!(g.rect, (640, 480, 640, 480));
+        assert!(g.name.is_none());
+    }
+
+    // LOW-9: has_rect returns true for Cache/UIA (real rect), false for OCR/VLM/YOLO.
+    #[test]
+    fn grounded_has_rect_for_uia_and_cache() {
+        let uia = Grounded::from_rect((0, 0, 10, 10), 0.9, Tier::Uia);
+        assert!(uia.has_rect(), "UIA tier must have a real rect");
+        let cache = Grounded::from_rect((0, 0, 10, 10), 0.95, Tier::Cache);
+        assert!(cache.has_rect(), "Cache tier must have a real rect");
+    }
+
+    #[test]
+    fn grounded_no_rect_for_point_only_tiers() {
+        let vlm = Grounded::from_point((50, 50), 0.6, Tier::Vlm);
+        assert!(!vlm.has_rect(), "VLM tier must not claim a real rect");
+        let ocr = Grounded::from_point((50, 50), 0.7, Tier::Ocr);
+        assert!(!ocr.has_rect(), "OCR tier must not claim a real rect");
+        let yolo = Grounded::from_point((50, 50), 0.75, Tier::Yolo);
+        assert!(!yolo.has_rect(), "YOLO tier must not claim a real rect");
+    }
+
+    // HIGH-2: name field can be set on Grounded for UIA/Cache tiers.
+    #[test]
+    fn grounded_name_field_settable() {
+        let mut g = Grounded::from_rect((0, 0, 100, 50), 0.9, Tier::Uia);
+        g.name = Some("Submit".to_string());
+        assert_eq!(g.name.as_deref(), Some("Submit"));
     }
 
     // --- Target helpers ---
