@@ -166,6 +166,14 @@ impl UiaCache {
         Ok(SnapshotDelta { seq: current.seq, added: current.nodes.clone(), removed: vec![], updated: vec![] })
     }
 
+    /// Bump the seq counter in-place without touching nodes or archiving history.
+    /// Use this from find() to advance cache_seq for wait_until conditions without
+    /// corrupting the mirror that describe_screen_delta depends on.
+    pub fn bump_seq(&self) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.current.seq += 1;
+    }
+
     /// Replace the current snapshot wholesale; archive the prior into history.
     /// Wired by the walker-driven refresh path and, in the future, by COM event handlers.
     pub fn apply_snapshot(&self, mut new_snap: Snapshot) {
@@ -291,5 +299,35 @@ mod tests {
         cache.apply_mutation_for_test(ElementNode::dummy());
         let delta = cache.snapshot_delta(None, Some(s1.seq)).unwrap();
         assert_eq!(delta.added.len(), 1);
+    }
+
+    /// HIGH-3: bump_seq must advance seq without clearing or archiving nodes.
+    #[test]
+    fn bump_seq_advances_seq_without_clearing_nodes() {
+        let cache = UiaCache::new();
+        // Seed one node into the cache.
+        cache.apply_mutation_for_test(ElementNode::dummy());
+        let seq_before = cache.seq();
+        let snap_before = cache.snapshot(None, None).unwrap();
+        assert_eq!(snap_before.nodes.len(), 1);
+
+        cache.bump_seq();
+
+        let seq_after = cache.seq();
+        assert!(seq_after > seq_before, "bump_seq must advance seq");
+
+        // Nodes must be intact — apply_snapshot(empty) would have wiped them.
+        let snap_after = cache.snapshot(None, None).unwrap();
+        assert_eq!(snap_after.nodes.len(), 1, "bump_seq must not clear nodes");
+    }
+
+    /// HIGH-3: wait_until on cache_seq still advances after bump_seq.
+    #[test]
+    fn bump_seq_advances_cache_seq_for_wait_until() {
+        let cache = UiaCache::new();
+        let before = cache.seq();
+        cache.bump_seq();
+        cache.bump_seq();
+        assert_eq!(cache.seq(), before + 2);
     }
 }
