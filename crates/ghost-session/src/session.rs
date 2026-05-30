@@ -18,7 +18,7 @@ use ghost_core::{
     process::launch as proc_launch,
     system::{get_clipboard as core_get_clipboard, set_clipboard as core_set_clipboard},
     uia::{
-        init_com,
+        init_com, EventBus,
         tree::{UiaTree, WindowInfo, WindowState, list_windows as core_list_windows,
                focus_window as core_focus_window, set_window_state},
     },
@@ -133,26 +133,52 @@ impl GhostSession {
     }
 
     /// Find the first element matching the locator, retrying until timeout.
+    /// Tries the foreground window subtree first (fast path); only falls back
+    /// to a full desktop walk if the target isn't in the focused window.
+    /// Polling backs off: 25ms while warm, 75ms after 1s, 150ms after 3s.
+    /// `By::Description` is handled by `find_by_description` (vision fallback).
+    #[tracing::instrument(skip(self), fields(timeout_ms = self.timeout_ms))]
     pub async fn find(&self, by: By) -> Result<crate::GhostElement> {
+        if let By::Description(desc) = &by {
+            return Err(GhostError::Vision(format!(
+                "By::Description not supported by find(); use find_by_description() or click_by_description() to get coordinates. desc={desc}"
+            )));
+        }
         if is_stopped() {
             return Err(GhostError::Stopped);
         }
         let action = by.to_string();
         let ms = self.timeout_ms;
+        let started = std::time::Instant::now();
 
+        let bus = EventBus::global();
         let result = timeout(Duration::from_millis(ms), async {
+            let mut attempt: u32 = 0;
+            let mut last_seq = bus.seq();
             loop {
                 if is_stopped() {
                     return Err(GhostError::Stopped);
                 }
+                let lookup_started = std::time::Instant::now();
                 let found = match &by {
-                    By::Name(n) => self.tree.find_by_name(n).map_err(GhostError::Core)?,
-                    By::Role(r) => self.tree.find_by_role(r).map_err(GhostError::Core)?,
+                    By::Name(n) => self.tree.find_by_name_fast(n).map_err(GhostError::Core)?,
+                    By::Role(r) => self.tree.find_by_role_fast(r).map_err(GhostError::Core)?,
+                    By::Description(_) => unreachable!("filtered above"),
                 };
+                let lookup_us = lookup_started.elapsed().as_micros();
                 if let Some(el) = found {
+                    tracing::debug!(attempt, lookup_us, "find hit");
                     return Ok(crate::GhostElement::new(el));
                 }
-                tokio::time::sleep(Duration::from_millis(100)).await;
+                let elapsed_ms = started.elapsed().as_millis() as u64;
+                let backoff = if elapsed_ms < 1000 { 25 }
+                              else if elapsed_ms < 3000 { 75 }
+                              else { 150 };
+                attempt += 1;
+                match bus.wait_for_change(last_seq, backoff).await {
+                    Ok(s) => { last_seq = s; }
+                    Err(_) => {}
+                }
             }
         })
         .await;
@@ -160,11 +186,115 @@ impl GhostSession {
         match result {
             Ok(r) => r,
             Err(_elapsed) => {
+                tracing::warn!(action = %action, "find timeout, capturing screenshot");
                 let screenshot = capture_screen().ok();
                 Err(GhostError::ElementNotFound {
                     query: action,
                     screenshot,
                 })
+            }
+        }
+    }
+
+    /// Vision fallback: locate a UI element by natural-language description.
+    /// Captures a tight ROI of the foreground window, downscales + JPEG-encodes,
+    /// asks Claude for the center pixel, and returns absolute screen coords.
+    /// Requires `ANTHROPIC_API_KEY` env var. Override model via `GHOST_VISION_MODEL`
+    /// (default: claude-haiku-4-5; ~5x faster than Opus for "where is X" queries).
+    #[tracing::instrument(skip(self), fields(desc = %description))]
+    pub async fn locate_by_description(&self, description: &str) -> Result<(i32, i32)> {
+        let rect = self.foreground_window_rect()
+            .ok_or_else(|| GhostError::Vision("no foreground window for vision crop".into()))?;
+        let original = (
+            (rect.2 - rect.0).max(1) as u32,
+            (rect.3 - rect.1).max(1) as u32,
+        );
+        let max_dim = 1024u32;
+        let final_size = if original.0.max(original.1) > max_dim {
+            let scale = max_dim as f32 / original.0.max(original.1) as f32;
+            (
+                ((original.0 as f32) * scale).round().max(1.0) as u32,
+                ((original.1 as f32) * scale).round().max(1.0) as u32,
+            )
+        } else {
+            original
+        };
+        let jpeg = ghost_core::capture::capture_screen_region(
+            Some(rect),
+            Some(max_dim),
+            ghost_core::capture::CaptureFormat::Jpeg(80),
+        ).map_err(GhostError::Core)?;
+
+        let crop = crate::vision::Crop {
+            origin: (rect.0, rect.1),
+            original,
+            final_size,
+        };
+        let coords = crate::vision::vision_locate(description, &jpeg, final_size).await?;
+        match coords {
+            Some((vx, vy)) => Ok(crop.to_screen(vx, vy)),
+            None => Err(GhostError::ElementNotFound {
+                query: format!("description={description}"),
+                screenshot: None,
+            }),
+        }
+    }
+
+    /// Vision fallback + click. One round-trip for "click the blue Submit button".
+    pub async fn click_by_description(&self, description: &str) -> Result<()> {
+        let (x, y) = self.locate_by_description(description).await?;
+        self.click_at(x, y).await
+    }
+
+    /// Vision fallback + click + type. For form fills where UIA name is unstable.
+    pub async fn type_by_description(&self, description: &str, text: &str) -> Result<()> {
+        let (x, y) = self.locate_by_description(description).await?;
+        self.click_at(x, y).await?;
+        ghost_core::input::keyboard::type_text(text).map_err(GhostError::Core)
+    }
+
+    /// Local OCR text search via Windows.Media.Ocr (free, on-device, no API).
+    /// Searches for `needle` (case-insensitive contains) in the foreground window
+    /// (or full screen if `foreground=false`). Returns center pixel of first match.
+    /// Faster + cheaper than locate_by_description for plain-text cases; ~50-200ms typical.
+    ///
+    /// The blocking WinRT spin-wait (IAsyncOperation::get) runs on a spawn_blocking
+    /// thread so it does not block the async runtime.
+    #[tracing::instrument(skip(self), fields(needle = %needle, foreground))]
+    pub async fn find_text_local(&self, needle: &str, foreground: bool) -> Result<Option<(i32, i32)>> {
+        let region = if foreground { self.foreground_window_rect() } else { None };
+        let needle = needle.to_string();
+        tokio::task::spawn_blocking(move || {
+            ghost_core::ocr::find_text_local(&needle, region).map_err(GhostError::Core)
+        })
+        .await
+        .map_err(|e| GhostError::Core(ghost_core::error::CoreError::WorkerPanic(e.to_string())))?
+    }
+
+    /// Local OCR + click. Polls until needle appears or timeout. Event-driven backoff.
+    pub async fn click_text_local(&self, needle: &str, timeout_ms: u64) -> Result<()> {
+        let start = std::time::Instant::now();
+        let deadline = Duration::from_millis(timeout_ms);
+        let bus = EventBus::global();
+        let mut last_seq = bus.seq();
+        loop {
+            if is_stopped() { return Err(GhostError::Stopped); }
+            if let Some((x, y)) = self.find_text_local(needle, true).await? {
+                return self.click_at(x, y).await;
+            }
+            if start.elapsed() >= deadline {
+                return Err(GhostError::Timeout {
+                    action: format!("click_text_local:{needle}"),
+                    ms: timeout_ms,
+                });
+            }
+            let elapsed_ms = start.elapsed().as_millis() as u64;
+            let backoff = if elapsed_ms < 1000 { 100 }
+                          else if elapsed_ms < 3000 { 200 }
+                          else { 400 };
+            match bus.wait_for_change(last_seq, backoff).await {
+                Ok(s) => { last_seq = s; }
+                Err(_) => {}
             }
         }
     }
@@ -180,6 +310,42 @@ impl GhostSession {
     /// Capture the primary monitor as PNG bytes.
     pub async fn screenshot(&self, _region: Region) -> Result<Vec<u8>> {
         capture_screen().map_err(GhostError::Core)
+    }
+
+    /// Capture a screen region with optional downscale and JPEG/PNG encoding.
+    /// rect: (left, top, right, bottom) in pixels; None = full screen.
+    /// max_dim: longest-edge size after downscale; None = no downscale.
+    /// jpeg_quality: 0-100; None = PNG output.
+    /// For vision payloads, prefer rect=focused_window_bbox(), max_dim=Some(768), jpeg_quality=Some(75).
+    #[tracing::instrument(skip(self), fields(rect = ?rect, max_dim, jpeg_quality))]
+    pub async fn screenshot_region(
+        &self,
+        rect: Option<(i32, i32, i32, i32)>,
+        max_dim: Option<u32>,
+        jpeg_quality: Option<u8>,
+    ) -> Result<Vec<u8>> {
+        let format = match jpeg_quality {
+            Some(q) => ghost_core::capture::CaptureFormat::Jpeg(q),
+            None => ghost_core::capture::CaptureFormat::Png,
+        };
+        ghost_core::capture::capture_screen_region(rect, max_dim, format).map_err(GhostError::Core)
+    }
+
+    /// Bounding rect of the foreground window: (left, top, right, bottom) or None if no window focused.
+    /// Useful as the rect arg to screenshot_region for tight vision crops.
+    pub fn foreground_window_rect(&self) -> Option<(i32, i32, i32, i32)> {
+        unsafe {
+            use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowRect};
+            use windows::Win32::Foundation::RECT;
+            let hwnd = GetForegroundWindow();
+            if hwnd.is_invalid() { return None; }
+            let mut r = RECT::default();
+            if GetWindowRect(hwnd, &mut r).is_ok() {
+                Some((r.left, r.top, r.right, r.bottom))
+            } else {
+                None
+            }
+        }
     }
 
     /// Launch a process by name or path. Returns PID.
@@ -311,9 +477,36 @@ impl GhostSession {
         tokio::time::sleep(Duration::from_millis(ms)).await;
     }
 
+    /// Current event-bus sequence. Increments on each system foreground change.
+    /// Pair with wait_for_event for race-free event-driven waits.
+    pub fn event_seq(&self) -> u64 {
+        EventBus::global().seq()
+    }
+
+    /// Wait for the next system event (foreground change) or timeout.
+    /// Returns Ok(new_seq) on event, Err(Timeout) on no-event-within-deadline.
+    /// Use `since_seq = event_seq()` taken before triggering the action you're awaiting.
+    #[tracing::instrument(skip(self), fields(since_seq, timeout_ms))]
+    pub async fn wait_for_event(&self, since_seq: u64, timeout_ms: u64) -> Result<u64> {
+        EventBus::global()
+            .wait_for_change(since_seq, timeout_ms)
+            .await
+            .map_err(|_| GhostError::Timeout {
+                action: "wait_for_event".into(),
+                ms: timeout_ms,
+            })
+    }
+
     /// Return structured list of interactive elements. window: optional partial window title to scope.
     pub async fn describe_screen(&self, window: Option<&str>) -> Result<Vec<ghost_core::uia::ElementDescriptor>> {
         self.tree.describe_screen(window).map_err(GhostError::Core)
+    }
+
+    /// Fast describe scoped to the foreground window subtree only.
+    /// 5-50x faster than describe_screen(None); preferred default for agent loops.
+    #[tracing::instrument(skip(self))]
+    pub async fn describe_screen_fast(&self) -> Result<Vec<ghost_core::uia::ElementDescriptor>> {
+        self.tree.describe_screen_fast().map_err(GhostError::Core)
     }
 
     /// Get the text value of a found element.
@@ -338,6 +531,8 @@ impl GhostSession {
     }
 
     /// Click an element, then wait for `expected_text` to appear (or disappear) on screen.
+    /// Uses scoped (foreground-window) search instead of full desktop describe walks.
+    #[tracing::instrument(skip(self), fields(text = %expected_text, appears, timeout_ms))]
     pub async fn click_and_wait_for_text(
         &self,
         target: By,
@@ -349,11 +544,15 @@ impl GhostSession {
         el.click()?;
         let start = std::time::Instant::now();
         let deadline = Duration::from_millis(timeout_ms);
+        let bus = EventBus::global();
+        let mut last_seq = bus.seq();
         loop {
             if is_stopped() { return Err(GhostError::Stopped); }
-            let descriptors = self.describe_screen(None).await.unwrap_or_default();
-            let found = descriptors.iter().any(|d| d.name.contains(expected_text));
+            let probe = self.tree.find_by_name_fast(expected_text)
+                .map_err(GhostError::Core)?;
+            let found = probe.is_some();
             if found == appears {
+                tracing::debug!(elapsed_ms = start.elapsed().as_millis() as u64, "wait_for_text hit");
                 return Ok(());
             }
             if start.elapsed() >= deadline {
@@ -362,7 +561,14 @@ impl GhostSession {
                     ms: timeout_ms,
                 });
             }
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            let elapsed_ms = start.elapsed().as_millis() as u64;
+            let backoff = if elapsed_ms < 500 { 25 }
+                          else if elapsed_ms < 2000 { 75 }
+                          else { 150 };
+            match bus.wait_for_change(last_seq, backoff).await {
+                Ok(s) => { last_seq = s; }
+                Err(_) => {}
+            }
         }
     }
 
@@ -440,15 +646,24 @@ impl<'a> OpsDispatcher for SessionOpsDispatcher<'a> {
             Op::WaitForText { text, appears, timeout_ms } => {
                 let start = std::time::Instant::now();
                 let deadline = Duration::from_millis(*timeout_ms);
+                let bus = EventBus::global();
+                let mut last_seq = bus.seq();
                 loop {
-                    let descriptors = self.session.describe_screen(None).await
+                    let probe = self.session.tree.find_by_name_fast(text)
                         .map_err(|e| IntentError::OpFailed(e.to_string()))?;
-                    let found = descriptors.iter().any(|d| d.name.contains(text));
+                    let found = probe.is_some();
                     if found == *appears { break; }
                     if start.elapsed() >= deadline {
                         return Err(IntentError::OpFailed(format!("wait_for_text:{text}")));
                     }
-                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    let elapsed_ms = start.elapsed().as_millis() as u64;
+                    let backoff = if elapsed_ms < 500 { 25 }
+                                  else if elapsed_ms < 2000 { 75 }
+                                  else { 150 };
+                    match bus.wait_for_change(last_seq, backoff).await {
+                        Ok(s) => { last_seq = s; }
+                        Err(_) => {}
+                    }
                 }
             }
             Op::WaitUntil { condition, timeout_ms } => {
