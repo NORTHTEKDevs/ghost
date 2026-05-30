@@ -509,8 +509,12 @@ async fn handle_tool(
             Ok(json!({ "ok": true }))
         }
         "ghost_cache_stats" => {
-            let stats = session.cache_stats();
-            Ok(serde_json::to_value(stats).map_err(|e| e.to_string())?)
+            let uia_stats = session.cache_stats();
+            let loc_stats = session.locator_cache_stats();
+            Ok(json!({
+                "uia_mirror": serde_json::to_value(uia_stats).map_err(|e| e.to_string())?,
+                "locator": serde_json::to_value(loc_stats).map_err(|e| e.to_string())?,
+            }))
         }
         "ghost_cache_invalidate" => {
             session.cache_invalidate();
