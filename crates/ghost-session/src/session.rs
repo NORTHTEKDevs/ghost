@@ -605,6 +605,39 @@ impl GhostSession {
             .map_err(GhostError::Core)
     }
 
+    /// Atomic find → set_focus → action → report.
+    ///
+    /// Resolves the target element by `by`, sets UIA focus, then performs:
+    ///   - `action = "click"`: InvokePattern (focus-independent, preferred)
+    ///   - `action = "type"`: ValuePattern set (focus-independent, preferred)
+    ///
+    /// Returns `{ok, name, rect}` on success.
+    ///
+    /// This eliminates the cross-call focus race: instead of focus_window + find + click
+    /// in three separate MCP round-trips, one ghost_act call does them atomically.
+    pub async fn act(&self, by: By, action: &str, text: Option<&str>) -> Result<serde_json::Value> {
+        let el = self.find(by).await?;
+        // Best-effort UIA focus (non-fatal: InvokePattern/ValuePattern work without it)
+        let _ = el.set_focus();
+        let name = el.name();
+        let rect = el.bounding_rect();
+        match action {
+            "click" => {
+                el.click()?;
+            }
+            "type" => {
+                let t = text.ok_or_else(|| GhostError::Vision("ghost_act: action=type requires text param".into()))?;
+                el.type_text(t)?;
+            }
+            other => {
+                return Err(GhostError::Vision(format!("ghost_act: unknown action '{other}'; use click or type")));
+            }
+        }
+        let rect_json = rect.map(|(l, t, r, b)| serde_json::json!({"left": l, "top": t, "right": r, "bottom": b}))
+            .unwrap_or(serde_json::Value::Null);
+        Ok(serde_json::json!({ "ok": true, "name": name, "rect": rect_json }))
+    }
+
     /// Compile a JSON intent and run it through the FsmExecutor, dispatching ops against
     /// this session. See `ghost-intent::compiler` for intent schema.
     pub async fn execute_intent(&self, json: &str) -> Result<IntentResult> {
