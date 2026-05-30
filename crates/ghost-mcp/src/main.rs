@@ -164,10 +164,15 @@ async fn handle(
         }
         // MCP spec-compliant tools/call
         "tools/call" => {
-            let name = p["name"].as_str().ok_or("tools/call missing 'name'")?.to_string();
-            let args = p.get("arguments").cloned().unwrap_or(json!({}));
-            let out = dispatch_tool(session, &name, &args).await;
-            Ok(wrap_tool_result(out.map_err(|e| (-32000i64, e))))
+            match p["name"].as_str() {
+                None => Ok(wrap_tool_result(Err((-32602i64, "tools/call missing 'name'".to_string())))),
+                Some(name) => {
+                    let name = name.to_string();
+                    let args = p.get("arguments").cloned().unwrap_or(json!({}));
+                    let out = dispatch_tool(session, &name, &args).await;
+                    Ok(wrap_tool_result(out.map_err(|e| (-32000i64, e))))
+                }
+            }
         }
         // Legacy raw-name dispatch (comet-mcp and existing tests depend on this)
         other => dispatch_tool(session, other, &p).await,
@@ -219,6 +224,7 @@ async fn handle_tool(
                 let mut bytes = session.screenshot_region(rect, Some(max_dim), Some(jpeg_quality)).await.map_err(|e| e.to_string())?;
                 // Hard guard: if still too large (no foreground window → full screen), re-encode smaller
                 if bytes.len() > 1_500_000 {
+                    tracing::warn!(original_bytes = bytes.len(), "screenshot exceeded 1.5MB budget, re-encoding smaller");
                     bytes = session.screenshot_region(rect, Some(512), Some(60)).await.map_err(|e| e.to_string())?;
                 }
                 Ok(json!({ "jpeg_base64": base64_encode(&bytes), "size_bytes": bytes.len() }))
@@ -833,7 +839,7 @@ fn tools_schema() -> Value {
               "timeout_ms": { "type": "integer", "default": 5000 }
           }}},
         { "name": "ghost_act",
-          "description": "Atomic find → set UIA focus → perform action. Eliminates the cross-call focus race compared to separate ghost_focus_window + ghost_click calls. Returns {ok, name, rect}.",
+          "description": "Atomic find → set UIA focus → perform action. Eliminates the cross-call focus race compared to separate ghost_focus_window + ghost_click calls. Returns {ok, name, rect}. At least one of 'name' or 'role' must be supplied to identify the target element.",
           "inputSchema": { "type": "object", "required": ["action"], "properties": {
               "name": { "type": "string", "description": "Accessible name of target element (case-insensitive substring)" },
               "role": { "type": "string", "description": "Control type role: button, edit, checkbox, etc." },
@@ -1105,6 +1111,22 @@ mod tests {
         let v = wrap_tool_result(Err((-32000i64, "boom".to_string())));
         assert_eq!(v["isError"], json!(true));
         assert!(v["content"][0]["text"].as_str().unwrap().contains("boom"));
+    }
+
+    // HIGH-1: tools/call with missing 'name' must return content[] with isError, not a transport error
+    #[test]
+    fn tools_call_missing_name_returns_iserror_not_transport_err() {
+        // Simulate the None branch of the tools/call arm directly via wrap_tool_result
+        let result: std::result::Result<serde_json::Value, (i64, String)> =
+            Err((-32602i64, "tools/call missing 'name'".to_string()));
+        let v = wrap_tool_result(result);
+        // Must be a content[] envelope (Ok at transport level), not a JSON-RPC error
+        assert_eq!(v["isError"], json!(true), "isError must be true");
+        assert!(v["content"].as_array().is_some(), "content[] array must be present");
+        assert_eq!(v["content"][0]["type"], "text", "content[0].type must be 'text'");
+        assert!(v["content"][0]["text"].as_str()
+            .unwrap_or("").contains("'name'"),
+            "error text should mention missing 'name'");
     }
 
     // T0.2 — JSON-RPC errors have integer code
