@@ -799,17 +799,17 @@ fn tools_schema() -> Value {
           "description": "Read the current system-event sequence counter (foreground changes). Capture this before performing an action, then pass it as since_seq to ghost_wait_for_event for race-free event-driven waits.",
           "inputSchema": { "type": "object", "properties": {}}},
         { "name": "ghost_locate_by_description",
-          "description": "Vision fallback: locate a UI element by natural-language description (e.g. 'the blue Submit button'). Captures foreground window, asks Claude (Haiku by default) for center pixel. Requires ANTHROPIC_API_KEY env var. Set GHOST_VISION_MODEL to override model. Use only when UIA-based ghost_find misses (e.g. canvas-rendered apps, custom-drawn UIs).",
+          "description": "Vision fallback: locate a UI element by natural-language description (e.g. 'the blue Submit button'). Captures foreground window, asks vision model for center pixel. Requires NVIDIA_API_KEY (free at build.nvidia.com) or ANTHROPIC_API_KEY. Use GHOST_VISION_PROVIDER=nvidia|anthropic to override. Use only when UIA-based ghost_find misses (canvas-rendered UIs, custom-drawn controls). [required_env: NVIDIA_API_KEY or ANTHROPIC_API_KEY]",
           "inputSchema": { "type": "object", "required": ["description"], "properties": {
               "description": { "type": "string", "description": "Natural-language description of the target element" }
           }}},
         { "name": "ghost_click_by_description",
-          "description": "Vision fallback locate + click in one MCP round-trip. Same auth requirements as ghost_locate_by_description.",
+          "description": "Vision fallback locate + click in one MCP round-trip. Requires NVIDIA_API_KEY or ANTHROPIC_API_KEY (same as ghost_locate_by_description). [required_env: NVIDIA_API_KEY or ANTHROPIC_API_KEY]",
           "inputSchema": { "type": "object", "required": ["description"], "properties": {
               "description": { "type": "string" }
           }}},
         { "name": "ghost_type_by_description",
-          "description": "Vision fallback locate + click + type. For form fields with unstable UIA names.",
+          "description": "Vision fallback locate + click + type. For form fields with unstable UIA names. Requires NVIDIA_API_KEY or ANTHROPIC_API_KEY. [required_env: NVIDIA_API_KEY or ANTHROPIC_API_KEY]",
           "inputSchema": { "type": "object", "required": ["description","text"], "properties": {
               "description": { "type": "string" },
               "text": { "type": "string" }

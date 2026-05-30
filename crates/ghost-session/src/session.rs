@@ -49,6 +49,22 @@ impl GhostSession {
         init_com().map_err(GhostError::Core)?;
         register_emergency_stop().map_err(GhostError::Core)?;
         let tree = UiaTree::new().map_err(GhostError::Core)?;
+
+        // Log which vision providers are configured (presence only, never values).
+        let nvidia_ok = std::env::var("NVIDIA_API_KEY").is_ok();
+        let anthropic_ok = std::env::var("ANTHROPIC_API_KEY").is_ok();
+        let provider_override = std::env::var("GHOST_VISION_PROVIDER").ok();
+        if nvidia_ok || anthropic_ok {
+            eprintln!(
+                "[ghost-session] vision providers configured: NVIDIA_API_KEY={} ANTHROPIC_API_KEY={} GHOST_VISION_PROVIDER={}",
+                if nvidia_ok { "SET" } else { "unset" },
+                if anthropic_ok { "SET" } else { "unset" },
+                provider_override.as_deref().unwrap_or("unset (auto-detect)"),
+            );
+        } else {
+            eprintln!("[ghost-session] WARNING: no vision API key configured; ghost_locate_by_description / ghost_click_by_description / ghost_type_by_description will fail. Set NVIDIA_API_KEY or ANTHROPIC_API_KEY.");
+        }
+
         Ok(Self {
             timeout_ms: 5000,
             tree,
