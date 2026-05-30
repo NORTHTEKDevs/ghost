@@ -114,7 +114,12 @@ pub enum TierResult {
 ///
 /// All methods are `async` so that VLM calls can await without blocking.
 /// Sync tiers (Cache, UIA, OCR) just return immediately.
-pub trait GroundingTier: Send + Sync {
+///
+/// # COM safety
+/// The future returned by `locate` is NOT `Send`.  COM UIA objects are thread-affine
+/// (STA) and cannot be moved to another thread.  The grounding engine always runs on
+/// the session's block_on STA thread, so `Send` is not required.
+pub trait GroundingTier {
     /// The tier identifier.
     fn tier(&self) -> Tier;
 
@@ -123,7 +128,7 @@ pub trait GroundingTier: Send + Sync {
     fn locate<'a>(
         &'a self,
         target: &'a Target,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = TierResult> + Send + 'a>>;
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = TierResult> + 'a>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -132,19 +137,28 @@ pub trait GroundingTier: Send + Sync {
 
 /// The cascade engine.  Holds an ordered list of tier implementations and
 /// runs them in order until one succeeds with sufficient confidence.
-pub struct GroundingEngine {
+///
+/// The lifetime `'t` is the lifetime of the tier implementations.  For tiers
+/// that borrow session state (COM, cache, etc.) `'t` is tied to the session
+/// reference.  For stub tiers in tests `'t` can be `'static`.
+///
+/// # COM / thread safety
+/// `GroundingEngine` is intentionally NOT `Send`.  The UIA tiers hold COM pointers
+/// that are thread-affine (STA).  The engine always runs on the session's STA
+/// block_on thread; never move it to a different thread.
+pub struct GroundingEngine<'t> {
     /// Ordered list of tiers to try (first = highest priority).
-    tiers: Vec<Box<dyn GroundingTier>>,
+    tiers: Vec<Box<dyn GroundingTier + 't>>,
     /// Minimum confidence a tier result must have to be accepted.
     threshold: f32,
     /// Cumulative telemetry.
     stats: GroundingStats,
 }
 
-impl GroundingEngine {
+impl<'t> GroundingEngine<'t> {
     /// Create a new engine with the given tiers (in priority order) and a
     /// default confidence threshold of [`DEFAULT_THRESHOLD`].
-    pub fn new(tiers: Vec<Box<dyn GroundingTier>>) -> Self {
+    pub fn new(tiers: Vec<Box<dyn GroundingTier + 't>>) -> Self {
         Self {
             tiers,
             threshold: DEFAULT_THRESHOLD,
@@ -297,7 +311,7 @@ mod tests {
         fn locate<'a>(
             &'a self,
             _target: &'a Target,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = TierResult> + Send + 'a>> {
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = TierResult> + 'a>> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             let r = match &self.result {
                 TierResult::Hit(g) => TierResult::Hit(g.clone()),
