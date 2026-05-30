@@ -1,0 +1,29 @@
+[package]
+name = "ghost-ground"
+version = "0.1.0"
+edition = "2021"
+description = "Hybrid grounding cascade for Ghost — coordinate contract, types, parser, engine, and YOLO tier."
+
+[features]
+default = []
+# Enable the OmniParser-YOLO ONNX icon detector tier (tier 4).
+# Requires the `ort` ONNX Runtime crate and a model file at GHOST_YOLO_MODEL env path.
+# The default build (no --features ghost-ground/yolo) compiles without ort.
+yolo = ["dep:ort"]
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+# Optional: ONNX Runtime for YOLO tier. Only present when feature `yolo` is enabled.
+[dependencies.ort]
+version = "2.0.0-rc.12"
+optional = true
+default-features = false
+features = ["load-dynamic"]
+
+[dev-dependencies]
+serde_json = { workspace = true }
+tokio = { workspace = true }
