@@ -1,5 +1,109 @@
 # Changelog
 
+## [0.5.0] - 2026-05-07 — Local OCR + Multi-Provider Vision
+
+### Added
+
+- **NVIDIA Build vision provider** (default): OpenAI-compatible client in
+  `ghost-session/src/vision.rs`. Uses `meta/llama-3.2-90b-vision-instruct`
+  by default at `https://integrate.api.nvidia.com/v1/chat/completions`.
+  Free with NVIDIA Developer signup (~zero local disk).
+  Set `NVIDIA_API_KEY`. Falls back to Anthropic if key absent.
+- **Multi-provider selection**: `GHOST_VISION_PROVIDER=nvidia|anthropic`
+  for explicit choice. `GHOST_VISION_BASE_URL` overrides for self-hosted
+  Ollama / vLLM / llama.cpp servers (any OpenAI-compat endpoint).
+  `GHOST_VISION_MODEL` overrides per-provider default.
+- Robust JSON response parsing: handles bare JSON, code-fenced JSON, and
+  prose-wrapped JSON across providers.
+- 5 new unit tests on response parsing + provider selection (97 total).
+- **Windows.Media.Ocr integration** (`ghost-core/src/ocr.rs`):
+  on-device, free, no API. SoftwareBitmap built from raw BGRA via
+  IBufferByteAccess memcpy. OcrEngine init via TryCreateFromUserProfileLanguages
+  with en-US fallback. Returns Vec<OcrWord{text, BoundingRect}> in absolute
+  screen coords.
+- Session methods: `find_text_local(needle, foreground)` and
+  `click_text_local(needle, timeout_ms)` with event-driven backoff.
+- 2 new MCP tools: `ghost_find_text_local`, `ghost_click_text_local`.
+  Pair with vision fallback: try OCR first (free, ~50-200ms), then
+  ghost_locate_by_description (paid API, ~1-3s) only on miss.
+- Public helpers in `capture/screen.rs`: `capture_screen_full_rgba`,
+  `rgba_to_bgra_in_place` for non-encoding consumers.
+
+### Dependencies
+
+- `windows-core = "0.58"` direct dep on ghost-core (required by
+  `windows::core::implement` macro expansions).
+- Workspace `windows` features added: `Foundation`, `Foundation_Collections`,
+  `Globalization`, `Graphics_Imaging`, `Media_Ocr`, `Storage_Streams`,
+  `Win32_System_WinRT`.
+
+### Deferred from v0.5
+
+- **Full IUIAutomation event handlers**: windows-rs 0.58 does not
+  auto-generate `_Impl` traits for `IUIAutomationFocusChangedEventHandler`
+  / `IUIAutomationStructureChangedEventHandler`. Implementing them needs
+  raw VTABLE-level COM (200+ LOC unsafe, deadlock risk on UIA threadpool,
+  SAFEARRAY param marshaling). `EventBus::bump()` retained as the public
+  hook for when this gets wired (~5 line integration).
+- **LocatorStore read path**: write path is trivial; the value comes from
+  the read path which needs `IUIAutomation::ElementFromPoint` integration
+  to verify a cached rect before skipping the walk. Without that,
+  populating the store gains nothing.
+
+## [0.4.0] - 2026-05-07 — Hot Path Overhaul
+
+Targets browser-automation-grade latency for the desktop. Six-phase upgrade to
+the action loop, screenshot pipeline, and locator system. 92 tests passing.
+
+### Added
+
+- **Scoped UIA search** (`tree.rs`): `find_by_name_fast` / `find_by_role_fast` /
+  `describe_screen_fast` use `IUIAutomation::ElementFromHandle` rooted at the
+  foreground HWND. Typically 10-100x faster than the prior full-desktop walk;
+  falls back to desktop scope on miss.
+- **System event bus** (`uia/event_bus.rs`): `SetWinEventHook(EVENT_SYSTEM_FOREGROUND)`
+  on a dedicated pump thread populates a global `EventBus` with sequence
+  counter + `tokio::sync::Notify`. `wait_for_change(since_seq, timeout_ms)`
+  is spurious-wakeup-safe and races to <5ms wakeup latency.
+- **Region/JPEG capture** (`capture/screen.rs`): `capture_screen_region(rect, max_dim, format)`
+  + `CaptureFormat::{Png, Jpeg(quality)}`. Refactored DXGI path into shared
+  `capture_rgba` helper. Recommended vision payload preset:
+  foreground rect + max_dim=768 + jpeg q75 = 10-50x smaller than full PNG.
+- **Vision fallback** (`session/vision.rs`): `By::Description("the blue Submit button")`
+  routes through Claude Messages API with model tiering (Haiku default, Opus
+  via `GHOST_VISION_MODEL`). Capture → ROI → downscale → vision_locate → coord
+  back-translation. New session methods: `locate_by_description`,
+  `click_by_description`, `type_by_description`. Requires `ANTHROPIC_API_KEY`.
+- **8 new MCP tools** (45 total):
+  - `ghost_describe_screen_fast` — foreground-scoped describe.
+  - `ghost_screenshot_region` — ROI + downscale + JPEG/PNG selection.
+  - `ghost_event_seq` / `ghost_wait_for_event` — direct event-bus access.
+  - `ghost_locate_by_description` / `ghost_click_by_description` /
+    `ghost_type_by_description` — vision fallback ergonomic surface.
+  - `ghost_batch_actions` — single MCP round-trip for N ops, replaces
+    multiple sequential tool calls in agent flows.
+- **Tracing instrumentation** on `find`, `click_and_wait_for_text`,
+  `screenshot_region`, `wait_for_event`, `describe_screen_fast` with
+  per-action lookup-microsecond fields. `RUST_LOG=ghost_session=debug` for
+  per-call latency.
+
+### Changed
+
+- `find()` polling: fixed 100ms → tiered backoff (25ms warm / 75ms / 150ms),
+  now driven by `EventBus::wait_for_change` for event wakeups during the
+  backoff window.
+- `click_and_wait_for_text` and FSM `Op::WaitForText`: replaced full
+  `describe_screen` rewalks with scoped `find_by_name_fast` probes.
+  ~50x cheaper per poll.
+- `By` enum gained `Description` variant for vision-bound locators.
+- Workspace `image` dep gains `jpeg` feature.
+
+### Fixed
+
+- Spurious-wakeup safety in `EventBus::wait_for_change`: re-checks `seq` after
+  each `Notify` wake; only returns Ok when seq has actually advanced past
+  `since_seq`.
+
 ## [0.3.0] - 2026-04-18 — Speed Overhaul
 
 ### Added

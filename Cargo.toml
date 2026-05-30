@@ -18,7 +18,7 @@ tracing-subscriber = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 windows = { version = "0.58", features = [
     "Win32_Foundation",
     "Win32_System_Com",
@@ -27,6 +27,7 @@ windows = { version = "0.58", features = [
     "Win32_System_Memory",
     "Win32_System_Threading",
     "Win32_Security",
+    "Win32_System_WinRT",
     "Win32_UI_Accessibility",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_WindowsAndMessaging",
@@ -34,6 +35,12 @@ windows = { version = "0.58", features = [
     "Win32_Graphics_Dxgi_Common",
     "Win32_Graphics_Direct3D11",
     "Win32_Graphics_Direct3D",
+    "Foundation",
+    "Foundation_Collections",
+    "Globalization",
+    "Graphics_Imaging",
+    "Media_Ocr",
+    "Storage_Streams",
 ] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 sonic-rs = "0.3"

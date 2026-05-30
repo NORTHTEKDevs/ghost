@@ -21,6 +21,7 @@ windows = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 image = { workspace = true }
+reqwest = { workspace = true }
 
 [dev-dependencies]
 ghost-intent = { path = "../ghost-intent" }

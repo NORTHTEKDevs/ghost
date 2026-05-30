@@ -11,6 +11,7 @@ readme = "../../README.md"
 
 [dependencies]
 windows = { workspace = true }
+windows-core = "0.58"
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true }
