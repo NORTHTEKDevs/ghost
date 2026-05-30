@@ -39,11 +39,14 @@ pub const CONFIDENCE_VLM: f32 = 0.60;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LocateMode {
     /// Try only fast local tiers (Cache, UIA, OCR, YOLO). No cloud VLM.
-    /// The engine escalates to `Deliberate` automatically on miss or low confidence.
+    /// The engine escalates to VLM automatically on a full local miss.
     #[default]
     Instant,
-    /// Try all tiers including cloud VLM and reflection.
+    /// Try all tiers including cloud VLM and reflection from the first attempt.
     Deliberate,
+    /// Try only local tiers (Cache, UIA, OCR, YOLO). Never escalates to VLM.
+    /// Use when API cost must be zero (offline, cost-sensitive automation).
+    InstantOnly,
 }
 
 // ---------------------------------------------------------------------------
@@ -193,17 +196,18 @@ impl<'t> GroundingEngine<'t> {
         let result = self.run_tiers(target, mode).await;
 
         if let Some(grounded) = result {
-            if mode == LocateMode::Instant {
-                self.stats.instant_hits += 1;
-            } else {
-                self.stats.deliberate_hits += 1;
+            match mode {
+                LocateMode::Instant | LocateMode::InstantOnly => self.stats.instant_hits += 1,
+                LocateMode::Deliberate => self.stats.deliberate_hits += 1,
             }
             return Some(grounded);
         }
 
-        // Escalate from Instant → Deliberate automatically.
+        // MEDIUM-3/6/8: Escalate from Instant → VLM-ONLY (not a full re-run of all tiers).
+        // InstantOnly never escalates to avoid any VLM API cost.
         if mode == LocateMode::Instant {
-            let escalated = self.run_tiers(target, LocateMode::Deliberate).await;
+            tracing::warn!(?target, "instant local miss; escalating to VLM");
+            let escalated = self.run_vlm_only(target).await;
             if escalated.is_some() {
                 self.stats.deliberate_hits += 1;
                 return escalated;
@@ -214,13 +218,41 @@ impl<'t> GroundingEngine<'t> {
         None
     }
 
+    /// Run only the VLM tier (Instant-miss escalation path).
+    /// This ensures escalation never re-runs Cache/UIA/OCR that already missed.
+    async fn run_vlm_only(&mut self, target: &Target) -> Option<Grounded> {
+        for i in 0..self.tiers.len() {
+            if self.tiers[i].tier() != Tier::Vlm {
+                continue;
+            }
+            let start = Instant::now();
+            let result = self.tiers[i].locate(target).await;
+            let elapsed_ms = start.elapsed().as_millis() as u64;
+            match result {
+                TierResult::Hit(grounded) => {
+                    let hit = grounded.confidence >= self.threshold;
+                    self.stats.record_tier(Tier::Vlm, hit, elapsed_ms);
+                    if hit {
+                        return Some(grounded);
+                    }
+                }
+                TierResult::Miss => {
+                    self.stats.record_tier(Tier::Vlm, false, elapsed_ms);
+                }
+                TierResult::NotApplicable => {}
+            }
+        }
+        None
+    }
+
     /// Run all tiers that are active for `mode`, in order.
     async fn run_tiers(&mut self, target: &Target, mode: LocateMode) -> Option<Grounded> {
         for i in 0..self.tiers.len() {
             let tier_id = self.tiers[i].tier();
 
-            // Skip VLM in Instant mode.
-            if mode == LocateMode::Instant && tier_id == Tier::Vlm {
+            // Skip VLM in Instant and InstantOnly modes during the primary pass.
+            // (Instant escalates via run_vlm_only separately; InstantOnly never calls VLM.)
+            if matches!(mode, LocateMode::Instant | LocateMode::InstantOnly) && tier_id == Tier::Vlm {
                 continue;
             }
 
@@ -281,7 +313,7 @@ mod tests {
             let calls2 = calls.clone();
             let rect = (0, 0, 100, 50);
             let center = (50, 25);
-            let g = Grounded { rect, center, confidence, source: tier };
+            let g = Grounded { rect, center, confidence, source: tier, name: None };
             (
                 Box::new(StubTier { tier, result: TierResult::Hit(g), calls: calls2 }),
                 calls,
@@ -411,15 +443,54 @@ mod tests {
     #[test]
     fn instant_mode_skips_vlm() {
         // Proper test: VLM is the only real tier; Instant first pass should skip it.
-        // Escalation to Deliberate will then call it once.
+        // Escalation via run_vlm_only will then call it exactly once.
         let (vlm_only, vlm_only_calls) = StubTier::hit(Tier::Vlm, CONFIDENCE_VLM);
         let (cache_miss, _) = StubTier::miss(Tier::Cache);
         let mut eng = GroundingEngine::new(vec![cache_miss, vlm_only]);
         let _result = run(eng.locate(&name("btn"), LocateMode::Instant));
-        // Escalation will call VLM since all Instant tiers missed.
-        // Key assertion: at most 1 VLM call (from escalation), not 2.
+        // MEDIUM-3: escalation must call VLM exactly once (not twice from a full Deliberate re-run).
         let vlm_total = vlm_only_calls.load(Ordering::SeqCst);
-        assert!(vlm_total <= 1, "VLM called {vlm_total} times; should be at most 1 (from escalation)");
+        assert_eq!(vlm_total, 1, "VLM called {vlm_total} times; must be exactly 1 (escalation only, not re-run)");
+    }
+
+    // MEDIUM-3: Instant miss → exactly one extra VLM attempt, not a full tier re-run.
+    #[test]
+    fn instant_miss_escalates_vlm_only_not_full_rerun() {
+        let (cache_miss, cache_calls) = StubTier::miss(Tier::Cache);
+        let (uia_miss, uia_calls) = StubTier::miss(Tier::Uia);
+        let (vlm_hit, vlm_calls) = StubTier::hit(Tier::Vlm, CONFIDENCE_VLM);
+        let mut engine = GroundingEngine::new(vec![cache_miss, uia_miss, vlm_hit]);
+        let result = run(engine.locate(&name("btn"), LocateMode::Instant));
+        assert!(result.is_some(), "should escalate and find via VLM");
+        // Cache and UIA each called once (in the Instant pass), not twice.
+        assert_eq!(cache_calls.load(Ordering::SeqCst), 1, "Cache must be called exactly once");
+        assert_eq!(uia_calls.load(Ordering::SeqCst), 1, "UIA must be called exactly once");
+        // VLM called exactly once (escalation only).
+        assert_eq!(vlm_calls.load(Ordering::SeqCst), 1, "VLM must be called exactly once during escalation");
+    }
+
+    // MEDIUM-7: InstantOnly never escalates to VLM, even on full miss.
+    #[test]
+    fn instant_only_never_calls_vlm() {
+        let (cache_miss, _) = StubTier::miss(Tier::Cache);
+        let (uia_miss, _) = StubTier::miss(Tier::Uia);
+        let (vlm_hit, vlm_calls) = StubTier::hit(Tier::Vlm, CONFIDENCE_VLM);
+        let mut engine = GroundingEngine::new(vec![cache_miss, uia_miss, vlm_hit]);
+        let result = run(engine.locate(&name("btn"), LocateMode::InstantOnly));
+        assert!(result.is_none(), "InstantOnly should return None on local miss — no VLM escalation");
+        assert_eq!(vlm_calls.load(Ordering::SeqCst), 0, "VLM must never be called in InstantOnly mode");
+    }
+
+    // MEDIUM-7: InstantOnly returns hit when a local tier succeeds.
+    #[test]
+    fn instant_only_local_hit_returns_result() {
+        let (uia_hit, uia_calls) = StubTier::hit(Tier::Uia, CONFIDENCE_UIA);
+        let (vlm_hit, vlm_calls) = StubTier::hit(Tier::Vlm, CONFIDENCE_VLM);
+        let mut engine = GroundingEngine::new(vec![uia_hit, vlm_hit]);
+        let result = run(engine.locate(&name("btn"), LocateMode::InstantOnly)).unwrap();
+        assert_eq!(result.source, Tier::Uia);
+        assert_eq!(uia_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(vlm_calls.load(Ordering::SeqCst), 0, "VLM must not be called when UIA hit in InstantOnly");
     }
 
     #[test]
