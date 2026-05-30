@@ -1,5 +1,6 @@
 use crate::error::CoreError;
 use crate::uia::element::{role_id_to_name, ElementDescriptor};
+use crate::uia::tree::role_alias_matches;
 use windows::Win32::UI::Accessibility::*;
 
 /// Walker that uses a single `IUIAutomationCacheRequest` to batch property fetches.
@@ -96,6 +97,7 @@ impl<'a> CachedTreeWalker<'a> {
     }
 
     /// Server-side role match. Maps the role string to a control-type id and searches.
+    /// Alias expansion: "tab" matches "tabitem", "list" matches "listitem" (same as live path).
     pub fn find_by_role(&self, role: &str) -> Result<Option<ElementDescriptor>, CoreError> {
         let target = role.to_lowercase();
         unsafe {
@@ -104,7 +106,7 @@ impl<'a> CachedTreeWalker<'a> {
                 .GetRootElement()
                 .map_err(|e| CoreError::ComInit(format!("GetRootElement: {e}")))?;
             let all = self.walk(&root)?;
-            Ok(all.into_iter().find(|d| d.role == target))
+            Ok(all.into_iter().find(|d| d.role == target || role_alias_matches(&target, &d.role)))
         }
     }
 }
