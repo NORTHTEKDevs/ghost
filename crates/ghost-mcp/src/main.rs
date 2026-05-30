@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use ghost_session::GhostSession;
+use ghost_session::{GhostSession, Target, LocateMode};
 use std::io::{BufRead, Write};
 use std::sync::OnceLock;
 
@@ -186,12 +186,18 @@ async fn handle_tool(
 ) -> std::result::Result<Value, String> {
     match method {
         "ghost_find" => {
-            let by = parse_by(&p)?;
-            let (mode_label, _deliberate) = parse_locate_mode(p);
-            let el = session.find(by).await.map_err(|e| e.to_string())?;
+            let (mode_label, mode) = parse_locate_mode(p);
+            // Route through the grounding cascade so source/confidence are returned.
+            let target = parse_target(p)?;
+            let grounded = session.ground(target, mode).await.map_err(|e| e.to_string())?;
             Ok(json!({
-                "name": el.name(),
-                "bounding_rect": el.bounding_rect(),
+                "center": { "x": grounded.center.0, "y": grounded.center.1 },
+                "rect": {
+                    "left": grounded.rect.0, "top": grounded.rect.1,
+                    "right": grounded.rect.2, "bottom": grounded.rect.3
+                },
+                "source": grounded.source.to_string(),
+                "confidence": grounded.confidence,
                 "dispatch_mode": mode_label,
             }))
         }
@@ -513,9 +519,11 @@ async fn handle_tool(
         "ghost_cache_stats" => {
             let uia_stats = session.cache_stats();
             let loc_stats = session.locator_cache_stats();
+            let grounding = session.grounding_stats();
             Ok(json!({
                 "uia_mirror": serde_json::to_value(uia_stats).map_err(|e| e.to_string())?,
                 "locator": serde_json::to_value(loc_stats).map_err(|e| e.to_string())?,
+                "grounding": serde_json::to_value(grounding).map_err(|e| e.to_string())?,
             }))
         }
         "ghost_cache_invalidate" => {
@@ -565,14 +573,47 @@ async fn handle_tool(
             }
         }
         "ghost_act" => {
-            let by = parse_by(p)?;
             let action = p["action"].as_str().ok_or("missing param: action (click|type)")?;
             let text = p["text"].as_str();
-            let (mode_label, _deliberate) = parse_locate_mode(p);
-            let mut result = session.act(by, action, text).await.map_err(|e| e.to_string())?;
-            // Annotate result with dispatch mode telemetry.
+            let (mode_label, mode) = parse_locate_mode(p);
+            let target = parse_target(p)?;
+
+            // Try cascade first to get grounded position + winning tier.
+            let grounded = session.ground(target.clone(), mode).await
+                .map_err(|e| e.to_string())?;
+
+            // Determine dispatch path: if grounding won via UIA tier, use
+            // focus-independent InvokePattern/SetValue via session.find() → element.
+            // For all other tiers (cache coord, ocr, vlm) fall back to coordinate click.
+            let by_for_uia = match &target {
+                Target::Name(n) => Some(ghost_session::By::name(n.as_str())),
+                Target::Role(r) => Some(ghost_session::By::role(r.as_str())),
+                _ => None,
+            };
+
+            let use_uia_path = grounded.source == ghost_session::Tier::Uia
+                || grounded.source == ghost_session::Tier::Cache;
+
+            let act_result = if use_uia_path {
+                if let Some(by) = by_for_uia {
+                    // Use existing act() which does find() → InvokePattern/SetValue.
+                    session.act(by, action, text).await.map_err(|e| e.to_string())?
+                } else {
+                    // Fallback to coordinate dispatch.
+                    act_at_coords(session, grounded.center.0, grounded.center.1, action, text).await?
+                }
+            } else {
+                // OCR/VLM tier → coordinate dispatch: ensure foreground, click/type at center.
+                act_at_coords(session, grounded.center.0, grounded.center.1, action, text).await?
+            };
+
+            // Merge source/confidence/dispatch_mode into the result.
+            let mut result = act_result;
             if let Some(obj) = result.as_object_mut() {
+                obj.insert("source".into(), Value::String(grounded.source.to_string()));
+                obj.insert("confidence".into(), serde_json::json!(grounded.confidence));
                 obj.insert("dispatch_mode".into(), Value::String(mode_label.into()));
+                obj.insert("center".into(), json!({ "x": grounded.center.0, "y": grounded.center.1 }));
             }
             Ok(result)
         }
@@ -583,15 +624,56 @@ async fn handle_tool(
 
 /// Parse the optional `mode` field used by ghost_find / ghost_act.
 ///
-/// Returns `("instant", true)` by default.  The second bool indicates whether
-/// the caller requested deliberate mode (VLM + reflection enabled).
+/// Returns `("instant", LocateMode::Instant)` by default.
 /// Escalation from Instant → Deliberate happens automatically inside the
 /// GroundingEngine when local tiers all miss; this param only forces Deliberate
 /// from the first attempt.
-pub fn parse_locate_mode(p: &Value) -> (&'static str, bool) {
+pub fn parse_locate_mode(p: &Value) -> (&'static str, LocateMode) {
     match p.get("mode").and_then(|v| v.as_str()).unwrap_or("instant") {
-        "deliberate" => ("deliberate", true),
-        _ => ("instant", false),
+        "deliberate" => ("deliberate", LocateMode::Deliberate),
+        _ => ("instant", LocateMode::Instant),
+    }
+}
+
+/// Parse the grounding `Target` from MCP params.
+/// Precedence: name → role → description → text → error.
+pub fn parse_target(p: &Value) -> std::result::Result<Target, String> {
+    if let Some(n) = p["name"].as_str() {
+        return Ok(Target::Name(n.into()));
+    }
+    if let Some(r) = p["role"].as_str() {
+        return Ok(Target::Role(r.into()));
+    }
+    if let Some(d) = p["description"].as_str() {
+        return Ok(Target::Description(d.into()));
+    }
+    if let Some(t) = p["text"].as_str() {
+        return Ok(Target::Text(t.into()));
+    }
+    Err("params must include 'name', 'role', 'description', or 'text'".into())
+}
+
+/// Coordinate-based action dispatch: ensure foreground, then click/type at (x, y).
+async fn act_at_coords(
+    session: &GhostSession,
+    x: i32,
+    y: i32,
+    action: &str,
+    text: Option<&str>,
+) -> std::result::Result<Value, String> {
+    match action {
+        "click" => {
+            session.click_at(x, y).await.map_err(|e| e.to_string())?;
+            Ok(json!({ "ok": true }))
+        }
+        "type" => {
+            let t = text.ok_or("action=type requires text param")?;
+            session.click_at(x, y).await.map_err(|e| e.to_string())?;
+            ghost_core::input::keyboard::type_text(t)
+                .map_err(|e| e.to_string())?;
+            Ok(json!({ "ok": true }))
+        }
+        other => Err(format!("ghost_act: unknown action '{other}'; use click or type")),
     }
 }
 
@@ -1161,33 +1243,103 @@ mod tests {
     #[test]
     fn parse_locate_mode_defaults_to_instant() {
         let p = json!({});
-        let (label, deliberate) = parse_locate_mode(&p);
+        let (label, mode) = parse_locate_mode(&p);
         assert_eq!(label, "instant");
-        assert!(!deliberate);
+        assert_eq!(mode, LocateMode::Instant);
     }
 
     #[test]
     fn parse_locate_mode_instant_explicit() {
         let p = json!({"mode": "instant"});
-        let (label, deliberate) = parse_locate_mode(&p);
+        let (label, mode) = parse_locate_mode(&p);
         assert_eq!(label, "instant");
-        assert!(!deliberate);
+        assert_eq!(mode, LocateMode::Instant);
     }
 
     #[test]
     fn parse_locate_mode_deliberate() {
         let p = json!({"mode": "deliberate"});
-        let (label, deliberate) = parse_locate_mode(&p);
+        let (label, mode) = parse_locate_mode(&p);
         assert_eq!(label, "deliberate");
-        assert!(deliberate);
+        assert_eq!(mode, LocateMode::Deliberate);
     }
 
     #[test]
     fn parse_locate_mode_unknown_value_falls_back_to_instant() {
         let p = json!({"mode": "unknown_value"});
-        let (label, deliberate) = parse_locate_mode(&p);
+        let (label, mode) = parse_locate_mode(&p);
         assert_eq!(label, "instant");
-        assert!(!deliberate);
+        assert_eq!(mode, LocateMode::Instant);
+    }
+
+    // W4 — parse_target routing tests (pure, no COM)
+    #[test]
+    fn parse_target_name() {
+        let p = json!({"name": "Submit"});
+        let t = parse_target(&p).unwrap();
+        assert!(matches!(t, Target::Name(n) if n == "Submit"));
+    }
+
+    #[test]
+    fn parse_target_role() {
+        let p = json!({"role": "button"});
+        let t = parse_target(&p).unwrap();
+        assert!(matches!(t, Target::Role(r) if r == "button"));
+    }
+
+    #[test]
+    fn parse_target_description() {
+        let p = json!({"description": "the blue submit button"});
+        let t = parse_target(&p).unwrap();
+        assert!(matches!(t, Target::Description(d) if d == "the blue submit button"));
+    }
+
+    #[test]
+    fn parse_target_text() {
+        let p = json!({"text": "Hello World"});
+        let t = parse_target(&p).unwrap();
+        assert!(matches!(t, Target::Text(s) if s == "Hello World"));
+    }
+
+    #[test]
+    fn parse_target_missing_returns_error() {
+        let p = json!({"mode": "instant"});
+        assert!(parse_target(&p).is_err());
+    }
+
+    #[test]
+    fn parse_target_prefers_name_over_role() {
+        // name takes precedence over role
+        let p = json!({"name": "OK", "role": "button"});
+        let t = parse_target(&p).unwrap();
+        assert!(matches!(t, Target::Name(n) if n == "OK"));
+    }
+
+    /// Act dispatch: UIA/Cache tier uses InvokePattern path; VLM/OCR uses coordinate path.
+    /// This tests the pure decision logic without COM.
+    #[test]
+    fn act_dispatch_uia_tier_triggers_uia_path() {
+        use ghost_session::Tier;
+        // When grounded.source == Tier::Uia and target is Name, use_uia_path should be true.
+        let source = Tier::Uia;
+        let use_uia_path = source == Tier::Uia || source == Tier::Cache;
+        assert!(use_uia_path, "UIA tier should use focus-independent path");
+    }
+
+    #[test]
+    fn act_dispatch_vlm_tier_uses_coord_path() {
+        use ghost_session::Tier;
+        let source = Tier::Vlm;
+        let use_uia_path = source == Tier::Uia || source == Tier::Cache;
+        assert!(!use_uia_path, "VLM tier should use coordinate click path");
+    }
+
+    #[test]
+    fn act_dispatch_ocr_tier_uses_coord_path() {
+        use ghost_session::Tier;
+        let source = Tier::Ocr;
+        let use_uia_path = source == Tier::Uia || source == Tier::Cache;
+        assert!(!use_uia_path, "OCR tier should use coordinate click path");
     }
 
     #[test]

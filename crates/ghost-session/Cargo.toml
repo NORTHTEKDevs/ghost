@@ -13,6 +13,7 @@ readme = "../../README.md"
 ghost-core = { path = "../ghost-core" }
 ghost-cache = { path = "../ghost-cache" }
 ghost-intent = { path = "../ghost-intent" }
+ghost-ground = { path = "../ghost-ground" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

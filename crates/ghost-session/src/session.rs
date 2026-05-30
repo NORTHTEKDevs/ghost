@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::cell::RefCell;
 use std::time::Duration;
 use tokio::time::timeout;
 use async_trait::async_trait;
@@ -25,9 +26,12 @@ use ghost_core::{
                focus_window as core_focus_window, set_window_state},
     },
 };
+use ghost_ground::engine::{GroundingEngine, GroundingStats, LocateMode};
+use ghost_ground::types::{Grounded, Target, Tier};
 use crate::{
     locator::By,
     error::{GhostError, Result},
+    tiers::{CacheTier, UiaTier, OcrTier, VlmTier, foreground_hwnd},
 };
 
 pub struct Region;
@@ -47,6 +51,10 @@ pub struct GhostSession {
     /// Reflection ring buffer: records recent grounding/action failures so the
     /// next VLM prompt can be prefixed with a negative hint.
     pub reflection: crate::reflection::ReflectionBuffer,
+    /// Cumulative grounding cascade telemetry. RefCell because `ground()` takes `&self`
+    /// (MCP handlers only have &GhostSession) but needs to mutate stats. Safe because
+    /// all session calls run on the single STA tokio block_on thread.
+    grounding_stats: RefCell<GroundingStats>,
     /// Keeps COM initialized for the session lifetime — calls CoUninitialize on drop.
     _com_guard: ComGuard,
 }
@@ -80,6 +88,7 @@ impl GhostSession {
             cache: Arc::new(UiaCache::new()),
             locator_cache: LocatorCache::new(),
             reflection: crate::reflection::ReflectionBuffer::default(),
+            grounding_stats: RefCell::new(GroundingStats::default()),
             _com_guard: com_guard,
         })
     }
@@ -389,6 +398,84 @@ impl GhostSession {
         })
         .await
         .map_err(|e| GhostError::Core(ghost_core::error::CoreError::WorkerPanic(e.to_string())))?
+    }
+
+    // -----------------------------------------------------------------------
+    // Grounding cascade (W2)
+    // -----------------------------------------------------------------------
+
+    /// Run the four-tier grounding cascade (Cache → UIA → OCR → VLM) for `target`.
+    ///
+    /// `mode = Instant` skips VLM; the engine auto-escalates to Deliberate on miss.
+    /// `mode = Deliberate` tries VLM from the start.
+    ///
+    /// Returns `Grounded` (rect + center + confidence + source) on success.
+    /// Updates cumulative telemetry via the session's `grounding_stats` RefCell.
+    ///
+    /// # COM safety
+    /// Must be called on the STA thread (the tokio block_on loop). CacheTier and
+    /// UiaTier touch COM directly; they never cross thread boundaries here.
+    #[tracing::instrument(skip(self), fields(target = ?target, ?mode))]
+    pub async fn ground(&self, target: Target, mode: LocateMode) -> Result<Grounded> {
+        // Coords bypass all tiers.
+        if let Target::Coords(x, y) = target {
+            return Ok(Grounded::from_point((x, y), 1.0, Tier::Cache));
+        }
+
+        let hwnd = foreground_hwnd();
+
+        // Build tiers fresh per call: lifetimes borrow from &self which is valid
+        // for the entire async scope below (no Send needed, same STA thread).
+        let cache = CacheTier {
+            locator_cache: &self.locator_cache,
+            tree: &self.tree,
+            hwnd,
+        };
+        let uia = UiaTier::new(&self.tree, &self.locator_cache, hwnd);
+        let ocr = OcrTier { session: self };
+        let vlm = VlmTier { session: self };
+
+        let tiers: Vec<Box<dyn ghost_ground::engine::GroundingTier + '_>> = vec![
+            Box::new(cache),
+            Box::new(uia),
+            Box::new(ocr),
+            Box::new(vlm),
+        ];
+
+        // Engine is local to this call — no need to store it.
+        let mut engine = GroundingEngine::new(tiers);
+
+        let result = engine.locate(&target, mode).await;
+
+        // Merge stats into session's cumulative stats.
+        {
+            let call_stats = engine.stats();
+            let mut sess_stats = self.grounding_stats.borrow_mut();
+            sess_stats.instant_hits += call_stats.instant_hits;
+            sess_stats.deliberate_hits += call_stats.deliberate_hits;
+            sess_stats.total_misses += call_stats.total_misses;
+            for (tier_key, ts) in &call_stats.by_tier {
+                let entry = sess_stats.by_tier
+                    .entry(tier_key.clone())
+                    .or_default();
+                entry.attempts += ts.attempts;
+                entry.hits += ts.hits;
+                entry.total_ms += ts.total_ms;
+            }
+        }
+
+        // Also bump cache seq so wait_until conditions on cache_seq progress.
+        self.cache.bump_seq();
+
+        result.ok_or_else(|| GhostError::ElementNotFound {
+            query: format!("{target:?}"),
+            screenshot: None,
+        })
+    }
+
+    /// Snapshot current grounding cascade telemetry (across all `ground()` calls this session).
+    pub fn grounding_stats(&self) -> GroundingStats {
+        self.grounding_stats.borrow().clone()
     }
 
     /// Local OCR + click. Polls until needle appears or timeout. Event-driven backoff.

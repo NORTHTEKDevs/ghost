@@ -18,6 +18,17 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 
 # Optional: ONNX Runtime for YOLO tier. Only present when feature `yolo` is enabled.
+#
+# BLOCKER (W5): No ort 2.x rc version compiles on this box:
+#   rc.4–rc.8: size_t / fn-pointer option chain errors (old OrtApiBase ABI).
+#   rc.9:      same fn-pointer errors.
+#   rc.10:     API renamed (Environment → environment, SessionBuilder rework).
+#   rc.12:     VitisAI EP stub references field absent from OrtApi on this ORT build.
+#
+# The yolo.rs impl targets the ort 2.0.0-rc.4/5 API (Environment + SessionBuilder).
+# To unblock: update yolo.rs to the rc.12 / stable 2.x API and switch to
+# default-features=false + features=["download-binaries", "ndarray"]; or wait for
+# ort 2.0 stable.  Until then the feature is gated and the default build is clean.
 [dependencies.ort]
 version = "2.0.0-rc.12"
 optional = true
