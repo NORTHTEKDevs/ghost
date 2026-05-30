@@ -85,21 +85,45 @@ unsafe extern "system" fn win_event_proc(
     _hook: HWINEVENTHOOK,
     _event: u32,
     _hwnd: HWND,
-    _id_object: i32,
+    id_object: i32,
     _id_child: i32,
     _id_thread: u32,
     _time: u32,
 ) {
+    // HIGH-4: filter high-frequency noise before bumping the bus seq.
+    //
+    // Only react to OBJID_CLIENT (-4) and OBJID_WINDOW (0).
+    // OBJID_CARET (-8) fires on every caret blink / cursor move — suppress it.
+    // EVENT_SYSTEM_FOREGROUND and EVENT_OBJECT_FOCUS always deliver OBJID_WINDOW/OBJID_CLIENT
+    // so they are unaffected by this guard.
+    const OBJID_CLIENT: i32 = -4;
+    const OBJID_WINDOW: i32 = 0;
+    if id_object != OBJID_CLIENT && id_object != OBJID_WINDOW {
+        return;
+    }
+    // LOW-11: use the public bump() method instead of duplicating the inline seq+notify.
     if let Some(&bus) = GLOBAL_BUS.get() {
-        bus.seq.fetch_add(1, Ordering::Relaxed);
-        bus.notify.notify_waiters();
+        bus.bump();
+    }
+}
+
+/// LOW-10: RAII wrapper that calls UnhookWinEvent on drop.
+/// The pump thread runs for the process lifetime so teardown is academic,
+/// but the wrapper ensures hooks are released if the thread ever exits cleanly.
+struct HookGuard(HWINEVENTHOOK);
+impl Drop for HookGuard {
+    fn drop(&mut self) {
+        use windows::Win32::UI::Accessibility::UnhookWinEvent;
+        if !self.0.is_invalid() {
+            unsafe { let _ = UnhookWinEvent(self.0); }
+        }
     }
 }
 
 fn pump_thread(_bus: &'static EventBus) {
     unsafe {
         // Hook 1: foreground window changes (was already present).
-        let _hook_fg = SetWinEventHook(
+        let _hook_fg = HookGuard(SetWinEventHook(
             EVENT_SYSTEM_FOREGROUND,
             EVENT_SYSTEM_FOREGROUND,
             None,
@@ -107,11 +131,11 @@ fn pump_thread(_bus: &'static EventBus) {
             0,
             0,
             WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS,
-        );
+        ));
 
         // Hook 2: focus changes within the active window (e.g., tab, click-to-field).
         // EVENT_OBJECT_FOCUS fires when keyboard focus moves to any accessible object.
-        let _hook_focus = SetWinEventHook(
+        let _hook_focus = HookGuard(SetWinEventHook(
             EVENT_OBJECT_FOCUS,
             EVENT_OBJECT_FOCUS,
             None,
@@ -119,11 +143,12 @@ fn pump_thread(_bus: &'static EventBus) {
             0,
             0,
             WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS,
-        );
+        ));
 
         // Hook 3: object state changes (e.g., button enabled/disabled, checkbox toggled,
         // dialog open/close). Fires on STATE_SYSTEM_* changes via EVENT_OBJECT_STATECHANGE.
-        let _hook_state = SetWinEventHook(
+        // HIGH-4: OBJID_CARET filtered in win_event_proc to suppress caret-blink flooding.
+        let _hook_state = HookGuard(SetWinEventHook(
             EVENT_OBJECT_STATECHANGE,
             EVENT_OBJECT_STATECHANGE,
             None,
@@ -131,7 +156,7 @@ fn pump_thread(_bus: &'static EventBus) {
             0,
             0,
             WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS,
-        );
+        ));
 
         let mut msg = MSG::default();
         loop {
