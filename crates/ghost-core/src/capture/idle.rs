@@ -58,6 +58,9 @@ impl IdleDetector {
 
     /// Wait until `stable_frames` consecutive captures yield identical downsampled hashes,
     /// or return `Err(CoreError::JobTimeout)` after `timeout_ms` elapses.
+    ///
+    /// Uses `capture_screen_downsample_raw(8)` (8x8 = 256 bytes) instead of full PNG encoding.
+    /// This avoids the PNG encoder overhead (~1-5ms per frame) on every stability poll.
     pub async fn wait_stable(&self, stable_frames: u32, timeout_ms: u64) -> Result<(), CoreError> {
         let start = Instant::now();
         let deadline = Duration::from_millis(timeout_ms);
@@ -68,8 +71,9 @@ impl IdleDetector {
             if start.elapsed() >= deadline {
                 return Err(CoreError::JobTimeout);
             }
-            let png = crate::capture::screen::capture_screen()?;
-            let hash = hash_frame(&png);
+            // Hash a raw 8x8 downsample of the DXGI surface — no PNG encoding.
+            let raw = crate::capture::screen::capture_screen_downsample_raw(8)?;
+            let hash = hash_frame(&raw);
             if Some(hash) == last_hash {
                 count += 1;
                 if count >= stable_frames {
@@ -110,6 +114,64 @@ mod tests {
         for &b in &out {
             assert_eq!(b, 128);
         }
+    }
+
+    /// Two synthetic 8x8 RGBA buffers that are identical should hash identically.
+    #[test]
+    fn identical_raw_buffers_hash_the_same() {
+        let a = vec![42u8; 8 * 8 * 4];
+        let b = a.clone();
+        assert_eq!(hash_frame(&a), hash_frame(&b));
+    }
+
+    /// A single-bit difference in the raw buffer must produce a different hash.
+    #[test]
+    fn different_raw_buffers_hash_differently() {
+        let a = vec![0u8; 8 * 8 * 4];
+        let mut b = a.clone();
+        b[0] = 1;
+        assert_ne!(hash_frame(&a), hash_frame(&b));
+    }
+
+    /// Simulate "stable": if we hash the same buffer N times, all hashes are equal.
+    #[test]
+    fn stable_detection_logic_on_identical_frames() {
+        let frame = vec![100u8; 8 * 8 * 4];
+        let hash = hash_frame(&frame);
+        let mut last: Option<[u8; 32]> = None;
+        let mut count = 0u32;
+        for _ in 0..3 {
+            if Some(hash) == last {
+                count += 1;
+            } else {
+                count = 1;
+                last = Some(hash);
+            }
+        }
+        assert!(count >= 3, "identical frames should be stable after 3 iterations");
+    }
+
+    /// Simulate "changed": alternating different frames must never reach stable.
+    #[test]
+    fn changed_detection_logic_on_alternating_frames() {
+        let frame_a = vec![0u8; 8 * 8 * 4];
+        let frame_b = vec![255u8; 8 * 8 * 4];
+        let hash_a = hash_frame(&frame_a);
+        let hash_b = hash_frame(&frame_b);
+        let frames = [hash_a, hash_b, hash_a, hash_b];
+        let mut last: Option<[u8; 32]> = None;
+        let mut max_count = 0u32;
+        let mut count = 0u32;
+        for h in frames {
+            if Some(h) == last {
+                count += 1;
+            } else {
+                count = 1;
+                last = Some(h);
+            }
+            max_count = max_count.max(count);
+        }
+        assert!(max_count < 3, "alternating frames should never reach stable_frames=3");
     }
 
     #[tokio::test]
