@@ -26,6 +26,12 @@ pub enum GhostError {
 
     #[error("Intent error: {0}")]
     Intent(String),
+
+    #[error("Vision error: {0}")]
+    Vision(String),
+
+    #[error("Configuration error: {0}")]
+    Config(String),
 }
 
 impl From<ghost_cache::error::CacheError> for GhostError {

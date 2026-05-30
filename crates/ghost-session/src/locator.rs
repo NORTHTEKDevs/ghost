@@ -4,6 +4,9 @@ use std::fmt;
 pub enum By {
     Name(String),
     Role(String),
+    /// Natural-language description for vision fallback. Tried only if UIA misses.
+    /// Example: "the blue Submit button at the bottom of the form"
+    Description(String),
 }
 
 impl By {
@@ -14,6 +17,10 @@ impl By {
     pub fn role(r: impl Into<String>) -> Self {
         By::Role(r.into())
     }
+
+    pub fn description(d: impl Into<String>) -> Self {
+        By::Description(d.into())
+    }
 }
 
 impl fmt::Display for By {
@@ -21,6 +28,7 @@ impl fmt::Display for By {
         match self {
             By::Name(n) => write!(f, "name={}", n),
             By::Role(r) => write!(f, "role={}", r),
+            By::Description(d) => write!(f, "description={}", d),
         }
     }
 }
