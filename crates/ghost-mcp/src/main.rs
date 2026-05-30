@@ -208,8 +208,21 @@ async fn handle_tool(
             Ok(json!({ "ok": true }))
         }
         "ghost_screenshot" => {
-            let png = session.screenshot(ghost_session::session::Region::full()).await.map_err(|e| e.to_string())?;
-            Ok(json!({ "png_base64": base64_encode(&png) }))
+            // Default: foreground window crop, max 768px, JPEG 75 quality.
+            // Pass "full": true for the full-screen lossless PNG.
+            if p.get("full").and_then(|v| v.as_bool()).unwrap_or(false) {
+                let png = session.screenshot(ghost_session::session::Region::full()).await.map_err(|e| e.to_string())?;
+                Ok(json!({ "png_base64": base64_encode(&png), "size_bytes": png.len() }))
+            } else {
+                let (rect_mode, max_dim, jpeg_quality) = screenshot_default_opts(&p);
+                let rect = if rect_mode { session.foreground_window_rect() } else { None };
+                let mut bytes = session.screenshot_region(rect, Some(max_dim), Some(jpeg_quality)).await.map_err(|e| e.to_string())?;
+                // Hard guard: if still too large (no foreground window → full screen), re-encode smaller
+                if bytes.len() > 1_500_000 {
+                    bytes = session.screenshot_region(rect, Some(512), Some(60)).await.map_err(|e| e.to_string())?;
+                }
+                Ok(json!({ "jpeg_base64": base64_encode(&bytes), "size_bytes": bytes.len() }))
+            }
         }
         "ghost_screenshot_region" => {
             let rect = if p.get("rect").is_some() {
@@ -544,6 +557,15 @@ async fn handle_tool(
 }
 
 
+/// Returns (foreground_mode, max_dim, jpeg_quality) for ghost_screenshot default behaviour.
+/// Exposed as a pure function so it can be unit-tested without a live session.
+fn screenshot_default_opts(p: &Value) -> (bool, u32, u8) {
+    let foreground = p.get("foreground").and_then(|v| v.as_bool()).unwrap_or(true);
+    let max_dim = p.get("max_dim").and_then(|v| v.as_u64()).unwrap_or(768) as u32;
+    let quality = p.get("jpeg_quality").and_then(|v| v.as_u64()).map(|q| q.min(100) as u8).unwrap_or(75);
+    (foreground, max_dim, quality)
+}
+
 fn tools_schema() -> Value {
     json!([
         { "name": "ghost_find",
@@ -569,8 +591,10 @@ fn tools_schema() -> Value {
               "x": { "type": "integer" }, "y": { "type": "integer" }
           }}},
         { "name": "ghost_screenshot",
-          "description": "Capture the primary monitor as a base64-encoded PNG (full screen, lossless).",
-          "inputSchema": { "type": "object", "properties": {} }},
+          "description": "Capture a screenshot. Default: foreground window, max 768px longest edge, JPEG quality 75 — typically 20-100KB. Pass \"full\": true for a full-screen lossless PNG (1-5MB). Always includes size_bytes.",
+          "inputSchema": { "type": "object", "properties": {
+              "full": { "type": "boolean", "description": "If true, capture the full screen as lossless PNG. Default false (foreground+JPEG)." }
+          }}},
         { "name": "ghost_screenshot_region",
           "description": "Capture a screen region with optional downscale and PNG/JPEG encoding. For vision payloads, use foreground=true + max_dim=768 + jpeg_quality=75 (10-50x smaller than full PNG, 3-5x faster vision inference).",
           "inputSchema": { "type": "object", "properties": {
@@ -1031,6 +1055,26 @@ mod tests {
         assert_eq!(resp["protocolVersion"], "2024-11-05");
         assert!(resp["capabilities"]["tools"].is_object());
         assert_eq!(resp["serverInfo"]["name"], "ghost");
+    }
+
+    // T0.5 — screenshot defaults
+    #[test]
+    fn screenshot_opts_defaults_are_foreground_768_75() {
+        let p = json!({});
+        let (fg, dim, qual) = screenshot_default_opts(&p);
+        assert!(fg, "default should be foreground=true");
+        assert_eq!(dim, 768);
+        assert_eq!(qual, 75);
+    }
+
+    #[test]
+    fn screenshot_opts_full_mode_flag_is_separate() {
+        let p = json!({"full": true});
+        // full flag is checked directly; screenshot_default_opts is used only for non-full path
+        let (fg, dim, qual) = screenshot_default_opts(&p);
+        assert!(fg);
+        assert_eq!(dim, 768);
+        assert_eq!(qual, 75);
     }
 
     // T0.1 — tools/call wrapping
