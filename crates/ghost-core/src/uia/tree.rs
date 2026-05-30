@@ -243,6 +243,21 @@ impl UiaTree {
         }
         Ok(())
     }
+
+    /// Return the UIA element at the given screen coordinates.
+    /// Used by the locator cache to validate cached rects: if the element at the
+    /// center of the cached rect still matches the expected name/role, the cache
+    /// hit is valid. Returns None if no element is found (minimized window, etc).
+    pub fn element_from_point(&self, x: i32, y: i32) -> Result<Option<UiaElement>, CoreError> {
+        use windows::Win32::Foundation::POINT;
+        unsafe {
+            let pt = POINT { x, y };
+            match self.automation.ElementFromPoint(pt) {
+                Ok(el) => Ok(Some(UiaElement(el))),
+                Err(_) => Ok(None),
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

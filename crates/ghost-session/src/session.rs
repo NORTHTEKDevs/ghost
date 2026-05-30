@@ -3,6 +3,8 @@ use std::time::Duration;
 use tokio::time::timeout;
 use async_trait::async_trait;
 use ghost_cache::uia_mirror::{UiaCache, SnapshotDelta, Snapshot, CacheStats};
+use ghost_cache::{LocatorCache, LocatorCacheStats};
+use ghost_cache::locator_cache::LocatorKey;
 use ghost_intent::compiler::{CompiledIntent, IntentCompiler, Op};
 use ghost_intent::error::IntentError;
 use ghost_intent::executor::{FsmExecutor, IntentResult, IntentState, OpsDispatcher};
@@ -40,6 +42,8 @@ pub struct GhostSession {
     timeout_ms: u64,
     tree: UiaTree,
     cache: Arc<UiaCache>,
+    /// In-session in-memory locator cache. Validated via ElementFromPoint on hit.
+    locator_cache: LocatorCache,
     /// Keeps COM initialized for the session lifetime — calls CoUninitialize on drop.
     _com_guard: ComGuard,
 }
@@ -71,6 +75,7 @@ impl GhostSession {
             timeout_ms: 5000,
             tree,
             cache: Arc::new(UiaCache::new()),
+            locator_cache: LocatorCache::new(),
             _com_guard: com_guard,
         })
     }
@@ -85,9 +90,14 @@ impl GhostSession {
         self.cache.snapshot_delta(window, since_seq).map_err(Into::into)
     }
 
-    /// Return cache statistics (snapshots served, history hit rate, etc).
+    /// Return UIA mirror cache statistics (snapshots served, history hit rate, etc).
     pub fn cache_stats(&self) -> CacheStats {
         self.cache.stats()
+    }
+
+    /// Return locator cache hit/miss/invalidation statistics.
+    pub fn locator_cache_stats(&self) -> LocatorCacheStats {
+        self.locator_cache.stats()
     }
 
     /// Invalidate the UIA cache. Next describe_screen_delta returns a full snapshot.
@@ -151,7 +161,28 @@ impl GhostSession {
         self
     }
 
+    /// Build the locator cache key for a `By` variant.
+    fn by_to_cache_key(by: &By) -> Option<LocatorKey> {
+        match by {
+            By::Name(n) => Some(LocatorKey::new("*", n.as_str())),
+            By::Role(r) => Some(LocatorKey::new(r.as_str(), "*")),
+            By::Description(_) => None,
+        }
+    }
+
     /// Find the first element matching the locator, retrying until timeout.
+    ///
+    /// Fast path (T1.5): on each attempt, checks the in-session locator cache
+    /// first. If the cache has a rect for this (role, name) key, validates it
+    /// via `IUIAutomation::ElementFromPoint(center_of_rect)`. If the returned
+    /// element's name/role still matches, returns it immediately without walking
+    /// the UIA tree. On mismatch, invalidates the cache entry and falls through
+    /// to the normal walk.
+    ///
+    /// After a successful walk, upserts the result into the locator cache and
+    /// advances `cache_seq` (via `apply_snapshot`) so `wait_until` conditions
+    /// on `cache_seq` actually progress.
+    ///
     /// Tries the foreground window subtree first (fast path); only falls back
     /// to a full desktop walk if the target isn't in the focused window.
     /// Polling backs off: 25ms while warm, 75ms after 1s, 150ms after 3s.
@@ -169,6 +200,7 @@ impl GhostSession {
         let action = by.to_string();
         let ms = self.timeout_ms;
         let started = std::time::Instant::now();
+        let cache_key = Self::by_to_cache_key(&by);
 
         let bus = EventBus::global();
         let result = timeout(Duration::from_millis(ms), async {
@@ -179,6 +211,41 @@ impl GhostSession {
                     return Err(GhostError::Stopped);
                 }
                 let lookup_started = std::time::Instant::now();
+
+                // --- Locator cache fast path ---
+                if let Some(ref key) = cache_key {
+                    if let Some(hit) = self.locator_cache.lookup(key) {
+                        let (cx, cy) = hit.center;
+                        // Validate: element at that point must still match.
+                        let validated = match self.tree.element_from_point(cx, cy).map_err(GhostError::Core)? {
+                            Some(el) => {
+                                let matches = match &by {
+                                    By::Name(n) => el.name().to_lowercase().contains(&n.to_lowercase()),
+                                    By::Role(r) => {
+                                        let role = ghost_core::uia::element::role_id_to_name(el.control_type());
+                                        role == r.as_str()
+                                    }
+                                    By::Description(_) => false,
+                                };
+                                if matches { Some(el) } else { None }
+                            }
+                            None => None,
+                        };
+                        match validated {
+                            Some(el) => {
+                                tracing::debug!(attempt, "locator cache HIT");
+                                return Ok(crate::GhostElement::new(el));
+                            }
+                            None => {
+                                // Stale cache entry — invalidate and fall through to walk.
+                                tracing::debug!("locator cache STALE, invalidating");
+                                self.locator_cache.invalidate(key);
+                            }
+                        }
+                    }
+                }
+
+                // --- Normal UIA tree walk ---
                 let found = match &by {
                     By::Name(n) => self.tree.find_by_name_fast(n).map_err(GhostError::Core)?,
                     By::Role(r) => self.tree.find_by_role_fast(r).map_err(GhostError::Core)?,
@@ -187,6 +254,18 @@ impl GhostSession {
                 let lookup_us = lookup_started.elapsed().as_micros();
                 if let Some(el) = found {
                     tracing::debug!(attempt, lookup_us, "find hit");
+                    // Upsert rect into locator cache and advance cache_seq.
+                    if let Some(ref key) = cache_key {
+                        if let Some(rect) = el.bounding_rect() {
+                            self.locator_cache.upsert(key.clone(), (rect.left, rect.top, rect.right, rect.bottom));
+                            // Advance cache_seq so wait_until conditions on it progress.
+                            // apply_snapshot bumps current.seq by 1.
+                            self.cache.apply_snapshot(ghost_cache::uia_mirror::Snapshot {
+                                seq: 0,
+                                nodes: vec![],
+                            });
+                        }
+                    }
                     return Ok(crate::GhostElement::new(el));
                 }
                 let elapsed_ms = started.elapsed().as_millis() as u64;
@@ -644,6 +723,7 @@ impl GhostSession {
     /// This eliminates the cross-call focus race: instead of focus_window + find + click
     /// in three separate MCP round-trips, one ghost_act call does them atomically.
     pub async fn act(&self, by: By, action: &str, text: Option<&str>) -> Result<serde_json::Value> {
+        // find() already upserts into the locator cache on success.
         let el = self.find(by).await?;
         // Best-effort UIA focus (non-fatal: InvokePattern/ValuePattern work without it)
         let _ = el.set_focus();
