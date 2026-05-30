@@ -55,6 +55,12 @@ impl GhostElement {
     pub fn get_text(&self) -> String {
         self.inner.get_text()
     }
+
+    /// Set UIA focus to this element. Used before keyboard actions to ensure
+    /// input lands in the right control.
+    pub fn set_focus(&self) -> Result<()> {
+        self.inner.set_focus().map_err(GhostError::Core)
+    }
 }
 
 // Note: GhostElement wraps live COM objects (IUIAutomationElement) which require a

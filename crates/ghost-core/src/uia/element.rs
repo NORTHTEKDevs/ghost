@@ -51,6 +51,17 @@ impl UiaElement {
         unsafe { self.0.CurrentIsEnabled().map(|b| b.as_bool()).unwrap_or(false) }
     }
 
+    /// Set UIA focus to this element via IUIAutomationElement::SetFocus().
+    pub fn set_focus(&self) -> Result<(), crate::error::CoreError> {
+        unsafe {
+            self.0.SetFocus()
+                .map_err(|e| crate::error::CoreError::Win32 {
+                    code: e.code().0 as u32,
+                    context: "IUIAutomationElement::SetFocus",
+                })
+        }
+    }
+
     /// Get the current text value. Tries ValuePattern first, falls back to element name.
     pub fn get_text(&self) -> String {
         use windows::Win32::UI::Accessibility::{

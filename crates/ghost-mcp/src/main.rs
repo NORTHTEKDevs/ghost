@@ -552,6 +552,12 @@ async fn handle_tool(
                 Err(_) => Ok(json!({ "seq": session.event_seq(), "timed_out": true })),
             }
         }
+        "ghost_act" => {
+            let by = parse_by(p)?;
+            let action = p["action"].as_str().ok_or("missing param: action (click|type)")?;
+            let text = p["text"].as_str();
+            session.act(by, action, text).await.map_err(|e| e.to_string())
+        }
         _ => Err(format!("unknown method: {}", method)),
     }
 }
@@ -825,6 +831,14 @@ fn tools_schema() -> Value {
           "inputSchema": { "type": "object", "properties": {
               "since_seq": { "type": "integer", "description": "Last seen event seq (from ghost_event_seq); waits for any seq > this" },
               "timeout_ms": { "type": "integer", "default": 5000 }
+          }}},
+        { "name": "ghost_act",
+          "description": "Atomic find → set UIA focus → perform action. Eliminates the cross-call focus race compared to separate ghost_focus_window + ghost_click calls. Returns {ok, name, rect}.",
+          "inputSchema": { "type": "object", "required": ["action"], "properties": {
+              "name": { "type": "string", "description": "Accessible name of target element (case-insensitive substring)" },
+              "role": { "type": "string", "description": "Control type role: button, edit, checkbox, etc." },
+              "action": { "type": "string", "enum": ["click", "type"], "description": "Action to perform after finding the element" },
+              "text": { "type": "string", "description": "Text to type (required when action=type)" }
           }}}
     ])
 }
@@ -992,7 +1006,7 @@ mod tests {
     fn tools_schema_has_expected_tool_count() {
         let tools = tools_schema();
         let list = tools.as_array().unwrap();
-        assert_eq!(list.len(), 47, "expected 47 tools (27 pre-v0.3.0 + 10 v0.3.0 + 5 v0.4 perf + 3 v0.4 vision + 2 v0.5 ocr)");
+        assert_eq!(list.len(), 48, "expected 48 tools (47 pre-v0.6.0 + 1 ghost_act)");
     }
 
     #[test]
