@@ -864,8 +864,27 @@ impl GhostSession {
                 let t = text.ok_or_else(|| GhostError::Vision("ghost_act: action=type requires text param".into()))?;
                 el.type_text(t)?;
             }
+            // HIGH-2: no clean UIA pattern for these — resolve element bounding-rect center
+            // and dispatch coordinate equivalents (same path as OCR/VLM tier).
+            "double_click" | "right_click" | "hover" => {
+                let center = rect.map(|(l, t, r, b)| ((l + r) / 2, (t + b) / 2))
+                    .ok_or_else(|| GhostError::Vision(format!("ghost_act: action={action} requires element with bounding rect")))?;
+                let (cx, cy) = center;
+                match action {
+                    "double_click" => {
+                        self.double_click_at(cx, cy).await?;
+                    }
+                    "right_click" => {
+                        self.right_click_at(cx, cy).await?;
+                    }
+                    "hover" => {
+                        self.hover(cx, cy).await?;
+                    }
+                    _ => unreachable!(),
+                }
+            }
             other => {
-                return Err(GhostError::Vision(format!("ghost_act: unknown action '{other}'; use click or type")));
+                return Err(GhostError::Vision(format!("ghost_act: unknown action '{other}'; use click|type|double_click|right_click|hover")));
             }
         }
 
