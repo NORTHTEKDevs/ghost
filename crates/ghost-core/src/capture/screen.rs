@@ -46,6 +46,53 @@ pub fn capture_screen_full_rgba() -> Result<(Vec<u8>, usize, usize), CoreError> 
     capture_rgba(guard.as_ref().unwrap())
 }
 
+/// Capture the primary monitor, downsample to `target_dim x target_dim` cells,
+/// and return the raw averaged BGRA bytes (target_dim * target_dim * 4 bytes).
+/// This is the fast path for idle detection and perceptual hashing: no PNG encode needed.
+/// The BGRA channel order is preserved from the DXGI surface to avoid an extra swap.
+pub fn capture_screen_downsample_raw(target_dim: usize) -> Result<Vec<u8>, CoreError> {
+    let mut guard = CAPTURE_STATE.lock().unwrap();
+    if guard.is_none() {
+        *guard = Some(init_capture_state()?);
+    }
+    let (rgba, w, h) = capture_rgba(guard.as_ref().unwrap())?;
+    // Downsample to target_dim x target_dim by averaging cells.
+    let dim = target_dim.max(1);
+    let channels = 4usize;
+    let mut out = vec![0u8; dim * dim * channels];
+    if w == 0 || h == 0 {
+        return Ok(out);
+    }
+    let cell_w = (w / dim).max(1);
+    let cell_h = (h / dim).max(1);
+    for by in 0..dim {
+        for bx in 0..dim {
+            let mut acc = [0u64; 4];
+            let mut n: u64 = 0;
+            for y in (by * cell_h)..(((by + 1) * cell_h).min(h)) {
+                for x in (bx * cell_w)..(((bx + 1) * cell_w).min(w)) {
+                    let idx = (y * w + x) * channels;
+                    if idx + 3 < rgba.len() {
+                        acc[0] += rgba[idx] as u64;
+                        acc[1] += rgba[idx + 1] as u64;
+                        acc[2] += rgba[idx + 2] as u64;
+                        acc[3] += rgba[idx + 3] as u64;
+                        n += 1;
+                    }
+                }
+            }
+            let dst = (by * dim + bx) * channels;
+            if n > 0 {
+                out[dst]     = (acc[0] / n) as u8;
+                out[dst + 1] = (acc[1] / n) as u8;
+                out[dst + 2] = (acc[2] / n) as u8;
+                out[dst + 3] = (acc[3] / n) as u8;
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// In-place RGBA -> BGRA channel swap. Used by WinRT OCR which requires Bgra8.
 pub fn rgba_to_bgra_in_place(buf: &mut [u8]) {
     let mut i = 0;
