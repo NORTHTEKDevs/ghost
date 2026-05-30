@@ -15,7 +15,7 @@ use crate::error::CoreError;
 /// Check if a searched role matches an element role through defined aliases.
 /// By::Role("tab") matches both "tab" and "tabitem".
 /// By::Role("list") matches both "list" and "listitem".
-fn role_alias_matches(searched: &str, el_role: &str) -> bool {
+pub(crate) fn role_alias_matches(searched: &str, el_role: &str) -> bool {
     match searched {
         "tab" => el_role == "tabitem",
         "list" => el_role == "listitem",
@@ -292,22 +292,45 @@ pub fn list_windows() -> Result<Vec<WindowInfo>, CoreError> {
 
 /// Attempt to bring `hwnd` to the foreground using the AttachThreadInput workaround.
 /// Returns Ok(true) if foreground confirmed within `timeout_ms`, Ok(false) if timed out.
+///
+/// MEDIUM-5 fixes:
+/// (a) GetForegroundWindow() called once, value reused — eliminates the double-call TOCTOU.
+/// (b) AttachThreadInput only called when thread IDs differ, and only detached for threads
+///     that were actually attached — prevents the self-attach failure that ERROR_INVALID_PARAMETER.
 pub fn ensure_foreground(hwnd: HWND, timeout_ms: u64) -> Result<bool, CoreError> {
     unsafe {
-        if GetForegroundWindow() == hwnd {
+        // Single call to GetForegroundWindow — reuse throughout to avoid TOCTOU.
+        let fg = GetForegroundWindow();
+        if fg == hwnd {
             return Ok(true);
         }
-        let fg = GetForegroundWindow();
         let cur_tid = GetCurrentThreadId();
         let fg_tid = GetWindowThreadProcessId(fg, None);
         let tgt_tid = GetWindowThreadProcessId(hwnd, None);
-        let _ = AttachThreadInput(cur_tid, fg_tid, TRUE);
-        let _ = AttachThreadInput(cur_tid, tgt_tid, TRUE);
+
+        // Only attach when IDs differ — AttachThreadInput fails (E_INVALIDARG) on self-attach.
+        let attached_fg = fg_tid != cur_tid && fg_tid != 0;
+        let attached_tgt = tgt_tid != cur_tid && tgt_tid != 0 && tgt_tid != fg_tid;
+
+        if attached_fg {
+            let _ = AttachThreadInput(cur_tid, fg_tid, TRUE);
+        }
+        if attached_tgt {
+            let _ = AttachThreadInput(cur_tid, tgt_tid, TRUE);
+        }
+
         let _ = ShowWindow(hwnd, SW_SHOW);
         let _ = BringWindowToTop(hwnd);
         let _ = SetForegroundWindow(hwnd);
-        let _ = AttachThreadInput(cur_tid, fg_tid, FALSE);
-        let _ = AttachThreadInput(cur_tid, tgt_tid, FALSE);
+
+        // Detach only threads we attached.
+        if attached_fg {
+            let _ = AttachThreadInput(cur_tid, fg_tid, FALSE);
+        }
+        if attached_tgt {
+            let _ = AttachThreadInput(cur_tid, tgt_tid, FALSE);
+        }
+
         let start = std::time::Instant::now();
         while start.elapsed().as_millis() < timeout_ms as u128 {
             if GetForegroundWindow() == hwnd {
@@ -385,5 +408,21 @@ mod tests {
     fn role_alias_list_matches_listitem() {
         assert!(role_alias_matches("list", "listitem"));
         assert!(!role_alias_matches("list", "menu"));
+    }
+
+    // LOW-9: ensure_foreground must not panic on the current foreground window.
+    // Marked ignore because it requires a live desktop session.
+    #[test]
+    #[ignore]
+    fn ensure_foreground_current_fg_returns_ok_true() {
+        // Fetch the current foreground window; ensure_foreground should return Ok(true) immediately.
+        let hwnd = unsafe { GetForegroundWindow() };
+        if hwnd.is_invalid() {
+            // No foreground window (headless CI) — skip rather than fail.
+            return;
+        }
+        let result = ensure_foreground(hwnd, 0);
+        assert!(result.is_ok(), "ensure_foreground must not panic or error: {:?}", result);
+        assert_eq!(result.unwrap(), true, "already-foreground window should return Ok(true)");
     }
 }

@@ -10,7 +10,19 @@ pub use event_bus::EventBus;
 pub use tree::{UiaTree, WindowInfo, WindowState, list_windows, focus_window, set_window_state};
 
 use crate::error::CoreError;
-use windows::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
+use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
+
+/// RAII guard that calls CoUninitialize on drop, balancing a successful CoInitializeEx call.
+/// Store in GhostSession to tie COM lifetime to the session lifetime.
+pub struct ComGuard {
+    _private: (),
+}
+
+impl Drop for ComGuard {
+    fn drop(&mut self) {
+        unsafe { CoUninitialize() };
+    }
+}
 
 /// Initialize COM in Single-Threaded Apartment (STA) mode.
 ///
@@ -24,9 +36,11 @@ use windows::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
 ///     to worker threads; all UIA calls originate from the MCP main loop thread.
 ///
 /// Must be called once per thread before using UIA.
-pub fn init_com() -> Result<(), CoreError> {
+/// Returns a `ComGuard` whose Drop calls CoUninitialize, balancing this call.
+pub fn init_com() -> Result<ComGuard, CoreError> {
     unsafe {
         CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok()
-            .map_err(|e| CoreError::ComInit(format!("CoInitializeEx(STA) failed: {e:?}")))
+            .map_err(|e| CoreError::ComInit(format!("CoInitializeEx(STA) failed: {e:?}")))?;
+        Ok(ComGuard { _private: () })
     }
 }
