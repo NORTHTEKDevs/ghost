@@ -646,6 +646,7 @@ dependencies = [
 name = "ghost-ground"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "ort",
  "serde",
  "serde_json",
@@ -699,6 +700,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "windows",
 ]
 
 [[package]]

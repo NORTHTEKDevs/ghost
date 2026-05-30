@@ -18,8 +18,8 @@
 //! ```
 //! Prints an accuracy summary to stdout.
 
-use ghost_ground::parser::{parse_vlm_response, ParsedAction, CoordSpace};
-use ghost_ground::types::{norm_to_px, px_to_norm, CoordNorm};
+use ghost_ground::parser::{parse_vlm_response, ParsedAction};
+use ghost_ground::types::{norm_to_px, px_to_norm};
 use serde::Deserialize;
 use std::path::PathBuf;
 
