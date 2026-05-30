@@ -161,11 +161,16 @@ impl GhostSession {
         self
     }
 
-    /// Build the locator cache key for a `By` variant.
+    /// Build the locator cache key for a `By` variant, scoped to the current foreground HWND.
+    /// MEDIUM-6: include hwnd so entries from different windows can't collide.
     fn by_to_cache_key(by: &By) -> Option<LocatorKey> {
+        let hwnd = unsafe {
+            let h = windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow();
+            if h.is_invalid() { 0isize } else { h.0 as isize }
+        };
         match by {
-            By::Name(n) => Some(LocatorKey::new("*", n.as_str())),
-            By::Role(r) => Some(LocatorKey::new(r.as_str(), "*")),
+            By::Name(n) => Some(LocatorKey::with_hwnd(hwnd, "*", n.as_str())),
+            By::Role(r) => Some(LocatorKey::with_hwnd(hwnd, r.as_str(), "*")),
             By::Description(_) => None,
         }
     }
@@ -220,7 +225,8 @@ impl GhostSession {
                         let validated = match self.tree.element_from_point(cx, cy).map_err(GhostError::Core)? {
                             Some(el) => {
                                 let matches = match &by {
-                                    By::Name(n) => el.name().to_lowercase().contains(&n.to_lowercase()),
+                                    // MEDIUM-7: equality for cache validation — contains can match wrong element
+                                    By::Name(n) => el.name().to_lowercase() == n.to_lowercase(),
                                     By::Role(r) => {
                                         let role = ghost_core::uia::element::role_id_to_name(el.control_type());
                                         role == r.as_str()
@@ -258,12 +264,9 @@ impl GhostSession {
                     if let Some(ref key) = cache_key {
                         if let Some(rect) = el.bounding_rect() {
                             self.locator_cache.upsert(key.clone(), (rect.left, rect.top, rect.right, rect.bottom));
-                            // Advance cache_seq so wait_until conditions on it progress.
-                            // apply_snapshot bumps current.seq by 1.
-                            self.cache.apply_snapshot(ghost_cache::uia_mirror::Snapshot {
-                                seq: 0,
-                                nodes: vec![],
-                            });
+                            // HIGH-3: bump_seq instead of apply_snapshot(empty) — advancing seq
+                            // without corrupting nodes or archiving the snapshot.
+                            self.cache.bump_seq();
                         }
                     }
                     return Ok(crate::GhostElement::new(el));
@@ -406,8 +409,12 @@ impl GhostSession {
     }
 
     /// Capture the primary monitor as PNG bytes.
+    /// HIGH-2: runs on a spawn_blocking thread so the DXGI wait (up to 50ms) never
+    /// blocks a tokio worker. D3D11/DXGI objects are MTA-safe behind the global Mutex.
     pub async fn screenshot(&self, _region: Region) -> Result<Vec<u8>> {
-        capture_screen().map_err(GhostError::Core)
+        tokio::task::spawn_blocking(|| capture_screen().map_err(GhostError::Core))
+            .await
+            .map_err(|e| GhostError::Core(ghost_core::error::CoreError::WorkerPanic(e.to_string())))?
     }
 
     /// Capture a screen region with optional downscale and JPEG/PNG encoding.
@@ -415,6 +422,7 @@ impl GhostSession {
     /// max_dim: longest-edge size after downscale; None = no downscale.
     /// jpeg_quality: 0-100; None = PNG output.
     /// For vision payloads, prefer rect=focused_window_bbox(), max_dim=Some(768), jpeg_quality=Some(75).
+    /// HIGH-2: runs on a spawn_blocking thread for the same reason as screenshot().
     #[tracing::instrument(skip(self), fields(rect = ?rect, max_dim, jpeg_quality))]
     pub async fn screenshot_region(
         &self,
@@ -426,7 +434,11 @@ impl GhostSession {
             Some(q) => ghost_core::capture::CaptureFormat::Jpeg(q),
             None => ghost_core::capture::CaptureFormat::Png,
         };
-        ghost_core::capture::capture_screen_region(rect, max_dim, format).map_err(GhostError::Core)
+        tokio::task::spawn_blocking(move || {
+            ghost_core::capture::capture_screen_region(rect, max_dim, format).map_err(GhostError::Core)
+        })
+        .await
+        .map_err(|e| GhostError::Core(ghost_core::error::CoreError::WorkerPanic(e.to_string())))?
     }
 
     /// Bounding rect of the foreground window: (left, top, right, bottom) or None if no window focused.
@@ -730,9 +742,13 @@ impl GhostSession {
         let name = el.name();
         let rect = el.bounding_rect();
 
-        // Capture BEFORE frame (raw RGBA of element rect, or foreground window).
-        let target_rect = rect.or_else(|| self.foreground_window_rect());
-        let before_capture = capture_region_raw(target_rect).ok();
+        // MEDIUM-5: snapshot the foreground HWND before the action to detect focus changes.
+        let fg_before = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
+
+        // LOW-9: use foreground_window_rect() for both captures so the region stays valid
+        // even if the element moves after the action.
+        let capture_rect = self.foreground_window_rect();
+        let before_capture = capture_region_raw(capture_rect).ok();
 
         match action {
             "click" => {
@@ -750,11 +766,15 @@ impl GhostSession {
         // Capture AFTER frame and compute screen-delta verification.
         // Small delay to allow the action to render.
         tokio::time::sleep(Duration::from_millis(50)).await;
-        let after_capture = capture_region_raw(target_rect).ok();
+        // LOW-9: re-query foreground rect for after-capture (element may have moved/closed).
+        let after_capture_rect = self.foreground_window_rect();
+        let after_capture = capture_region_raw(after_capture_rect).ok();
 
         let verification = match (before_capture, after_capture) {
             (Some((before, bw, bh)), Some((after, aw, ah))) if bw == aw && bh == ah => {
-                let fg_ok = self.foreground_window_rect().is_some();
+                // MEDIUM-5: fg_ok = same window stayed focused, not just any window.
+                let fg_after = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
+                let fg_ok = !fg_before.is_invalid() && fg_before == fg_after;
                 Some(compute_verification(&before, &after, bw, bh, fg_ok))
             }
             _ => None,
