@@ -190,6 +190,8 @@ async fn handle_tool(
             // Route through the grounding cascade so source/confidence are returned.
             let target = parse_target(p)?;
             let grounded = session.ground(target, mode).await.map_err(|e| e.to_string())?;
+            // HIGH-2: include name field (Some for Cache/UIA tiers, null for OCR/VLM/YOLO).
+            // LOW-9: has_rect indicates whether rect is meaningful (false for point-only tiers).
             Ok(json!({
                 "center": { "x": grounded.center.0, "y": grounded.center.1 },
                 "rect": {
@@ -199,6 +201,8 @@ async fn handle_tool(
                 "source": grounded.source.to_string(),
                 "confidence": grounded.confidence,
                 "dispatch_mode": mode_label,
+                "name": grounded.name,
+                "has_rect": grounded.has_rect(),
             }))
         }
         "ghost_click" => {
@@ -599,8 +603,11 @@ async fn handle_tool(
                     // Use existing act() which does find() → InvokePattern/SetValue.
                     session.act(by, action, text).await.map_err(|e| e.to_string())?
                 } else {
-                    // Fallback to coordinate dispatch.
-                    act_at_coords(session, grounded.center.0, grounded.center.1, action, text).await?
+                    // LOW (act invariant guard): this branch is currently unreachable —
+                    // use_uia_path is only true when source is UIA/Cache, both of which
+                    // require a Name/Role target, which always produces a by_for_uia.
+                    debug_assert!(false, "use_uia_path is true but by_for_uia is None — target/tier mismatch");
+                    return Err("internal error: UIA dispatch path selected but no UIA locator available".into());
                 }
             } else {
                 // OCR/VLM tier → coordinate dispatch: ensure foreground, click/type at center.
@@ -631,6 +638,7 @@ async fn handle_tool(
 pub fn parse_locate_mode(p: &Value) -> (&'static str, LocateMode) {
     match p.get("mode").and_then(|v| v.as_str()).unwrap_or("instant") {
         "deliberate" => ("deliberate", LocateMode::Deliberate),
+        "instant_only" => ("instant_only", LocateMode::InstantOnly),
         _ => ("instant", LocateMode::Instant),
     }
 }
@@ -653,7 +661,11 @@ pub fn parse_target(p: &Value) -> std::result::Result<Target, String> {
     Err("params must include 'name', 'role', 'description', or 'text'".into())
 }
 
-/// Coordinate-based action dispatch: ensure foreground, then click/type at (x, y).
+/// Coordinate-based action dispatch: ensure foreground under point, then click/type at (x, y).
+///
+/// HIGH-1: `focus_window_under_point` is called before any input to ensure SendInput
+/// keystrokes land in the correct window (the one containing the target coordinates),
+/// not in whichever window currently happens to have focus.
 async fn act_at_coords(
     session: &GhostSession,
     x: i32,
@@ -661,6 +673,14 @@ async fn act_at_coords(
     action: &str,
     text: Option<&str>,
 ) -> std::result::Result<Value, String> {
+    // Bring the window under the target point to the foreground BEFORE any input.
+    // Tolerant: if focus cannot be confirmed we warn and proceed rather than hard-failing.
+    match ghost_core::uia::tree::focus_window_under_point(x, y) {
+        Ok(true) => {} // foreground confirmed
+        Ok(false) => tracing::warn!(x, y, "focus_window_under_point: could not confirm foreground; proceeding"),
+        Err(e) => tracing::warn!(error=%e, x, y, "focus_window_under_point error; proceeding"),
+    }
+
     match action {
         "click" => {
             session.click_at(x, y).await.map_err(|e| e.to_string())?;
@@ -689,11 +709,11 @@ fn screenshot_default_opts(p: &Value) -> (bool, u32, u8) {
 fn tools_schema() -> Value {
     json!([
         { "name": "ghost_find",
-          "description": "Find the first UI element matching name or role. Returns element name and bounding rect. Supports two-tier dispatch: 'instant' (default, local UIA/cache/OCR only, no API cost) and 'deliberate' (adds cloud VLM + reflection on miss).",
+          "description": "Find the first UI element matching name or role. Returns: center (always valid), rect (meaningful only when has_rect=true), source (cache/uia/ocr/vlm/yolo), confidence (0-1), name (element accessible name, null for OCR/VLM/YOLO), has_rect (true for Cache/UIA tiers), dispatch_mode. Supports three dispatch modes.",
           "inputSchema": { "type": "object", "properties": {
               "name": { "type": "string", "description": "Accessible name (case-insensitive substring)" },
               "role": { "type": "string", "description": "Control type: button, edit, checkbox, list, menu, tab, toolbar" },
-              "mode": { "type": "string", "enum": ["instant", "deliberate"], "description": "Dispatch mode. 'instant': local tiers only (cache/UIA/OCR/YOLO), auto-escalates to deliberate on miss. 'deliberate': adds cloud VLM + reflection from first attempt. Default: 'instant'." }
+              "mode": { "type": "string", "enum": ["instant", "deliberate", "instant_only"], "description": "Dispatch mode. 'instant' (default): local tiers (cache/UIA/OCR/YOLO), auto-escalates to VLM on miss. 'deliberate': adds cloud VLM from first attempt. 'instant_only': local tiers only, never escalates to VLM (zero API cost)." }
           }}},
         { "name": "ghost_click",
           "description": "Find a UI element and click it.",
@@ -948,13 +968,13 @@ fn tools_schema() -> Value {
               "timeout_ms": { "type": "integer", "default": 5000 }
           }}},
         { "name": "ghost_act",
-          "description": "Atomic find → set UIA focus → perform action. Eliminates the cross-call focus race compared to separate ghost_focus_window + ghost_click calls. Returns {ok, name, rect, dispatch_mode}. At least one of 'name' or 'role' must be supplied to identify the target element. Supports two-tier dispatch via 'mode' param.",
+          "description": "Atomic find → ensure foreground → perform action. Eliminates the cross-call focus race compared to separate ghost_focus_window + ghost_click calls. Returns {ok, source, confidence, dispatch_mode, center}. At least one of 'name' or 'role' must be supplied to identify the target element. Supports three dispatch modes via 'mode' param.",
           "inputSchema": { "type": "object", "required": ["action"], "properties": {
               "name": { "type": "string", "description": "Accessible name of target element (case-insensitive substring)" },
               "role": { "type": "string", "description": "Control type role: button, edit, checkbox, etc." },
               "action": { "type": "string", "enum": ["click", "type"], "description": "Action to perform after finding the element" },
               "text": { "type": "string", "description": "Text to type (required when action=type)" },
-              "mode": { "type": "string", "enum": ["instant", "deliberate"], "description": "Dispatch mode. 'instant' (default): local tiers only, auto-escalates on miss. 'deliberate': adds cloud VLM + reflection from first attempt." }
+              "mode": { "type": "string", "enum": ["instant", "deliberate", "instant_only"], "description": "Dispatch mode. 'instant' (default): local tiers, auto-escalates to VLM on miss. 'deliberate': adds cloud VLM from first attempt. 'instant_only': local tiers only, never calls VLM." }
           }}}
     ])
 }
@@ -1272,6 +1292,30 @@ mod tests {
         assert_eq!(mode, LocateMode::Instant);
     }
 
+    // MEDIUM-7: instant_only mode parse
+    #[test]
+    fn parse_locate_mode_instant_only() {
+        let p = json!({"mode": "instant_only"});
+        let (label, mode) = parse_locate_mode(&p);
+        assert_eq!(label, "instant_only");
+        assert_eq!(mode, LocateMode::InstantOnly);
+    }
+
+    // MEDIUM-7: all three modes parse correctly
+    #[test]
+    fn parse_locate_mode_three_way() {
+        let cases = [
+            ("instant", LocateMode::Instant),
+            ("deliberate", LocateMode::Deliberate),
+            ("instant_only", LocateMode::InstantOnly),
+        ];
+        for (s, expected) in cases {
+            let p = json!({"mode": s});
+            let (_, mode) = parse_locate_mode(&p);
+            assert_eq!(mode, expected, "mode '{}' parsed incorrectly", s);
+        }
+    }
+
     // W4 — parse_target routing tests (pure, no COM)
     #[test]
     fn parse_target_name() {
@@ -1351,6 +1395,31 @@ mod tests {
         assert!(props["mode"].is_object(), "ghost_find should have mode property in schema");
     }
 
+    // MEDIUM-7: ghost_find and ghost_act schemas must include instant_only enum value.
+    #[test]
+    fn ghost_find_schema_mode_includes_instant_only() {
+        let tools = tools_schema();
+        let find_tool = tools.as_array().unwrap().iter()
+            .find(|t| t["name"] == "ghost_find").unwrap();
+        let mode_enum = &find_tool["inputSchema"]["properties"]["mode"]["enum"];
+        let variants: Vec<&str> = mode_enum.as_array().unwrap()
+            .iter().filter_map(|v| v.as_str()).collect();
+        assert!(variants.contains(&"instant_only"), "ghost_find mode enum must include instant_only");
+        assert!(variants.contains(&"instant"), "ghost_find mode enum must include instant");
+        assert!(variants.contains(&"deliberate"), "ghost_find mode enum must include deliberate");
+    }
+
+    // HIGH-2 + LOW-9: ghost_find description mentions name and has_rect fields.
+    #[test]
+    fn ghost_find_schema_description_mentions_name_and_has_rect() {
+        let tools = tools_schema();
+        let find_tool = tools.as_array().unwrap().iter()
+            .find(|t| t["name"] == "ghost_find").unwrap();
+        let desc = find_tool["description"].as_str().unwrap();
+        assert!(desc.contains("name"), "ghost_find description must mention name field");
+        assert!(desc.contains("has_rect"), "ghost_find description must mention has_rect field");
+    }
+
     #[test]
     fn ghost_act_schema_has_mode_param() {
         let tools = tools_schema();
@@ -1358,6 +1427,17 @@ mod tests {
             .find(|t| t["name"] == "ghost_act").unwrap();
         let props = &act_tool["inputSchema"]["properties"];
         assert!(props["mode"].is_object(), "ghost_act should have mode property in schema");
+    }
+
+    #[test]
+    fn ghost_act_schema_mode_includes_instant_only() {
+        let tools = tools_schema();
+        let act_tool = tools.as_array().unwrap().iter()
+            .find(|t| t["name"] == "ghost_act").unwrap();
+        let mode_enum = &act_tool["inputSchema"]["properties"]["mode"]["enum"];
+        let variants: Vec<&str> = mode_enum.as_array().unwrap()
+            .iter().filter_map(|v| v.as_str()).collect();
+        assert!(variants.contains(&"instant_only"), "ghost_act mode enum must include instant_only");
     }
 
     // T0.2 — JSON-RPC errors have integer code
