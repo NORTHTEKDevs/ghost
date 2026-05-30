@@ -80,7 +80,15 @@ impl<'s> GroundingTier for CacheTier<'s> {
 
             if matches {
                 let rect = (hit.rect.0, hit.rect.1, hit.rect.2, hit.rect.3);
-                TierResult::Hit(Grounded::from_rect(rect, CONFIDENCE_CACHE, Tier::Cache))
+                // HIGH-2: populate name from the element retrieved from the cache.
+                let element_name = match target {
+                    Target::Name(n) => Some(n.clone()),
+                    Target::Role(_) => Some(el.name()),
+                    _ => None,
+                };
+                let mut grounded = Grounded::from_rect(rect, CONFIDENCE_CACHE, Tier::Cache);
+                grounded.name = element_name;
+                TierResult::Hit(grounded)
             } else {
                 self.locator_cache.invalidate(&key);
                 TierResult::Miss
@@ -150,7 +158,11 @@ impl<'s> GroundingTier for UiaTier<'s> {
                 self.locator_cache.upsert(k, rect_raw);
             }
 
-            TierResult::Hit(Grounded::from_rect(rect_raw, CONFIDENCE_UIA, Tier::Uia))
+            // HIGH-2: populate name from the element name at grounding time.
+            let element_name = Some(el.name());
+            let mut grounded = Grounded::from_rect(rect_raw, CONFIDENCE_UIA, Tier::Uia);
+            grounded.name = element_name;
+            TierResult::Hit(grounded)
         })
     }
 }
@@ -199,7 +211,8 @@ impl<'s> GroundingTier for OcrTier<'s> {
 // ---------------------------------------------------------------------------
 
 /// Cloud VLM fallback (NVIDIA / Anthropic). Applicable for Description and as a
-/// last-resort for Name/Text.  Skipped in LocateMode::Instant (enforced by engine).
+/// last-resort for Name/Text.  Called in LocateMode::Deliberate AND on automatic
+/// Instant-miss escalation (enforced by the engine; VlmTier itself is always willing).
 pub struct VlmTier<'s> {
     pub session: &'s crate::session::GhostSession,
 }
@@ -227,7 +240,12 @@ impl<'s> GroundingTier for VlmTier<'s> {
                 Ok((x, y)) => {
                     TierResult::Hit(Grounded::from_point((x, y), CONFIDENCE_VLM, Tier::Vlm))
                 }
-                Err(_) => TierResult::Miss,
+                // LOW (VlmTier error signal): log failures instead of silently swallowing
+                // misconfigured-API-key and network errors.
+                Err(e) => {
+                    tracing::warn!(error=%e, "VlmTier locate failed (treated as Miss)");
+                    TierResult::Miss
+                }
             }
         })
     }
