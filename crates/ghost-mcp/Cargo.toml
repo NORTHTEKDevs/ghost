@@ -19,6 +19,7 @@ ghost-core = { path = "../ghost-core" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = { workspace = true }
 sonic-rs = { workspace = true }
 reqwest = { workspace = true }
 tracing = { workspace = true }

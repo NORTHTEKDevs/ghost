@@ -382,6 +382,31 @@ impl GhostSession {
         ghost_core::input::keyboard::type_text(text).map_err(GhostError::Core)
     }
 
+    /// VLM-based structured field extraction for ghost_query.
+    ///
+    /// Takes a foreground screenshot (or region if provided), asks the VLM to extract
+    /// `fields` by name, and returns a JSON map of `{ field: value_or_null }`.
+    /// Fields the VLM cannot find are returned as `null`.
+    ///
+    /// This is the VLM fallback tier for `handle_ghost_query`; it is called only for
+    /// fields that UIA/OCR did not fill (i.e., the `unmatched` list).
+    pub async fn query_extract(
+        &self,
+        fields: &[String],
+        region: Option<(i32, i32, i32, i32)>,
+    ) -> Result<serde_json::Map<String, serde_json::Value>> {
+        if fields.is_empty() {
+            return Ok(serde_json::Map::new());
+        }
+        let rect = region.or_else(|| self.foreground_window_rect());
+        let jpeg = ghost_core::capture::capture_screen_region(
+            rect,
+            Some(1024),
+            ghost_core::capture::CaptureFormat::Jpeg(80),
+        ).map_err(GhostError::Core)?;
+        crate::vision::vision_extract(fields, &jpeg).await
+    }
+
     /// Local OCR text search via Windows.Media.Ocr (free, on-device, no API).
     /// Searches for `needle` (case-insensitive contains) in the foreground window
     /// (or full screen if `foreground=false`). Returns center pixel of first match.
