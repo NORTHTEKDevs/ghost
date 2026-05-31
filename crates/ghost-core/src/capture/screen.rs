@@ -1,6 +1,105 @@
 use std::sync::Mutex;
 use crate::error::CoreError;
 
+// ---------------------------------------------------------------------------
+// GDI BitBlt fallback capture
+// ---------------------------------------------------------------------------
+// Used when DXGI Desktop Duplication returns all-black frames. This happens on
+// systems with HDR displays, certain NVIDIA driver versions, and some RDP/VM configs.
+// GDI BitBlt is slower (~30-100ms vs ~5ms for DXGI) but works universally.
+//
+// NOTE: GDI captures in BGRA order. We swap to RGBA on read.
+
+/// Capture the primary virtual desktop using GDI BitBlt.
+/// Returns tightly-packed RGBA plus width and height.
+pub fn capture_screen_gdi() -> Result<(Vec<u8>, usize, usize), CoreError> {
+    unsafe {
+        use windows::Win32::Graphics::Gdi::{
+            CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject,
+            GetDC, ReleaseDC, SelectObject, BitBlt, GetDIBits,
+            BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, SRCCOPY,
+            BI_RGB,
+        };
+        use windows::Win32::Foundation::HWND;
+
+        let screen_dc = GetDC(HWND(std::ptr::null_mut()));
+        if screen_dc.is_invalid() {
+            return Err(CoreError::Win32 { code: 0, context: "GDI GetDC failed" });
+        }
+        // GetDC(NULL) returns the full virtual desktop; use SM_CXVIRTUALSCREEN / SM_CYVIRTUALSCREEN
+        // for multi-monitor setups. For single-monitor use SM_CXSCREEN / SM_CYSCREEN.
+        use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
+        let width = GetSystemMetrics(SM_CXSCREEN) as usize;
+        let height = GetSystemMetrics(SM_CYSCREEN) as usize;
+        if width == 0 || height == 0 {
+            let _ = ReleaseDC(HWND(std::ptr::null_mut()), screen_dc);
+            return Err(CoreError::Win32 { code: 0, context: "GDI GetSystemMetrics returned 0" });
+        }
+
+        let mem_dc = CreateCompatibleDC(screen_dc);
+        if mem_dc.is_invalid() {
+            let _ = ReleaseDC(HWND(std::ptr::null_mut()), screen_dc);
+            return Err(CoreError::Win32 { code: 0, context: "GDI CreateCompatibleDC failed" });
+        }
+
+        let bmp = CreateCompatibleBitmap(screen_dc, width as i32, height as i32);
+        if bmp.is_invalid() {
+            let _ = DeleteDC(mem_dc);
+            let _ = ReleaseDC(HWND(std::ptr::null_mut()), screen_dc);
+            return Err(CoreError::Win32 { code: 0, context: "GDI CreateCompatibleBitmap failed" });
+        }
+
+        let old_bmp = SelectObject(mem_dc, bmp);
+        let blit_result = BitBlt(mem_dc, 0, 0, width as i32, height as i32, screen_dc, 0, 0, SRCCOPY);
+
+        // Read pixels regardless of BitBlt result (partial data is better than nothing).
+        let mut bmi = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: width as i32,
+                biHeight: -(height as i32), // negative = top-down
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                biSizeImage: 0,
+                biXPelsPerMeter: 0,
+                biYPelsPerMeter: 0,
+                biClrUsed: 0,
+                biClrImportant: 0,
+            },
+            bmiColors: [Default::default()],
+        };
+
+        let mut bgra = vec![0u8; width * height * 4];
+        let scanlines = GetDIBits(
+            mem_dc,
+            bmp,
+            0,
+            height as u32,
+            Some(bgra.as_mut_ptr() as *mut _),
+            &mut bmi,
+            DIB_RGB_COLORS,
+        );
+
+        // Cleanup GDI objects.
+        let _ = SelectObject(mem_dc, old_bmp);
+        let _ = DeleteObject(bmp);
+        let _ = DeleteDC(mem_dc);
+        let _ = ReleaseDC(HWND(std::ptr::null_mut()), screen_dc);
+
+        if blit_result.is_err() {
+            return Err(CoreError::Win32 { code: 0, context: "GDI BitBlt failed" });
+        }
+        if scanlines == 0 {
+            return Err(CoreError::Win32 { code: 0, context: "GDI GetDIBits returned 0 scanlines" });
+        }
+
+        // BGRA (GDI) → RGBA
+        let rgba = bgra_to_rgba(&bgra, width, height, width * 4);
+        Ok((rgba, width, height))
+    }
+}
+
 // DESIGN: CaptureContext caches the full DXGI duplication session.
 //
 // D3D11 device + context are initialized once and reused across all captures.
@@ -267,8 +366,37 @@ unsafe fn acquire_duplication(ctx: &mut CaptureContext) -> Result<(), CoreError>
 /// Capture the primary monitor as a tightly-packed RGBA buffer plus dimensions.
 /// Reuses the cached IDXGIOutputDuplication and staging texture where possible.
 /// Re-acquires on DXGI_ERROR_ACCESS_LOST / DXGI_ERROR_ACCESS_DENIED (once per call).
+///
+/// Black-frame fallback: DXGI Desktop Duplication returns all-zero frames on some
+/// systems (HDR monitors, certain NVIDIA driver versions, RDP sessions). When detected,
+/// the function falls back to GDI BitBlt capture which works universally.
 fn capture_rgba(ctx: &mut CaptureContext) -> Result<(Vec<u8>, usize, usize), CoreError> {
-    unsafe { capture_rgba_inner(ctx, true) }
+    let result = unsafe { capture_rgba_inner(ctx, true) }?;
+    // If the captured frame is entirely black, DXGI is not working correctly on this
+    // system. Fall back to GDI BitBlt which captures correctly on all Windows configs.
+    if is_frame_black(&result.0) {
+        tracing::warn!("DXGI capture returned all-black frame; falling back to GDI BitBlt (HDR/driver/RDP compat)");
+        return capture_screen_gdi();
+    }
+    Ok(result)
+}
+
+/// Returns true if the RGBA buffer is entirely black (all R, G, B channels are zero).
+/// Used to detect the DXGI first-frame blank artifact.
+fn is_frame_black(rgba: &[u8]) -> bool {
+    if rgba.is_empty() {
+        return false; // empty is not a black frame we can skip
+    }
+    // Sample at most 256 evenly-spaced pixels to avoid scanning huge buffers.
+    let pixels = rgba.len() / 4;
+    let step = (pixels / 256).max(1);
+    for i in (0..pixels).step_by(step) {
+        let base = i * 4;
+        if rgba[base] != 0 || rgba[base + 1] != 0 || rgba[base + 2] != 0 {
+            return false;
+        }
+    }
+    true
 }
 
 /// RAII guard: calls ReleaseFrame on every exit path after AcquireNextFrame succeeds.
@@ -517,6 +645,42 @@ mod tests {
         assert_eq!(DXGI_ERROR_WAIT_TIMEOUT.0 as u32, 0x887A_0027);
         // 0x887A0001 = DXGI_ERROR_INVALID_CALL (wedged session — frame not released).
         assert_eq!(DXGI_ERROR_INVALID_CALL.0 as u32, 0x887A_0001);
+    }
+
+    // --- is_frame_black tests ---
+
+    #[test]
+    fn is_frame_black_all_zero_returns_true() {
+        let buf = vec![0u8; 4 * 100]; // 25 RGBA pixels, all black
+        assert!(is_frame_black(&buf));
+    }
+
+    #[test]
+    fn is_frame_black_single_nonzero_r_returns_false() {
+        let mut buf = vec![0u8; 4 * 100];
+        buf[0] = 1; // R channel non-zero
+        assert!(!is_frame_black(&buf));
+    }
+
+    #[test]
+    fn is_frame_black_only_alpha_nonzero_returns_true() {
+        // Alpha (index 3) is ignored — only R/G/B matter
+        let mut buf = vec![0u8; 4 * 100];
+        for i in (3..buf.len()).step_by(4) {
+            buf[i] = 255; // all alpha set, but R/G/B = 0
+        }
+        assert!(is_frame_black(&buf));
+    }
+
+    #[test]
+    fn is_frame_black_empty_returns_false() {
+        assert!(!is_frame_black(&[]));
+    }
+
+    #[test]
+    fn is_frame_black_single_white_pixel() {
+        let buf = vec![255u8, 255, 255, 255]; // 1 white pixel
+        assert!(!is_frame_black(&buf));
     }
 
     /// Live test: repeated captures reuse the duplication session (reacquire_count stays low).
