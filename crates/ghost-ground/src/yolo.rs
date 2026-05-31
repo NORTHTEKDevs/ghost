@@ -172,12 +172,16 @@ impl YoloDetector {
     }
 
     /// Load a YOLO detector from a filesystem path.
-    #[allow(unused_variables)]
+    ///
+    /// Uses ort 2.0.0-rc.10 API: `ort::session::Session::builder().commit_from_file()`.
+    /// `Environment` was removed in rc.9+; the global env is managed by the ort runtime.
+    /// `GraphOptimizationLevel` lives in `ort::session::builder` in rc.10.
     pub fn load(path: &str) -> Result<Self, String> {
-        use ort::{Environment, Session, SessionBuilder, GraphOptimizationLevel};
+        use ort::session::Session;
+        use ort::session::builder::GraphOptimizationLevel;
 
-        let session = SessionBuilder::new()
-            .map_err(|e| format!("ort SessionBuilder: {e}"))?
+        let session = Session::builder()
+            .map_err(|e| format!("ort Session::builder: {e}"))?
             .with_optimization_level(GraphOptimizationLevel::Level1)
             .map_err(|e| format!("ort opt level: {e}"))?
             .commit_from_file(path)
