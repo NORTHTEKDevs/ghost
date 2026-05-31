@@ -207,8 +207,9 @@ impl YoloDetector {
     /// The model is not shipped in the repo.  See the module doc comment for
     /// how to obtain and export it.
     pub fn detect_icons(&self, _rgba: &[u8], _width: u32, _height: u32) -> Vec<Region> {
-        // TODO: implement when model integration is complete.
+        // STUB: model inference not yet implemented.
         // Requires: resize, CHW transpose, run session, decode boxes, NMS.
+        tracing::debug!("detect_icons: stub — model inference not yet implemented, returning empty");
         vec![]
     }
 }

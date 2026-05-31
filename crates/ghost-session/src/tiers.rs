@@ -252,6 +252,78 @@ impl<'s> GroundingTier for VlmTier<'s> {
 }
 
 // ---------------------------------------------------------------------------
+// YoloTier (optional, feature = "yolo")
+// ---------------------------------------------------------------------------
+
+/// OmniParser-YOLO icon detector tier (T4).
+///
+/// Placed between OcrTier and VlmTier in the cascade.
+/// Only instantiated when the `yolo` feature is enabled AND `YoloDetector::from_env()`
+/// succeeds (i.e. `GHOST_YOLO_MODEL` points at a valid `.onnx` file).
+///
+/// Returns Miss today because `detect_icons` is a documented stub returning empty.
+/// Becomes active once model inference is implemented.
+#[cfg(feature = "yolo")]
+pub struct YoloTier<'s> {
+    pub session: &'s crate::session::GhostSession,
+    pub detector: ghost_ground::yolo::YoloDetector,
+}
+
+#[cfg(feature = "yolo")]
+impl<'s> ghost_ground::engine::GroundingTier for YoloTier<'s> {
+    fn tier(&self) -> ghost_ground::types::Tier {
+        ghost_ground::types::Tier::Yolo
+    }
+
+    fn locate<'a>(
+        &'a self,
+        target: &'a ghost_ground::types::Target,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ghost_ground::engine::TierResult> + 'a>> {
+        Box::pin(async move {
+            use ghost_ground::engine::TierResult;
+            use ghost_ground::types::{Target, Grounded, Tier};
+
+            // Coords are pre-grounded; Role has no visual anchor for YOLO.
+            match target {
+                Target::Coords(_, _) | Target::Role(_) => return TierResult::NotApplicable,
+                Target::Name(_) | Target::Text(_) | Target::Description(_) => {}
+            }
+
+            // Capture foreground window region.
+            let rect = self.session.foreground_window_rect();
+            let rgba_result = tokio::task::spawn_blocking(move || {
+                ghost_core::capture::capture_region_raw(rect)
+            })
+            .await;
+
+            let (raw, w, h) = match rgba_result {
+                Ok(Ok(r)) => r,
+                _ => return TierResult::Miss,
+            };
+
+            // Run YOLO detection (stub: returns empty — will Miss today).
+            let regions = self.detector.detect_icons(&raw, w as u32, h as u32);
+            if regions.is_empty() {
+                return TierResult::Miss;
+            }
+
+            // With regions present, use Set-of-Marks matching (future: ask VLM to pick ID).
+            // For now, return the highest-confidence region center.
+            let best = regions.iter().max_by(|a, b| a.confidence.partial_cmp(&b.confidence).unwrap_or(std::cmp::Ordering::Equal));
+            match best {
+                Some(r) => {
+                    let (cx, cy) = r.center();
+                    let mut grounded = Grounded::from_point((cx, cy), ghost_ground::engine::CONFIDENCE_YOLO, Tier::Yolo);
+                    grounded.name = None; // YOLO does not recover accessible name
+                    TierResult::Hit(grounded)
+                }
+                None => TierResult::Miss,
+            }
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Helper: get current foreground HWND as isize (0 = none)
 // ---------------------------------------------------------------------------
 

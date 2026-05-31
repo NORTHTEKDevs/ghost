@@ -33,6 +33,8 @@ use crate::{
     error::{GhostError, Result},
     tiers::{CacheTier, UiaTier, OcrTier, VlmTier, foreground_hwnd},
 };
+#[cfg(feature = "yolo")]
+use crate::tiers::YoloTier;
 
 pub struct Region;
 
@@ -429,7 +431,11 @@ impl GhostSession {
     // Grounding cascade (W2)
     // -----------------------------------------------------------------------
 
-    /// Run the four-tier grounding cascade (Cache → UIA → OCR → VLM) for `target`.
+    /// Run the grounding cascade for `target`.
+    ///
+    /// Tier order: Cache → UIA → OCR → [YOLO (optional T4)] → VLM.
+    /// T4 (YOLO) is included only when the crate is built with `--features yolo`
+    /// AND `GHOST_YOLO_MODEL` env var points at a valid `.onnx` file.
     ///
     /// `mode = Instant` skips VLM; the engine auto-escalates to Deliberate on miss.
     /// `mode = Deliberate` tries VLM from the start.
@@ -460,12 +466,32 @@ impl GhostSession {
         let ocr = OcrTier { session: self };
         let vlm = VlmTier { session: self };
 
+        // T4: YOLO tier inserted between OCR and VLM only when feature is enabled
+        // and the model file is present (from_env() reads GHOST_YOLO_MODEL).
+        #[cfg(feature = "yolo")]
+        let yolo_detector = ghost_ground::yolo::YoloDetector::from_env().ok();
+
+        #[cfg(not(feature = "yolo"))]
         let tiers: Vec<Box<dyn ghost_ground::engine::GroundingTier + '_>> = vec![
             Box::new(cache),
             Box::new(uia),
             Box::new(ocr),
             Box::new(vlm),
         ];
+
+        #[cfg(feature = "yolo")]
+        let tiers: Vec<Box<dyn ghost_ground::engine::GroundingTier + '_>> = {
+            let mut t: Vec<Box<dyn ghost_ground::engine::GroundingTier + '_>> = vec![
+                Box::new(cache),
+                Box::new(uia),
+                Box::new(ocr),
+            ];
+            if let Some(detector) = yolo_detector {
+                t.push(Box::new(YoloTier { session: self, detector }));
+            }
+            t.push(Box::new(vlm));
+            t
+        };
 
         // Engine is local to this call — no need to store it.
         let mut engine = GroundingEngine::new(tiers);
