@@ -400,7 +400,10 @@ async fn locate_via_openai_compat(
         .map(|c| c.message.content.clone())
         .ok_or_else(|| GhostError::Vision("no choices in response".into()))?;
 
-    parse_coord_response(&text)
+    tracing::debug!(model = %model, url = %url, raw_response = %text, "openai-compat VLM raw response");
+    let result = parse_coord_response(&text);
+    tracing::debug!(parsed = ?result, "parse_coord_response result");
+    result
 }
 
 // ============================================================================
