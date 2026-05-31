@@ -41,10 +41,13 @@ impl ProgressEmitter {
     // (T3.3). The current MCP loop uses noop() but the emit infrastructure is retained
     // for the future channel-based emitter. All items suppressed as a unit.
     fn new(token: Option<Value>, writer: *mut dyn Write) -> Self {
+        // NOTE: this writer path is unexercised in the live dispatch — only noop() is
+        // used (T3.3 streaming limitation). Not tested; retained for future channel upgrade.
         Self { token, writer: Some(writer), progress: 0, total: None }
     }
 
     fn with_total(mut self, total: u64) -> Self {
+        // NOTE: total is set here but unexercised; only noop() instances are created live.
         self.total = Some(total);
         self
     }
@@ -1008,6 +1011,34 @@ async fn handle_ghost_assert(
     }
 }
 
+/// Parse a `script` string (YAML or JSON) into a JSON `Value`.
+/// Returns `Err` with the gate message if the string is not valid YAML/JSON,
+/// OR if the parsed value is not an array.
+///
+/// Extracted from `handle_ghost_run` so it can be unit-tested without a live session.
+fn parse_run_script(script: &str) -> std::result::Result<Vec<Value>, String> {
+    let parsed: Value = serde_yaml::from_str(script)
+        .or_else(|_| serde_json::from_str(script))
+        .map_err(|e| format!("ghost_run: script is neither valid YAML nor JSON: {e}"))?;
+    parsed
+        .into_array()
+        .map_err(|_| "ghost_run: 'steps' must be an array".to_string())
+}
+
+/// Extension trait to make the Value-into-array conversion readable.
+trait ValueIntoArray {
+    fn into_array(self) -> std::result::Result<Vec<Value>, Value>;
+}
+
+impl ValueIntoArray for Value {
+    fn into_array(self) -> std::result::Result<Vec<Value>, Value> {
+        match self {
+            Value::Array(v) => Ok(v),
+            other => Err(other),
+        }
+    }
+}
+
 /// `ghost_run(steps|json_flow|script)` — T3.4 declarative flow runner.
 /// Accepts three input forms:
 ///   - `steps`: JSON array of {op, ...} objects (direct).
@@ -1019,21 +1050,20 @@ async fn handle_ghost_run(
     p: &Value,
 ) -> std::result::Result<Value, String> {
     // Accept steps array directly, a json_flow string, or a YAML/JSON script string.
-    let steps_val = if let Some(s) = p.get("steps") {
-        s.clone()
+    let steps_owned: Vec<Value>;
+    let steps = if let Some(s) = p.get("steps") {
+        s.as_array().ok_or("ghost_run: 'steps' must be an array")?
     } else if let Some(flow_str) = p["json_flow"].as_str() {
-        serde_json::from_str(flow_str).map_err(|e| format!("ghost_run: invalid json_flow: {e}"))?
+        let v: Value = serde_json::from_str(flow_str).map_err(|e| format!("ghost_run: invalid json_flow: {e}"))?;
+        steps_owned = v.into_array().map_err(|_| "ghost_run: 'steps' must be an array".to_string())?;
+        &steps_owned
     } else if let Some(script) = p["script"].as_str() {
-        // Try YAML first (superset of JSON), fall back to JSON on YAML parse failure.
-        let parsed: serde_json::Value = serde_yaml::from_str(script)
-            .or_else(|_| serde_json::from_str(script))
-            .map_err(|e| format!("ghost_run: script is neither valid YAML nor JSON: {e}"))?;
-        parsed
+        steps_owned = parse_run_script(script)?;
+        &steps_owned
     } else {
         return Err("ghost_run: provide 'steps' (array), 'json_flow' (JSON string), or 'script' (YAML/JSON string)".into());
     };
 
-    let steps = steps_val.as_array().ok_or("ghost_run: 'steps' must be an array")?;
     let total = steps.len() as u64;
     let max_retries = p["max_retries"].as_u64().unwrap_or(2) as usize;
     let stop_on_error = p["stop_on_error"].as_bool().unwrap_or(true);
@@ -2487,22 +2517,26 @@ mod tests {
     }
 
     #[test]
-    fn invalid_script_returns_error() {
-        // serde_yaml accepts almost any string as a scalar (YAML is very permissive),
-        // so the parse step itself succeeds. The subsequent .as_array() check in
-        // handle_ghost_run catches non-array YAML values and returns an error.
-        // This test verifies the full pipeline: scalar YAML → not an array → error string.
-        let bad = ":::not yaml or json:::";
-        let parsed: Result<serde_json::Value, _> = serde_yaml::from_str(bad)
-            .or_else(|_| serde_json::from_str::<serde_json::Value>(bad));
-        // serde_yaml parses this as a string scalar — Ok but not an array.
-        // The runtime guard (as_array().ok_or(...)) would turn this into an error.
-        // Verify that path: if parsed ok but not an array, it's an error.
-        let is_error = match &parsed {
-            Err(_) => true,
-            Ok(v) => v.as_array().is_none(), // non-array → ghost_run returns Err
-        };
-        assert!(is_error, "non-array or unparseable script must produce an error in ghost_run");
+    fn yaml_scalar_is_not_an_array() {
+        // serde_yaml accepts almost any string as a scalar, but parse_run_script
+        // rejects non-array values at the gate. Verify the actual gate message.
+        let scalar_yaml = "not_an_array";
+        let err = parse_run_script(scalar_yaml).unwrap_err();
+        assert!(
+            err.contains("'steps' must be an array"),
+            "expected gate message in error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn truly_invalid_yaml_or_json_returns_parse_error() {
+        // A string that serde_yaml AND serde_json both reject (EOF while parsing).
+        let bad = r#"{"unclosed":"}"#;
+        let err = parse_run_script(bad).unwrap_err();
+        assert!(
+            err.contains("ghost_run: script is neither valid YAML nor JSON"),
+            "expected parse error message, got: {err}"
+        );
     }
 
     // T0.2 — JSON-RPC errors have integer code
