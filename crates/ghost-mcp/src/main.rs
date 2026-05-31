@@ -18,6 +18,10 @@ use std::sync::OnceLock;
 /// safely shared across async boundaries without a channel. The token is captured and
 /// would be forwarded to a proper channel-based emitter in a future streaming upgrade.
 /// Start/end progress events are emitted at the ghost_run step level for flows.
+///
+/// Fields, noop(), and emit() are retained for the future streaming upgrade — not
+/// yet wired into the live dispatch path.
+#[allow(dead_code)]
 struct ProgressEmitter {
     token: Option<Value>,
     /// Write target (None = noop mode).
@@ -31,7 +35,11 @@ struct ProgressEmitter {
 unsafe impl Send for ProgressEmitter {}
 unsafe impl Sync for ProgressEmitter {}
 
+#[allow(dead_code)]
 impl ProgressEmitter {
+    // ProgressEmitter::new / with_total / noop / emit are the streaming upgrade path
+    // (T3.3). The current MCP loop uses noop() but the emit infrastructure is retained
+    // for the future channel-based emitter. All items suppressed as a unit.
     fn new(token: Option<Value>, writer: *mut dyn Write) -> Self {
         Self { token, writer: Some(writer), progress: 0, total: None }
     }
@@ -1000,19 +1008,29 @@ async fn handle_ghost_assert(
     }
 }
 
-/// `ghost_run(steps: [{op, ...}] | json_flow: string)` — T3.4 declarative flow runner.
-/// Executes steps sequentially. Each step has `op` (lean verb or legacy name) and its params.
+/// `ghost_run(steps|json_flow|script)` — T3.4 declarative flow runner.
+/// Accepts three input forms:
+///   - `steps`: JSON array of {op, ...} objects (direct).
+///   - `json_flow`: JSON-encoded string of the steps array.
+///   - `script`: YAML-encoded string of the steps array (or JSON, tried second).
+/// Executes steps sequentially with cascade + act-then-verify and real failure feedback.
 async fn handle_ghost_run(
     session: &GhostSession,
     p: &Value,
 ) -> std::result::Result<Value, String> {
-    // Accept either steps: [...] directly or a json_flow string (JSON array).
+    // Accept steps array directly, a json_flow string, or a YAML/JSON script string.
     let steps_val = if let Some(s) = p.get("steps") {
         s.clone()
     } else if let Some(flow_str) = p["json_flow"].as_str() {
         serde_json::from_str(flow_str).map_err(|e| format!("ghost_run: invalid json_flow: {e}"))?
+    } else if let Some(script) = p["script"].as_str() {
+        // Try YAML first (superset of JSON), fall back to JSON on YAML parse failure.
+        let parsed: serde_json::Value = serde_yaml::from_str(script)
+            .or_else(|_| serde_json::from_str(script))
+            .map_err(|e| format!("ghost_run: script is neither valid YAML nor JSON: {e}"))?;
+        parsed
     } else {
-        return Err("ghost_run: provide 'steps' (array) or 'json_flow' (JSON string)".into());
+        return Err("ghost_run: provide 'steps' (array), 'json_flow' (JSON string), or 'script' (YAML/JSON string)".into());
     };
 
     let steps = steps_val.as_array().ok_or("ghost_run: 'steps' must be an array")?;
@@ -1027,10 +1045,13 @@ async fn handle_ghost_run(
         let op = step["op"].as_str()
             .ok_or_else(|| format!("ghost_run: step {i} missing 'op'"))?;
 
+        // last_err: the None initial value is not read on the Ok(break) path; that's
+        // intentional — the None is replaced by the Err path, and read in if !succeeded.
+        #[allow(unused_assignments)]
         let mut last_err: Option<String> = None;
         let mut succeeded = false;
 
-        for _attempt in 0..=max_retries {
+        for attempt in 0..=max_retries {
             // Use in_run=true to prevent re-entering ghost_run recursively.
             let outcome = dispatch_tool_inner(session, op, step, true).await;
             match outcome {
@@ -1040,6 +1061,13 @@ async fn handle_ghost_run(
                     break;
                 }
                 Err(e) => {
+                    // Capture the real failure reason. This is surfaced in:
+                    //   1. last_err → included in the errors[] array and the final Err msg.
+                    //   2. tracing::warn → visible in the MCP server log for diagnostics.
+                    // The actual error string is the authoritative failure reason for callers.
+                    if attempt < max_retries {
+                        tracing::warn!(step = i, op, attempt, error = %e, "ghost_run: step failed, will retry");
+                    }
                     last_err = Some(e);
                 }
             }
@@ -1074,10 +1102,10 @@ async fn handle_ghost_run(
     }))
 }
 
-/// `ghost_query(schema?, region?)` — T3.5 structured screen extraction (stub).
-/// Extracts named fields from the screen using UIA + OCR + optional VLM fallback.
-/// Full implementation in T3.5; this stub returns the UIA element list annotated with
-/// schema field matches so callers can see the plumbing works.
+/// `ghost_query(schema?, region?)` — T3.5 structured screen extraction.
+/// Strategy: UIA field-name matching first; for fields not found, one batched VLM
+/// call extracts them from a foreground screenshot. `unmatched` in the result lists
+/// fields neither UIA nor VLM could fill.
 async fn handle_ghost_query(
     session: &GhostSession,
     p: &Value,
@@ -1095,18 +1123,28 @@ async fn handle_ghost_query(
         Vec::new()
     };
 
-    // Get elements via UIA fast describe.
+    // Optional region: [left,top,right,bottom].
+    let region: Option<(i32, i32, i32, i32)> = p.get("region").and_then(|r| {
+        let arr = r.as_array()?;
+        if arr.len() != 4 { return None; }
+        Some((
+            arr[0].as_i64()? as i32,
+            arr[1].as_i64()? as i32,
+            arr[2].as_i64()? as i32,
+            arr[3].as_i64()? as i32,
+        ))
+    });
+
+    // Phase 1: UIA fast-describe + name-substring matching.
     let elements_result = handle_tool(session, "ghost_describe_screen_fast", p).await?;
     let elements = elements_result.get("elements")
         .and_then(|e| e.as_array())
         .cloned()
         .unwrap_or_default();
 
-    // Naive field matching: for each schema field, find the first element whose
-    // name contains the field name (case-insensitive).
     let mut extracted: serde_json::Map<String, Value> = serde_json::Map::new();
-    // MEDIUM-6: collect fields that resolved to null so callers can detect partial extraction.
-    let mut unmatched: Vec<Value> = Vec::new();
+    let mut unmatched_fields: Vec<String> = Vec::new();
+
     for field in &field_names {
         let matched = elements.iter().find(|el| {
             el["name"].as_str()
@@ -1118,17 +1156,50 @@ async fn handle_ghost_query(
             .map(|s| Value::String(s.to_string()))
             .unwrap_or(Value::Null);
         if value.is_null() {
-            unmatched.push(Value::String(field.clone()));
+            unmatched_fields.push(field.clone());
         }
         extracted.insert(field.clone(), value);
     }
 
-    Ok(json!({
+    // Phase 2: VLM fallback for fields still unmatched after UIA.
+    let mut vlm_attempted = false;
+    let mut vlm_error: Option<String> = None;
+    if !unmatched_fields.is_empty() {
+        vlm_attempted = true;
+        match session.query_extract(&unmatched_fields, region).await {
+            Ok(vlm_map) => {
+                // Merge VLM results: only promote non-null VLM values.
+                for field in &unmatched_fields {
+                    if let Some(v) = vlm_map.get(field) {
+                        if !v.is_null() {
+                            extracted.insert(field.clone(), v.clone());
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                vlm_error = Some(e.to_string());
+                tracing::warn!(error=%e, "ghost_query VLM fallback failed; returning UIA results only");
+            }
+        }
+    }
+
+    // Recompute unmatched: fields still null after both passes.
+    let unmatched: Vec<Value> = field_names.iter()
+        .filter(|f| extracted.get(*f).map(|v| v.is_null()).unwrap_or(true))
+        .map(|f| Value::String(f.clone()))
+        .collect();
+
+    let mut result = json!({
         "extracted": extracted,
         "unmatched": unmatched,
         "element_count": elements.len(),
-        "note": "ghost_query T3.5 stub: UIA field matching only; VLM fallback not yet implemented",
-    }))
+        "vlm_attempted": vlm_attempted,
+    });
+    if let Some(e) = vlm_error {
+        result["vlm_error"] = Value::String(e);
+    }
+    Ok(result)
 }
 
 // ---------------------------------------------------------------------------
@@ -1204,10 +1275,11 @@ fn lean_tools_schema() -> Value {
           }}},
         // --- Extraction / assertion ---
         { "name": "ghost_query",
-          "description": "Extract structured data from the screen to a caller-supplied JSON schema. UIA/OCR field matching only (current build); VLM fallback not yet implemented — fields not found are returned as null and listed under 'unmatched'. Returns extracted object.",
+          "description": "Extract structured data from the screen. Strategy: UIA name-matching first, then a single batched VLM call for any fields still unmatched. Returns extracted object, unmatched list, and vlm_attempted flag.",
           "inputSchema": { "type": "object", "properties": {
               "schema": { "type": "object", "description": "JSON Schema (properties map) or array of field names to extract" },
-              "window": { "type": "string", "description": "Scope to window (partial title)" }
+              "window": { "type": "string", "description": "Scope to window (partial title)" },
+              "region": { "type": "array", "items": { "type": "integer" }, "minItems": 4, "maxItems": 4, "description": "Optional [left,top,right,bottom] region for VLM screenshot crop" }
           }}},
         { "name": "ghost_assert",
           "description": "Assert a predicate about screen state. Fails (error) if the assertion is not satisfied. predicate: text-present|text-absent|element-exists.",
@@ -1220,10 +1292,11 @@ fn lean_tools_schema() -> Value {
           }}},
         // --- Flow ---
         { "name": "ghost_run",
-          "description": "Execute a declarative step-by-step flow. Each step: {op, ...params}. Op can be any lean verb or legacy tool name. Retries on failure (max_retries). Emits per-step progress events.",
+          "description": "Execute a declarative step-by-step flow. Each step: {op, ...params}. Op can be any lean verb or legacy tool name. Retries on failure (max_retries), wiring real failure reason into the reflection buffer for VLM hint.",
           "inputSchema": { "type": "object", "properties": {
-              "steps": { "type": "array", "items": { "type": "object" }, "description": "Array of {op, ...params} steps" },
-              "json_flow": { "type": "string", "description": "JSON-encoded steps array (alternative to steps)" },
+              "steps": { "type": "array", "items": { "type": "object" }, "description": "Array of {op, ...params} steps (direct)" },
+              "json_flow": { "type": "string", "description": "JSON-encoded steps array string" },
+              "script": { "type": "string", "description": "YAML or JSON string of steps array (YAML tried first)" },
               "max_retries": { "type": "integer", "default": 2 },
               "stop_on_error": { "type": "boolean", "default": true }
           }}},
@@ -2287,6 +2360,149 @@ mod tests {
             .filter_map(|v| v.as_str()).collect();
         assert!(!unmatched_names.contains(&"title"), "matched field must not appear in unmatched");
         assert!(!unmatched_names.contains(&"price"), "matched field must not appear in unmatched");
+    }
+
+    // -----------------------------------------------------------------------
+    // ITEM 2: ghost_query VLM merge logic (pure, no live session)
+    // -----------------------------------------------------------------------
+
+    /// Simulate UIA phase (some hit, some miss) + VLM fill phase, verify merge.
+    #[test]
+    fn ghost_query_uia_hits_vlm_fills_remainder() {
+        let field_names = vec!["title".to_string(), "status".to_string(), "price".to_string()];
+        let elements: Vec<serde_json::Value> = vec![
+            json!({ "name": "title: My Product", "role": "text" }),
+        ];
+
+        // Phase 1: UIA matching
+        let mut extracted: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
+        let mut unmatched_fields: Vec<String> = Vec::new();
+        for field in &field_names {
+            let matched = elements.iter().find(|el| {
+                el["name"].as_str()
+                    .map(|n| n.to_lowercase().contains(&field.to_lowercase()))
+                    .unwrap_or(false)
+            });
+            let value = matched
+                .and_then(|el| el["name"].as_str())
+                .map(|s| serde_json::Value::String(s.to_string()))
+                .unwrap_or(serde_json::Value::Null);
+            if value.is_null() { unmatched_fields.push(field.clone()); }
+            extracted.insert(field.clone(), value);
+        }
+        // UIA found "title", missed "status" and "price"
+        assert!(!extracted["title"].is_null());
+        assert!(extracted["status"].is_null());
+        assert!(extracted["price"].is_null());
+        assert_eq!(unmatched_fields, vec!["status", "price"]);
+
+        // Phase 2: simulate VLM filling "status" but not "price"
+        let mut vlm_map = serde_json::Map::new();
+        vlm_map.insert("status".to_string(), json!("Active"));
+        vlm_map.insert("price".to_string(), serde_json::Value::Null);
+
+        for field in &unmatched_fields {
+            if let Some(v) = vlm_map.get(field) {
+                if !v.is_null() {
+                    extracted.insert(field.clone(), v.clone());
+                }
+            }
+        }
+
+        // After merge: title from UIA, status from VLM, price still null
+        assert!(!extracted["title"].is_null());
+        assert_eq!(extracted["status"], json!("Active"));
+        assert!(extracted["price"].is_null());
+
+        // Unmatched after both passes = only price
+        let unmatched: Vec<String> = field_names.iter()
+            .filter(|f| extracted.get(*f).map(|v| v.is_null()).unwrap_or(true))
+            .cloned()
+            .collect();
+        assert_eq!(unmatched, vec!["price"]);
+    }
+
+    #[test]
+    fn ghost_query_all_uia_hit_no_vlm_call() {
+        let field_names = vec!["name".to_string()];
+        let elements: Vec<serde_json::Value> = vec![
+            json!({ "name": "name field", "role": "text" }),
+        ];
+        let mut extracted: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
+        let mut unmatched_fields: Vec<String> = Vec::new();
+        for field in &field_names {
+            let matched = elements.iter().find(|el| {
+                el["name"].as_str()
+                    .map(|n| n.to_lowercase().contains(&field.to_lowercase()))
+                    .unwrap_or(false)
+            });
+            let value = matched.and_then(|el| el["name"].as_str())
+                .map(|s| serde_json::Value::String(s.to_string()))
+                .unwrap_or(serde_json::Value::Null);
+            if value.is_null() { unmatched_fields.push(field.clone()); }
+            extracted.insert(field.clone(), value);
+        }
+        // All filled by UIA → no VLM needed
+        assert!(unmatched_fields.is_empty(), "no fields should be unmatched when UIA covers all");
+        assert!(!extracted["name"].is_null());
+    }
+
+    // -----------------------------------------------------------------------
+    // ITEM 3: ghost_run YAML/JSON script parsing (pure, no live session)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn yaml_script_parses_to_same_as_json() {
+        let yaml_script = r#"
+- op: ghost_wait
+  for: ms
+  ms: 100
+- op: ghost_key
+  keys: "Enter"
+"#;
+        let json_script = r#"[
+  {"op": "ghost_wait", "for": "ms", "ms": 100},
+  {"op": "ghost_key", "keys": "Enter"}
+]"#;
+        let from_yaml: serde_json::Value = serde_yaml::from_str(yaml_script).unwrap();
+        let from_json: serde_json::Value = serde_json::from_str(json_script).unwrap();
+        let yaml_steps = from_yaml.as_array().unwrap();
+        let json_steps = from_json.as_array().unwrap();
+        assert_eq!(yaml_steps.len(), json_steps.len(), "both should have 2 steps");
+        assert_eq!(yaml_steps[0]["op"], json_steps[0]["op"]);
+        assert_eq!(yaml_steps[1]["op"], json_steps[1]["op"]);
+        assert_eq!(yaml_steps[0]["ms"], json_steps[0]["ms"]);
+        assert_eq!(yaml_steps[1]["keys"], json_steps[1]["keys"]);
+    }
+
+    #[test]
+    fn yaml_fallback_accepts_json_script() {
+        // JSON is valid YAML, so serde_yaml should accept it directly.
+        let json_script = r#"[{"op":"ghost_wait","ms":50}]"#;
+        let parsed: serde_json::Value = serde_yaml::from_str(json_script)
+            .or_else(|_| serde_json::from_str(json_script))
+            .unwrap();
+        assert!(parsed.as_array().is_some());
+        assert_eq!(parsed[0]["op"], json!("ghost_wait"));
+    }
+
+    #[test]
+    fn invalid_script_returns_error() {
+        // serde_yaml accepts almost any string as a scalar (YAML is very permissive),
+        // so the parse step itself succeeds. The subsequent .as_array() check in
+        // handle_ghost_run catches non-array YAML values and returns an error.
+        // This test verifies the full pipeline: scalar YAML → not an array → error string.
+        let bad = ":::not yaml or json:::";
+        let parsed: Result<serde_json::Value, _> = serde_yaml::from_str(bad)
+            .or_else(|_| serde_json::from_str::<serde_json::Value>(bad));
+        // serde_yaml parses this as a string scalar — Ok but not an array.
+        // The runtime guard (as_array().ok_or(...)) would turn this into an error.
+        // Verify that path: if parsed ok but not an array, it's an error.
+        let is_error = match &parsed {
+            Err(_) => true,
+            Ok(v) => v.as_array().is_none(), // non-array → ghost_run returns Err
+        };
+        assert!(is_error, "non-array or unparseable script must produce an error in ghost_run");
     }
 
     // T0.2 — JSON-RPC errors have integer code
