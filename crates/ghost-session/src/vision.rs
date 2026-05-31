@@ -93,6 +93,146 @@ pub async fn vision_locate(
     }
 }
 
+/// Extract named fields from a screenshot in one batched VLM call.
+///
+/// `fields` is the list of field names to extract.  The model is asked to return a
+/// single-line JSON object `{ "<field>": <value_or_null>, ... }`.  Fields the model
+/// cannot find are returned as `null`.
+///
+/// Returns a `serde_json::Map<String, Value>` keyed by field name.
+pub async fn vision_extract(
+    fields: &[String],
+    image_jpeg: &[u8],
+) -> Result<serde_json::Map<String, serde_json::Value>> {
+    if fields.is_empty() {
+        return Ok(serde_json::Map::new());
+    }
+    let provider = pick_provider()?;
+    let prompt = build_extract_prompt(fields);
+    let text = match provider {
+        Provider::Nvidia => extract_via_openai_compat(&prompt, image_jpeg).await?,
+        Provider::Anthropic => extract_via_anthropic(&prompt, image_jpeg).await?,
+    };
+    parse_extract_response(&text, fields)
+}
+
+fn build_extract_prompt(fields: &[String]) -> String {
+    let field_list = fields.iter().map(|f| format!("\"{f}\"")).collect::<Vec<_>>().join(", ");
+    format!(
+        "Look at this screenshot and extract the following fields: [{field_list}]. \
+         Respond with ONLY a single-line JSON object: {{\"<field>\": <value_or_null>, ...}}. \
+         For each field, return the text value visible on screen, or null if not found. \
+         No prose, no markdown, no explanation."
+    )
+}
+
+fn parse_extract_response(
+    text: &str,
+    fields: &[String],
+) -> Result<serde_json::Map<String, serde_json::Value>> {
+    let cleaned = text.trim()
+        .trim_start_matches("```json").trim_start_matches("```")
+        .trim_end_matches("```").trim();
+    let json_str = if cleaned.starts_with('{') {
+        cleaned.to_string()
+    } else if let (Some(start), Some(end)) = (cleaned.find('{'), cleaned.rfind('}')) {
+        cleaned[start..=end].to_string()
+    } else {
+        return Err(GhostError::Vision(format!("no JSON object in extract response: `{cleaned}`")));
+    };
+    let mut map: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&json_str)
+        .map_err(|e| GhostError::Vision(format!("could not parse extract JSON `{json_str}`: {e}")))?;
+    // Ensure all requested fields are present (fill missing with null).
+    for f in fields {
+        map.entry(f.clone()).or_insert(serde_json::Value::Null);
+    }
+    Ok(map)
+}
+
+async fn extract_via_openai_compat(prompt: &str, image_jpeg: &[u8]) -> Result<String> {
+    let api_key = std::env::var("NVIDIA_API_KEY")
+        .map_err(|_| GhostError::Config("NVIDIA_API_KEY not set".into()))?;
+    let model = std::env::var("GHOST_VISION_MODEL")
+        .unwrap_or_else(|_| NVIDIA_DEFAULT_MODEL.into());
+    let url = std::env::var("GHOST_VISION_BASE_URL")
+        .unwrap_or_else(|_| NVIDIA_DEFAULT_URL.into());
+    let b64 = base64_encode(image_jpeg);
+    let data_url = format!("data:image/jpeg;base64,{b64}");
+    let content = serde_json::json!([
+        {"type": "image_url", "image_url": {"url": data_url}},
+        {"type": "text", "text": prompt}
+    ]);
+    let req = OaiReq {
+        model: &model,
+        messages: vec![
+            OaiMsg { role: "system", content: serde_json::Value::String(SYSTEM_PROMPT.into()) },
+            OaiMsg { role: "user", content },
+        ],
+        max_tokens: 512,
+        temperature: 0.0,
+    };
+    let resp = http_client()
+        .post(&url)
+        .header("authorization", format!("Bearer {api_key}"))
+        .header("content-type", "application/json")
+        .header("accept", "application/json")
+        .json(&req)
+        .send()
+        .await
+        .map_err(|e| GhostError::Vision(format!("openai-compat extract request: {e}")))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(GhostError::Vision(format!("openai-compat extract {status}: {body}")));
+    }
+    let parsed: OaiResp = resp.json().await
+        .map_err(|e| GhostError::Vision(format!("openai-compat extract parse: {e}")))?;
+    Ok(parsed.choices.first()
+        .map(|c| c.message.content.clone())
+        .unwrap_or_default())
+}
+
+async fn extract_via_anthropic(prompt: &str, image_jpeg: &[u8]) -> Result<String> {
+    let api_key = std::env::var("ANTHROPIC_API_KEY")
+        .map_err(|_| GhostError::Config("ANTHROPIC_API_KEY not set".into()))?;
+    let model = std::env::var("GHOST_VISION_MODEL")
+        .unwrap_or_else(|_| ANTHROPIC_DEFAULT_MODEL.into());
+    let b64 = base64_encode(image_jpeg);
+    let req = AntReq {
+        model: &model,
+        max_tokens: 512,
+        system: SYSTEM_PROMPT,
+        messages: vec![AntMsg {
+            role: "user",
+            content: vec![
+                ContentBlock { kind: "image", text: None,
+                    source: Some(ImageSource { kind: "base64", media_type: "image/jpeg", data: b64 }) },
+                ContentBlock { kind: "text", text: Some(prompt.to_string()), source: None },
+            ],
+        }],
+    };
+    let resp = http_client()
+        .post(ANTHROPIC_URL)
+        .header("x-api-key", api_key)
+        .header("anthropic-version", ANTHROPIC_VERSION)
+        .header("content-type", "application/json")
+        .json(&req)
+        .send()
+        .await
+        .map_err(|e| GhostError::Vision(format!("anthropic extract request: {e}")))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(GhostError::Vision(format!("anthropic extract {status}: {body}")));
+    }
+    let parsed: AntResp = resp.json().await
+        .map_err(|e| GhostError::Vision(format!("anthropic extract parse: {e}")))?;
+    Ok(parsed.content.iter()
+        .find(|c| c.kind == "text")
+        .map(|c| c.text.trim().to_string())
+        .unwrap_or_default())
+}
+
 fn pick_provider() -> Result<Provider> {
     if let Ok(p) = std::env::var("GHOST_VISION_PROVIDER") {
         return match p.to_lowercase().as_str() {
@@ -155,6 +295,11 @@ fn parse_coord_response(text: &str) -> Result<Option<(i32, i32)>> {
 // OpenAI-compatible path (NVIDIA Build, Ollama, vLLM, llama.cpp, etc.)
 // ============================================================================
 
+// OaiImageUrl and OaiContent are Serialize types used as schema documentation for the
+// OpenAI-compat wire format. The actual HTTP body is built via serde_json::json! for
+// flexibility (mixed array of image_url + text parts), so the structs are not directly
+// constructed — they serve as the typed reference for the schema.
+#[allow(dead_code)]
 #[derive(Serialize)]
 struct OaiImageUrl<'a> {
     url: String,
@@ -162,6 +307,7 @@ struct OaiImageUrl<'a> {
     _marker: std::marker::PhantomData<&'a ()>,
 }
 
+#[allow(dead_code)]
 #[derive(Serialize)]
 struct OaiContent<'a> {
     #[serde(rename = "type")]
@@ -446,5 +592,68 @@ mod tests {
         std::env::remove_var("ANTHROPIC_API_KEY");
         std::env::remove_var("NVIDIA_API_KEY");
         assert_eq!(p, Provider::Anthropic);
+    }
+
+    // --- parse_extract_response (field extraction VLM response parsing) ---
+
+    #[test]
+    fn parse_extract_pure_json_all_values() {
+        let fields = vec!["title".to_string(), "price".to_string()];
+        let text = r#"{"title": "My Product", "price": "$9.99"}"#;
+        let map = parse_extract_response(text, &fields).unwrap();
+        assert_eq!(map["title"], serde_json::json!("My Product"));
+        assert_eq!(map["price"], serde_json::json!("$9.99"));
+    }
+
+    #[test]
+    fn parse_extract_missing_field_filled_with_null() {
+        let fields = vec!["title".to_string(), "status".to_string()];
+        let text = r#"{"title": "Hello"}"#;
+        let map = parse_extract_response(text, &fields).unwrap();
+        assert_eq!(map["title"], serde_json::json!("Hello"));
+        // status was missing from response → should be null
+        assert!(map["status"].is_null());
+    }
+
+    #[test]
+    fn parse_extract_explicit_null_field() {
+        let fields = vec!["title".to_string(), "price".to_string()];
+        let text = r#"{"title": "Widget", "price": null}"#;
+        let map = parse_extract_response(text, &fields).unwrap();
+        assert_eq!(map["title"], serde_json::json!("Widget"));
+        assert!(map["price"].is_null());
+    }
+
+    #[test]
+    fn parse_extract_with_code_fence() {
+        let fields = vec!["name".to_string()];
+        let text = "```json\n{\"name\": \"Alice\"}\n```";
+        let map = parse_extract_response(text, &fields).unwrap();
+        assert_eq!(map["name"], serde_json::json!("Alice"));
+    }
+
+    #[test]
+    fn parse_extract_with_prose_around_json() {
+        let fields = vec!["name".to_string()];
+        let text = "Here is the extracted data: {\"name\": \"Bob\"}. That's all.";
+        let map = parse_extract_response(text, &fields).unwrap();
+        assert_eq!(map["name"], serde_json::json!("Bob"));
+    }
+
+    #[test]
+    fn parse_extract_no_json_returns_error() {
+        let fields = vec!["name".to_string()];
+        let text = "I cannot find any data in this image.";
+        assert!(parse_extract_response(text, &fields).is_err());
+    }
+
+    #[test]
+    fn build_extract_prompt_includes_all_fields() {
+        let fields = vec!["title".to_string(), "price".to_string(), "status".to_string()];
+        let prompt = build_extract_prompt(&fields);
+        assert!(prompt.contains("\"title\""));
+        assert!(prompt.contains("\"price\""));
+        assert!(prompt.contains("\"status\""));
+        assert!(prompt.contains("JSON"));
     }
 }

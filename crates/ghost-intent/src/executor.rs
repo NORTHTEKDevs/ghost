@@ -80,6 +80,10 @@ impl<'a> FsmExecutor<'a> {
             }
             state.last_op_index = i;
             let mut attempt = 0u32;
+            // last_err is written on dispatch failure and read in abort/retry/failed branches.
+            // The initial None is correct; Rust's "never read" lint fires because the Ok(break)
+            // path exits without reading it, but every failure path does read it.
+            #[allow(unused_assignments)]
             let mut last_err: Option<String> = None;
             loop {
                 if start.elapsed() > deadline {
