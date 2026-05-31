@@ -165,15 +165,12 @@ enum Command {
     },
 
     // -----------------------------------------------------------------------
-    // Serve: run the MCP stdio server
+    // Serve: run the MCP stdio server (stdio only — no addr/port)
     // -----------------------------------------------------------------------
 
     /// Start the ghost MCP stdio server. Executes the ghost-mcp binary found in PATH
-    /// or adjacent to this binary. Use in stdio MCP client configurations.
-    Serve {
-        #[arg(long, default_value = "127.0.0.1:7878")]
-        addr: String,
-    },
+    /// or adjacent to this binary. Communicates over stdio; there is no addr/port.
+    Serve,
 }
 
 #[tokio::main]
@@ -194,7 +191,7 @@ async fn main() -> ExitCode {
 
 async fn run(cli: Cli) -> Result<(), String> {
     // Serve is special — it exec/spawns ghost-mcp, no GhostSession needed.
-    if let Command::Serve { .. } = &cli.command {
+    if let Command::Serve = &cli.command {
         return run_serve();
     }
 
@@ -399,16 +396,36 @@ async fn run(cli: Cli) -> Result<(), String> {
                 other => return Err(format!("unknown op '{other}'; use list|focus|state|launch")),
             }
         }
-        Command::Query { fields, window: _ } => {
+        Command::Query { fields, window } => {
             let field_list: Vec<String> = fields.split(',')
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
                 .collect();
-            let map = session.query_extract(&field_list, None).await.map_err(|e| e.to_string())?;
+            // Resolve optional --window to a bounding rect by name match.
+            let rect = if let Some(ref name) = window {
+                let windows = session.list_windows().await.map_err(|e| e.to_string())?;
+                match windows.into_iter().find(|w| w.name.contains(name.as_str())) {
+                    Some(w) => {
+                        use windows::Win32::Foundation::{HWND, RECT};
+                        use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
+                        let hwnd = HWND(w.hwnd);
+                        let mut r = RECT::default();
+                        if unsafe { GetWindowRect(hwnd, &mut r).is_ok() } {
+                            Some((r.left, r.top, r.right, r.bottom))
+                        } else {
+                            return Err(format!("could not get rect for window '{name}'"));
+                        }
+                    }
+                    None => return Err(format!("no window matching '{name}'")),
+                }
+            } else {
+                None
+            };
+            let map = session.query_extract(&field_list, rect).await.map_err(|e| e.to_string())?;
             println!("{}", serde_json::to_string_pretty(&serde_json::Value::Object(map)).unwrap());
         }
-        Command::Snapshot { out, foreground: _ } => {
-            let rect = session.foreground_window_rect();
+        Command::Snapshot { out, foreground } => {
+            let rect = if foreground { session.foreground_window_rect() } else { None };
             let bytes = session.screenshot_region(rect, Some(768), Some(75))
                 .await.map_err(|e| e.to_string())?;
             if let Some(path) = out {
@@ -421,7 +438,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             }
         }
 
-        Command::Serve { .. } => unreachable!("handled above"),
+        Command::Serve => unreachable!("handled above"),
     }
     Ok(())
 }
@@ -647,13 +664,13 @@ mod tests {
     #[test]
     fn parse_serve() {
         let cli = parse(&["serve"]).unwrap();
-        assert!(matches!(cli.command, Command::Serve { .. }));
+        assert!(matches!(cli.command, Command::Serve));
     }
 
     #[test]
-    fn parse_serve_custom_addr() {
-        let cli = parse(&["serve", "--addr", "0.0.0.0:9000"]).unwrap();
-        assert!(matches!(cli.command, Command::Serve { addr } if addr == "0.0.0.0:9000"));
+    fn serve_rejects_addr_flag() {
+        // --addr is not a valid flag on the stdio-only Serve subcommand.
+        assert!(parse(&["serve", "--addr", "0.0.0.0:9000"]).is_err());
     }
 
     // --- parse_target helper ---
