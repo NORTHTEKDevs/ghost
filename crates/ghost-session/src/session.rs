@@ -32,6 +32,7 @@ use crate::{
     locator::By,
     error::{GhostError, Result},
     tiers::{CacheTier, UiaTier, OcrTier, VlmTier, foreground_hwnd},
+    env_key_is_set,
 };
 #[cfg(feature = "yolo")]
 use crate::tiers::YoloTier;
@@ -70,8 +71,10 @@ impl GhostSession {
         let tree = UiaTree::new().map_err(GhostError::Core)?;
 
         // Log which vision providers are configured (presence only, never values).
-        let nvidia_ok = std::env::var("NVIDIA_API_KEY").is_ok();
-        let anthropic_ok = std::env::var("ANTHROPIC_API_KEY").is_ok();
+        // Treat empty/whitespace-only values the same as unset — an empty key causes
+        // confusing provider 500s rather than a clear error.
+        let nvidia_ok = env_key_is_set("NVIDIA_API_KEY");
+        let anthropic_ok = env_key_is_set("ANTHROPIC_API_KEY");
         let provider_override = std::env::var("GHOST_VISION_PROVIDER").ok();
         if nvidia_ok || anthropic_ok {
             eprintln!(

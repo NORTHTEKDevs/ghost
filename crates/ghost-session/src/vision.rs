@@ -21,6 +21,7 @@
 //! back from the downscaled+cropped image space to absolute screen pixels.
 
 use crate::error::{GhostError, Result};
+use crate::env_key_is_set;
 use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
 
@@ -152,6 +153,9 @@ fn parse_extract_response(
 async fn extract_via_openai_compat(prompt: &str, image_jpeg: &[u8]) -> Result<String> {
     let api_key = std::env::var("NVIDIA_API_KEY")
         .map_err(|_| GhostError::Config("NVIDIA_API_KEY not set".into()))?;
+    if api_key.trim().is_empty() {
+        return Err(GhostError::Vision("NVIDIA_API_KEY is empty/unset — set a valid key before using vision".into()));
+    }
     let model = std::env::var("GHOST_VISION_MODEL")
         .unwrap_or_else(|_| NVIDIA_DEFAULT_MODEL.into());
     let url = std::env::var("GHOST_VISION_BASE_URL")
@@ -195,6 +199,9 @@ async fn extract_via_openai_compat(prompt: &str, image_jpeg: &[u8]) -> Result<St
 async fn extract_via_anthropic(prompt: &str, image_jpeg: &[u8]) -> Result<String> {
     let api_key = std::env::var("ANTHROPIC_API_KEY")
         .map_err(|_| GhostError::Config("ANTHROPIC_API_KEY not set".into()))?;
+    if api_key.trim().is_empty() {
+        return Err(GhostError::Vision("ANTHROPIC_API_KEY is empty/unset — set a valid key before using vision".into()));
+    }
     let model = std::env::var("GHOST_VISION_MODEL")
         .unwrap_or_else(|_| ANTHROPIC_DEFAULT_MODEL.into());
     let b64 = base64_encode(image_jpeg);
@@ -243,10 +250,10 @@ fn pick_provider() -> Result<Provider> {
             ))),
         };
     }
-    if std::env::var("NVIDIA_API_KEY").is_ok() {
+    if env_key_is_set("NVIDIA_API_KEY") {
         return Ok(Provider::Nvidia);
     }
-    if std::env::var("ANTHROPIC_API_KEY").is_ok() {
+    if env_key_is_set("ANTHROPIC_API_KEY") {
         return Ok(Provider::Anthropic);
     }
     Err(GhostError::Config(
@@ -355,6 +362,9 @@ async fn locate_via_openai_compat(
 ) -> Result<Option<(i32, i32)>> {
     let api_key = std::env::var("NVIDIA_API_KEY")
         .map_err(|_| GhostError::Config("NVIDIA_API_KEY not set; sign up free at build.nvidia.com".into()))?;
+    if api_key.trim().is_empty() {
+        return Err(GhostError::Vision("NVIDIA_API_KEY is empty/unset — set a valid key before using vision".into()));
+    }
     let model = std::env::var("GHOST_VISION_MODEL")
         .unwrap_or_else(|_| NVIDIA_DEFAULT_MODEL.into());
     let url = std::env::var("GHOST_VISION_BASE_URL")
@@ -462,6 +472,9 @@ async fn locate_via_anthropic(
 ) -> Result<Option<(i32, i32)>> {
     let api_key = std::env::var("ANTHROPIC_API_KEY")
         .map_err(|_| GhostError::Config("ANTHROPIC_API_KEY not set".into()))?;
+    if api_key.trim().is_empty() {
+        return Err(GhostError::Vision("ANTHROPIC_API_KEY is empty/unset — set a valid key before using vision".into()));
+    }
     let model = std::env::var("GHOST_VISION_MODEL")
         .unwrap_or_else(|_| ANTHROPIC_DEFAULT_MODEL.into());
 
