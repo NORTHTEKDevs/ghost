@@ -18,7 +18,7 @@ No Claude required. No browser required. No CDP. Unblockable because it drives t
 
 ## Install
 
-Download prebuilt Windows binaries from the [Releases page](https://github.com/FrostbyteDevTeam/ghost/releases/latest):
+Download prebuilt Windows binaries from the [Releases page](https://github.com/NORTHTEKDevs/ghost/releases/latest):
 
 - `ghost.exe` — CLI
 - `ghost-http.exe` — REST server
@@ -27,7 +27,7 @@ Download prebuilt Windows binaries from the [Releases page](https://github.com/F
 Or build from source:
 
 ```bash
-git clone https://github.com/FrostbyteDevTeam/ghost
+git clone https://github.com/NORTHTEKDevs/ghost
 cd ghost
 cargo build --release --bin ghost --bin ghost-http --bin ghost-mcp
 # binaries in target/release/
@@ -105,7 +105,7 @@ Endpoints: `/health`, `/tools`, `/click`, `/click-at`, `/type`, `/press`, `/hotk
 
 ```toml
 [dependencies]
-ghost-session = { git = "https://github.com/FrostbyteDevTeam/ghost" }
+ghost-session = { git = "https://github.com/NORTHTEKDevs/ghost" }
 ```
 
 ```rust
@@ -206,4 +206,4 @@ See `docs/benches/v030-baseline.md`.
 
 ## License
 
-MIT - Copyright 2026 Frostbyte Digital
+MIT - Copyright 2026 Northtek

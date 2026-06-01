@@ -6,7 +6,7 @@ description = "HTTP REST server for Ghost Windows desktop automation"
 keywords = ["automation", "windows", "http", "rest"]
 categories = ["web-programming::http-server", "os::windows-apis"]
 license = "MIT"
-repository = "https://github.com/FrostbyteDevTeam/ghost"
+repository = "https://github.com/NORTHTEKDevs/ghost"
 
 [[bin]]
 name = "ghost-http"

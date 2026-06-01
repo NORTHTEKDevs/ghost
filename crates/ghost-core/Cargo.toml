@@ -6,7 +6,7 @@ description = "Low-level Win32/UIA/SendInput/DXGI primitives for the Ghost deskt
 keywords = ["automation", "windows", "win32", "desktop", "uia"]
 categories = ["os::windows-apis"]
 license = "MIT"
-repository = "https://github.com/FrostbyteDevTeam/ghost"
+repository = "https://github.com/NORTHTEKDevs/ghost"
 readme = "../../README.md"
 
 [dependencies]
