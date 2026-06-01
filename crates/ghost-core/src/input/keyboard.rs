@@ -155,6 +155,9 @@ pub fn name_to_vk(name: &str) -> Option<VIRTUAL_KEY> {
         "3" => Some(VK_3), "4" => Some(VK_4), "5" => Some(VK_5),
         "6" => Some(VK_6), "7" => Some(VK_7), "8" => Some(VK_8),
         "9" => Some(VK_9),
+        // MEDIUM-3: allow '+' literal so Ctrl++ (zoom-in) can be expressed.
+        "+" | "oem_plus" | "plus" => Some(VK_OEM_PLUS),
+        "numpad+" | "add" => Some(VK_ADD),
         _ => None,
     }
 }

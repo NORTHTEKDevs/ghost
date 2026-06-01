@@ -135,7 +135,9 @@ where
 
 fn loose_eq(a: Value, b: Value) -> bool {
     match (&a, &b) {
-        (Value::Number(x), Value::Number(y)) => to_f64(&a) == to_f64(&b) && x.is_i64() == y.is_i64() || to_f64(&a) == to_f64(&b),
+        // LOW: JS loose equality treats 1 == 1.0 as true (no type distinction).
+        // The old expression `(A && B) || A` was dead code reducing to just `A`.
+        (Value::Number(_), Value::Number(_)) => to_f64(&a) == to_f64(&b),
         _ => a == b,
     }
 }

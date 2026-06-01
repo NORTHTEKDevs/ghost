@@ -1,0 +1,308 @@
+{
+  "round": 1,
+  "confirmed": [
+    {
+      "lens": "bsr-correctness",
+      "title": "hotkey() leaks held modifier keys when press_key fails",
+      "sev": "high",
+      "file": "crates/ghost-session/src/session.rs",
+      "where": "GhostSession::hotkey (lines 647-667)",
+      "problem": "If `press_key(key_vk)` returns an error, the function early-returns via `?` while all modifier keys from `mod_vks` are still in the key-down state. Subsequent keyboard input to any window will receive phantom Ctrl/Shift/Alt until a new hotkey call succeeds, the user physically presses those keys, or `release_all_modifiers()` is invoked. The emergency-stop path already calls `release_all_modifiers()` precisely to avoid this class of stuck-key bug, but the normal error path in `hotkey()` does not. Real trigger: `SendInput` returning a short count (e.g., under UIPI restrictions) causes a `CoreError::Win32` which propagates out with modifiers held.",
+      "fix": "Before the `?` propagation on `press_key` error, release the held modifiers. Minimal fix at session.rs line 662:\n\n```rust\npress_key(key_vk).map_err(|e| {\n    for vk in mod_vks.iter().rev() {\n        let _ = core_key_up(*vk);\n    }\n    GhostError::Core(e)\n})?;\n```\n\nAlternatively, call `ghost_core::input::hotkey::release_all_modifiers()` in the error handler, which already handles all system modifier VKs (VK_SHIFT, VK_CONTROL, VK_MENU, VK_LWIN, VK_RWIN) and is the same mechanism used by the emergency-stop path.",
+      "evidence": "Confirmed in crates/ghost-session/src/session.rs lines 659-666:\n\n```rust\nfor vk in &mod_vks {\n    core_key_down(*vk).map_err(GhostError::Core)?;   // line 660\n}\npress_key(key_vk).map_err(GhostError::Core)?;         // line 662 -- early-returns here on error\nfor vk in mod_vks.iter().rev() {                       // line 663 -- never reached on error\n    core_key_up(*vk).map_err(GhostError::Core)?;\n"
+    },
+    {
+      "lens": "bsr-correctness",
+      "title": "loose_eq number comparison contains dead branch that silently changes equality semantics",
+      "sev": "low",
+      "file": "crates/ghost-intent/src/jsonlogic.rs",
+      "where": "loose_eq (line 138)",
+      "problem": "The number-comparison arm is: `to_f64(&a) == to_f64(&b) && x.is_i64() == y.is_i64() || to_f64(&a) == to_f64(&b)`. Due to operator precedence this parses as `(A && B) || A` which reduces to `A` (just `to_f64 == to_f64`). The `x.is_i64() == y.is_i64()` guard is therefore dead code and never influences the result. The most likely intent was to keep integer-typed values distinct from float-typed ones (e.g., so `1i64 != 1.0f64`), which would require `&&` not `||` as the top-level join. As written, `{\"==\": [1, 1.0]}` evaluates to `true`, which may cause `abort_if` or `retry_if` conditions that mix integer and float literals to fire or suppress unexpectedly.",
+      "fix": "Since this is a JSONLogic evaluator and JSONLogic uses JavaScript loose equality semantics (where `1 == 1.0` is `true`), the correct fix is to simply drop the dead guard entirely:\n\n```rust\n(Value::Number(_, _), Value::Number(_, _)) => to_f64(&a) == to_f64(&b),\n```\n\nNote: `Value::Number` in serde_json takes one field, not two - the pattern should be `Value::Number(x)` and `Value::Number(y)` (or just `(Value::Number(_), Value::Number(_))` since the guards are removed). If type-strict comparison (int != float) was ever intended, the fix would be `to_f64(&a) == to_f64(&b) && x.is_i64() == y.is_i64()` (drop the trailing `|| to_f64(&a) == to_f64(&b)`), but this would deviate from JSONLogic spec.",
+      "evidence": "Confirmed at `crates/ghost-intent/src/jsonlogic.rs` line 138:\n\n```rust\n(Value::Number(x), Value::Number(y)) => to_f64(&a) == to_f64(&b) && x.is_i64() == y.is_i64() || to_f64(&a) == to_f64(&b),\n```\n\nRust's `&&` binds tighter than `||`, so this is `(A && B) || A` = `A`. The `x.is_i64() == y.is_i64()` guard is dead code and never affects the result. No comment or documentation marks this as intention"
+    },
+    {
+      "lens": "bsr-correctness",
+      "title": "capture_region_raw silently falls back to full screen on invalid rect, corrupting before/after verification comparison",
+      "sev": "medium",
+      "file": "crates/ghost-core/src/capture/verify.rs",
+      "where": "capture_region_raw (lines 71-73)",
+      "problem": "When the provided rect is degenerate (`r <= l || b <= t`), the function silently returns the full-screen RGBA buffer instead of returning an error. In `GhostSession::act()`, the before-capture and after-capture calls can use different effective regions if the foreground window rect becomes invalid between the two captures (e.g., a dialog closes during the action). Both calls then return full-screen data with the same dimensions (`bw == aw && bh == ah` holds), so `compute_verification` runs but compares two full-screen frames that include unrelated UI regions. This produces false `changed=true` readings for actions that only affect a small widget, or false `changed=false` if the dialog that closed happened to balance the screen delta. The verification result is returned to callers and is used as an action-success signal.",
+      "fix": "At verify.rs line 71, replace the silent fallback with an explicit error:\n```rust\nif r <= l || b <= t {\n    return Err(CoreError::Win32 { code: 0, context: \"capture_region_raw: degenerate rect after clamping\" });\n}\n```\nThe callers in session.rs already use `.ok()` (lines 911, 950), so an error maps to `None` and the verification arm at line 952-960 falls through to `_ => None`, cleanly skipping verification rather than silently comparing full-screen frames. No other callers need changes - tiers.rs line 299 uses `Ok(Ok(r))` pattern matching which also handles the error gracefully.",
+      "evidence": "verify.rs lines 71-73 confirmed:\n```rust\nif r <= l || b <= t {\n    return Ok((full_rgba, full_w, full_h));\n}\n```\nThe session.rs act() method queries two separate rects: `capture_rect = self.foreground_window_rect()` (line 910) for before, and `after_capture_rect = self.foreground_window_rect()` (line 949) for after. Both call `capture_region_raw(...).ok()`. The guard at line 953 is `bw == aw && bh"
+    },
+    {
+      "lens": "bsr-correctness",
+      "title": "pick_provider tests use std::env::set_var in a multi-threaded test harness causing potential data races",
+      "sev": "low",
+      "file": "crates/ghost-session/src/vision.rs",
+      "where": "pick_provider_with_explicit_override test (lines 602-611)",
+      "problem": "`std::env::set_var` and `std::env::remove_var` are not thread-safe and Rust 1.81 deprecated them in multi-threaded contexts. The test harness runs tests in parallel by default. If another test reads any of the same env vars (`GHOST_VISION_PROVIDER`, `ANTHROPIC_API_KEY`, `NVIDIA_API_KEY`) concurrently, a data race occurs. The test also does not restore `GHOST_VISION_PROVIDER` inside a `finally`-equivalent (if `pick_provider()` panics mid-test, the vars are left set, polluting other tests). This is not a production bug but can cause non-deterministic test failures.",
+      "fix": "Wrap the call with `std::panic::catch_unwind` to guarantee cleanup on panic, or add the `serial_test` crate and annotate with `#[serial]`. Minimal fix (no new dependency):\n```rust\nstd::env::set_var(\"GHOST_VISION_PROVIDER\", \"anthropic\");\nstd::env::set_var(\"ANTHROPIC_API_KEY\", \"test\");\nstd::env::set_var(\"NVIDIA_API_KEY\", \"test\");\nlet result = std::panic::catch_unwind(|| pick_provider());\nstd::env::remove_var(\"GHOST_VISION_PROVIDER\");\nstd::env::remove_var(\"ANTHROPIC_API_KEY\");\nstd::env::remove_var(\"NVIDIA_API_KEY\");\nassert_eq!(result.unwrap().unwrap(), Provider::Anthropic);\n```",
+      "evidence": "vision.rs lines 602-611 confirmed:\n```\nfn pick_provider_with_explicit_override() {\n    std::env::set_var(\"GHOST_VISION_PROVIDER\", \"anthropic\");  // line 603\n    std::env::set_var(\"ANTHROPIC_API_KEY\", \"test\");            // line 604\n    std::env::set_var(\"NVIDIA_API_KEY\", \"test\");               // line 605\n    let p = pick_provider().unwrap();\n    std::env::remove_var(\"GHOST_VISION_PROVIDER\");     "
+    },
+    {
+      "lens": "prod-realism",
+      "title": "ghost_run retries fire with zero delay, turning transient failures into instant triple-failures",
+      "sev": "high",
+      "file": "crates/ghost-mcp/src/main.rs",
+      "where": "handle_ghost_run, lines 1084-1103",
+      "problem": "The retry loop `for attempt in 0..=max_retries` dispatches each attempt immediately after the previous one fails with no sleep between attempts. Default max_retries=2 means three back-to-back calls with no recovery time. For the common transient failure cases this system is designed for (app mid-load, focus settling after a window switch, OCR not yet seeing freshly rendered text), all three attempts fail within milliseconds of each other for the same underlying reason. The caller gets an error that looks like a hard failure when it was actually a timing issue that 200ms of settle time would have fixed.",
+      "fix": "Add a `tokio::time::sleep` call in the `Err` branch gated on `attempt < max_retries`. Insert after line 1101 (`last_err = Some(e);`):\n\n```rust\nif attempt < max_retries {\n    tokio::time::sleep(std::time::Duration::from_millis(\n        50u64.saturating_shl(attempt as u32).min(500)\n    )).await;\n}\n```\n\nThis gives 50ms before attempt 1 and 100ms before attempt 2 (capped at 500ms), which covers the primary transient cases (focus settle, OCR render lag, app mid-load). Requires adding `use std::time::Duration;` if not already imported, or using the inline `std::time::Duration::from_millis` form shown above.",
+      "evidence": "Confirmed in C:/Users/Krist/projects/active/ghost/crates/ghost-mcp/src/main.rs:\n\nLine 1068: `let max_retries = p[\"max_retries\"].as_u64().unwrap_or(2) as usize;`\n\nLines 1084-1103:\n```\nfor attempt in 0..=max_retries {\n    let outcome = dispatch_tool_inner(session, op, step, true).await;\n    match outcome {\n        Ok(v) => { results.push(v); succeeded = true; break; }\n        Err(e) => {\n           "
+    },
+    {
+      "lens": "prod-realism",
+      "title": "wait_stable calls blocking DXGI capture synchronously inside the async runtime without spawn_blocking",
+      "sev": "high",
+      "file": "crates/ghost-core/src/capture/idle.rs",
+      "where": "IdleDetector::wait_stable, line 75: capture_screen_downsample_raw(8)",
+      "problem": "`wait_stable` is an async fn that calls `capture_screen_downsample_raw` directly without `spawn_blocking`. That function acquires the `CAPTURE_STATE` Mutex and then calls `AcquireNextFrame` with a 50ms timeout (screen.rs:482). This is a synchronous blocking OS call inside the tokio async executor. Every `wait_for_idle` call with `stable_frames=3` blocks the entire tokio thread for up to 3*50ms=150ms per poll cycle, stalling all other concurrent MCP requests. The comment at session.rs:574 explicitly notes screenshot uses spawn_blocking for this exact reason; idle detection was missed.",
+      "fix": "Wrap the `capture_screen_downsample_raw` call in `wait_stable` with `tokio::task::spawn_blocking`, matching the pattern already used by `screenshot()` and `screenshot_region()`:\n\n```rust\nlet raw = tokio::task::spawn_blocking(|| crate::capture::screen::capture_screen_downsample_raw(8))\n    .await\n    .map_err(|e| CoreError::WorkerPanic(e.to_string()))??;\n```\n\nThis is the only change needed. The `tokio::time::sleep` at line 86 is already async-safe and does not need wrapping.",
+      "evidence": "idle.rs:75 -- `let raw = crate::capture::screen::capture_screen_downsample_raw(8)?;` -- direct synchronous call inside `async fn wait_stable`, no spawn_blocking at any level.\n\nscreen.rs:235-239 -- `capture_screen_downsample_raw` locks `CAPTURE_STATE.lock().unwrap()` (blocking mutex) then calls `capture_rgba` which calls `capture_rgba_inner`.\n\nscreen.rs:482 -- inside `capture_rgba_inner`: `let acqu"
+    },
+    {
+      "lens": "prod-realism",
+      "title": "STA pool job timeout silently reduces pool concurrency with no observable signal",
+      "sev": "medium",
+      "file": "crates/ghost-core/src/uia/sta_pool.rs",
+      "where": "StaPool::submit, lines 117-132",
+      "problem": "On job timeout the pool returns `CoreError::JobTimeout` to the caller but the worker thread continues executing the orphaned job until it finishes (which could be indefinitely if the UIA call hangs). While the worker is executing the orphaned job it cannot process new jobs. With a 1-worker pool (common for STA affinity) this means the pool is fully blocked. With a 2-worker pool, half capacity is silently lost. There is no metric, log counter, or health signal to tell the on-call engineer that workers are wedged. The only observable symptom is all subsequent STA jobs timing out too, creating a cascade that looks like the automation target is unresponsive.",
+      "fix": "1. Add `orphaned_jobs: Arc<AtomicUsize>` to `StaPool`; increment it in the `Err(_)` timeout arm and decrement when the worker's `reply.send` fails (indicating the caller already timed out). Expose the count via a `health()` method.\n2. Upgrade the timeout log from `tracing::warn!` to `tracing::error!` and include the worker ID so alerting rules can fire on it.\n3. In `spawn_worker`, after `reply.send(r)` returns `Err(_)` (closed channel = caller timed out), log the orphan completion and decrement the counter.\n4. Optionally: when an orphan is detected, call `Self::spawn_worker(...)` to restore pool capacity, and drop the orphaned thread when its job eventually finishes (requires tracking thread handles or using a scoped approach).",
+      "evidence": "sta_pool.rs lines 117-131 confirm the behavior verbatim:\n\n```rust\nmatch tokio::time::timeout(self.job_timeout, reply_rx).await {\n    // ... Ok branches ...\n    Err(_) => {\n        tracing::warn!(\n            \"orphaning STA job after {:?} timeout\",\n            self.job_timeout\n        );\n        Err(CoreError::JobTimeout)\n    }\n}\n```\n\nThe worker loop at line 68-82 is a plain `while let Ok((job, rep"
+    },
+    {
+      "lens": "reality-check",
+      "title": "ReflectionBuffer is never written to - feedback loop is dead code",
+      "sev": "high",
+      "file": "crates/ghost-session/src/session.rs",
+      "where": "GhostSession::reflection (field, line 56); locate_by_description (line 360 reads it)",
+      "problem": "The reflection ring buffer is read in `locate_by_description` (line 360: `self.reflection.failure_hint()`) to prepend failure hints to VLM prompts. However, `self.reflection.record_failure` and `self.reflection.record_success` are never called anywhere in the codebase - a codebase-wide grep for `self.reflection.record` or `reflection.record_failure` returns zero matches. The buffer is always empty at runtime, so `failure_hint()` always returns `None`, and the entire reflection/negative-hint feature described in the design is silently inoperative. The struct, tests, and VLM call integration are all wired up, but the write side is missing.",
+      "fix": "1. Wrap the field in RefCell: change session.rs line 56 from `pub reflection: crate::reflection::ReflectionBuffer` to `pub reflection: RefCell<crate::reflection::ReflectionBuffer>` and update the initializer at line 95 accordingly.\n\n2. After the `vision_locate` call in `locate_by_description` (around line 367-374), record outcomes:\n- On `None` / error: `self.reflection.borrow_mut().record_failure(hash_obs(description), format!(\"locate {description}\"), \"not found\");`\n- On `Some((vx, vy))`: `self.reflection.borrow_mut().record_success(hash_obs(description), format!(\"locate {description} -> ({vx},{vy})\"));`\n\n3. The `obs_hash` can be derived from the description string using the existing `hash_obs` helper or a simple DefaultHasher over the description bytes.\n\n4. Any existing callers that access `session.reflection` directly (currently none outside tests) would need `.borrow()` instead of direct field access.",
+      "evidence": "Confirmed by reading the actual code and a codebase-wide grep.\n\nsession.rs line 56: `pub reflection: crate::reflection::ReflectionBuffer` - plain field, not RefCell.\n\nsession.rs line 360 (the only call site for self.reflection outside reflection.rs itself): `let effective_description = if let Some(hint) = self.reflection.failure_hint() {`\n\nGrep for `record_failure|record_success` across all .rs fi"
+    },
+    {
+      "lens": "reality-check",
+      "title": "ghost_act missing from run_batch_op dispatch table - silently fails as unknown op",
+      "sev": "medium",
+      "file": "crates/ghost-mcp/src/main.rs",
+      "where": "run_batch_op (line 1664); dispatch table (lines 1671-1712)",
+      "problem": "`ghost_run` and `ghost_batch_actions` both dispatch steps through `run_batch_op`. The batch op table maps short names like `click`, `type`, `find`, `screenshot`, etc. to their full tool names. The `act` short-name is absent from the table. A step `{\"op\": \"ghost_act\", ...}` also fails because the full name is not in the table either - the only catch-all is `other => return Err(format!(\"unknown batch op: {other}\"))`. This means `ghost_run` steps that use the primary lean verb `ghost_act` silently produce an error instead of dispatching. Since `ghost_act` is the advertised primary action verb in the lean schema, this is a real gap for any agent that uses `ghost_run` flows.",
+      "fix": "Add `\"act\" | \"ghost_act\" =>` arm to the `match op` in `run_batch_op` at `/crates/ghost-mcp/src/main.rs` around line 1709, before the `other =>` arm:\n\n```rust\n\"act\" | \"ghost_act\" => \"ghost_act\",\nother => return Err(format!(\"unknown batch op: {other}\")),\n```\n\nThis matches the pattern used by all other short/full name pairs in the table and makes `ghost_batch_actions` consistent with `ghost_run`'s ability to dispatch `ghost_act`. Severity is medium (not high) because `ghost_run` - the primary flow runner - is unaffected; only the lower-level `ghost_batch_actions` tool is broken for this op.",
+      "evidence": "The gap is real but the scope in the finding is overstated. Confirmed code paths:\n\n1. `run_batch_op` match table (lines 1671-1710 in `crates/ghost-mcp/src/main.rs`): lists `\"click\"`, `\"type\"`, `\"find\"`, `\"screenshot\"`, etc. - `\"act\"` and `\"ghost_act\"` are absent. The catch-all at line 1710 is `other => return Err(format!(\"unknown batch op: {other}\"))`. So any `{\"op\": \"ghost_act\"}` or `{\"op\": \"act\""
+    },
+    {
+      "lens": "reality-check",
+      "title": "IdleDetector struct comment says 'stub' but the real implementation is present - honesty gap",
+      "sev": "low",
+      "file": "crates/ghost-core/src/capture/idle.rs",
+      "where": "IdleDetector struct doc comment (line 48-49)",
+      "problem": "The doc comment on `IdleDetector` reads: \"Stub DXGI-backed idle detector. Real implementation polls `IDXGIOutputDuplication`.\" However, `wait_stable` (line 64) is fully implemented: it calls `capture_screen_downsample_raw(8)`, hashes the result with blake3, and counts stable frames. It is not a stub. The misleading comment creates a false impression that this feature does not work, which could cause callers to unnecessarily skip `wait_for_idle` or discount its value in code review.",
+      "fix": "Update line 48 from `/// Stub DXGI-backed idle detector. Real implementation polls `IDXGIOutputDuplication`.` to something like `/// DXGI-backed idle detector. Polls screen state via `capture_screen_downsample_raw` with blake3 hash comparison across consecutive frames.` The `_placeholder` field can optionally be replaced with a named marker or removed if the struct gains real fields in a follow-up.",
+      "evidence": "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/capture/idle.rs line 48-49: `/// Stub DXGI-backed idle detector. Real implementation polls `IDXGIOutputDuplication`.` - but lines 64-88 show `wait_stable` is fully implemented: it calls `crate::capture::screen::capture_screen_downsample_raw(8)`, runs `hash_frame(&raw)`, and counts stable consecutive hashes in a polling loop. The struct fie"
+    },
+    {
+      "lens": "reality-check",
+      "title": "Legacy ghost_act schema (in legacy_tools_schema_full) only lists click and type in action enum, missing double_click/right_click/hover",
+      "sev": "low",
+      "file": "crates/ghost-mcp/src/main.rs",
+      "where": "legacy_tools_schema_full, ghost_act entry (line 1653-1658)",
+      "problem": "The legacy full schema (not returned by `tools/list` but used by some callers and tests) declares `ghost_act` action enum as `[\"click\", \"type\"]` only (line 1656). The live implementation in `handle_tool` and `act_at_coords` handles five actions: click, type, double_click, right_click, hover. The lean schema (returned by `tools/list`) correctly lists all five. The legacy schema discrepancy means any caller that inspects the legacy schema for validation (e.g., old comet-mcp) will reject valid `double_click`/`right_click`/`hover` invocations as schema violations. The test `ghost_act_schema_enum_has_all_five_actions` only checks the lean schema, so this goes uncaught.",
+      "fix": "In `legacy_tools_schema_full` at main.rs:1655, change the action enum from `[\"click\", \"type\"]` to `[\"click\", \"type\", \"double_click\", \"right_click\", \"hover\"]` to match the lean schema at line 1267 and the live implementation.",
+      "evidence": "main.rs:1655 (legacy schema): `\"action\": { \"type\": \"string\", \"enum\": [\"click\", \"type\"], ...}` -- only 2 actions listed. Compared to main.rs:1267 (lean schema): `\"enum\": [\"click\", \"type\", \"double_click\", \"right_click\", \"hover\"]` -- all 5 listed. The implementation at main.rs:851-863 and the error string at line 732 (`\"click|type|double_click|right_click|hover\"`) confirm all 5 are live and handled. "
+    },
+    {
+      "lens": "evidence-issues",
+      "title": "hotkey() leaks modifier keys on mid-sequence SendInput failure",
+      "sev": "high",
+      "file": "crates/ghost-session/src/session.rs",
+      "where": "hotkey() lines 659-665",
+      "problem": "Modifier keys (Ctrl, Alt, Shift, Win) are pressed with core_key_down() at lines 659-661, then press_key() is called at line 662. If press_key() returns Err (e.g. SendInput partial-delivery error code: 0), the function immediately returns that Err via the ? operator without executing the core_key_up() loop at lines 663-665. Those modifier keys remain physically held in Windows state for the rest of the session, corrupting all subsequent keyboard input for every app on the desktop. The only recovery is ghost_stop() (which calls release_all_modifiers()) or the user physically pressing and releasing each modifier key. In an agent loop this silently breaks all subsequent typing, hotkeys, and text input.",
+      "fix": "Replace lines 659-665 with an explicit cleanup block so modifiers are always released regardless of press_key outcome:\n\n```rust\nlet mut pressed: Vec<u16> = Vec::new();\nfor vk in &mod_vks {\n    core_key_down(*vk).map_err(GhostError::Core)?;\n    pressed.push(*vk);\n}\nlet result = press_key(key_vk).map_err(GhostError::Core);\nfor vk in pressed.iter().rev() {\n    let _ = core_key_up(*vk); // best-effort; ignore secondary errors\n}\nresult?;\n```\n\nThis ensures modifiers are released on both the success and error paths. The secondary `core_key_up` errors are intentionally swallowed to preserve the original error. The `?` after the cleanup loop is reached in all cases.",
+      "evidence": "Confirmed at C:/Users/Krist/projects/active/ghost/crates/ghost-session/src/session.rs lines 659-665:\n\n```rust\nfor vk in &mod_vks {\n    core_key_down(*vk).map_err(GhostError::Core)?;  // line 660\n}\npress_key(key_vk).map_err(GhostError::Core)?;       // line 662 \u2014 ? exits here on failure\nfor vk in mod_vks.iter().rev() {\n    core_key_up(*vk).map_err(GhostError::Core)?;    // lines 663-665 never reach"
+    },
+    {
+      "lens": "evidence-issues",
+      "title": "act() calls capture_region_raw synchronously on the async executor thread, blocking the event loop",
+      "sev": "high",
+      "file": "crates/ghost-session/src/session.rs",
+      "where": "act() lines 911, 950",
+      "problem": "capture_region_raw() at lines 911 and 950 calls capture_screen_full_rgba() which acquires CAPTURE_STATE Mutex and does DXGI AcquireNextFrame (can block 5-50ms per call). Both calls are made directly on the async executor thread with no spawn_blocking wrapper. This blocks the entire single-thread tokio runtime for up to 100ms per ghost_act invocation (before + after capture). The same issue was explicitly fixed for screenshot() (see line 572-575 comment: 'HIGH-2: runs on a spawn_blocking thread so the DXGI wait never blocks a tokio worker'), but act() was not updated. In an agent loop issuing many ghost_act calls, the event-bus wait_for_change and all other async work queues behind these blocking captures.",
+      "fix": "Wrap both capture_region_raw calls in spawn_blocking, matching the pattern already used by screenshot():\n\nsession.rs line 910-911:\n```rust\nlet capture_rect = self.foreground_window_rect();\nlet before_capture = tokio::task::spawn_blocking(move || capture_region_raw(capture_rect))\n    .await\n    .ok()\n    .and_then(|r| r.ok());\n```\n\nsession.rs line 949-950:\n```rust\nlet after_capture_rect = self.foreground_window_rect();\nlet after_capture = tokio::task::spawn_blocking(move || capture_region_raw(after_capture_rect))\n    .await\n    .ok()\n    .and_then(|r| r.ok());\n```\n\nThe CAPTURE_STATE Mutex is already documented as MTA-safe (screen.rs:163), so moving acquisition to a blocking thread pool is safe.",
+      "evidence": "session.rs:911 `let before_capture = capture_region_raw(capture_rect).ok();` and session.rs:950 `let after_capture = capture_region_raw(after_capture_rect).ok();` are bare synchronous calls with no spawn_blocking wrapper.\n\ncapture_region_raw (verify.rs:63) calls `super::screen::capture_screen_full_rgba()`, which at screen.rs:296 does `let mut guard = CAPTURE_STATE.lock().unwrap();` (the global Mut"
+    },
+    {
+      "lens": "evidence-issues",
+      "title": "ghost_key handler splits on '+' so keys with '+' in the name produce empty-string key fragments",
+      "sev": "medium",
+      "file": "crates/ghost-mcp/src/main.rs",
+      "where": "handle_ghost_key() line 914",
+      "problem": "The keys string is split on every '+' character: `keys.split('+').collect()`. A call like ghost_key({keys:'Ctrl++'}) (Ctrl+Plus, needed for zoom-in in terminals/browsers) splits into ['Ctrl', '', ''], making the last segment (the 'key') an empty string. name_to_vk('') returns None, which becomes an error: 'unknown key name'. The error is generic and gives the agent no clue that '+' is the problem. Any key combination using the NumpadAdd or OEM-Plus key (VK_ADD/VK_OEM_PLUS) that an agent would try to type via ghost_key fails silently.",
+      "fix": "Two-part fix: (1) In `name_to_vk` (keyboard.rs), add arms: `\"+\" | \"oem_plus\" | \"plus\" => Some(VK_OEM_PLUS)` and `\"numpad+\" | \"add\" => Some(VK_ADD)`. (2) In `handle_ghost_key` (main.rs), after splitting on `+`, check whether the last segment is empty and replace it with `\"+\"` before dispatching, so `\"Ctrl++\"` resolves to modifier=Ctrl, key=`\"+\"` -> VK_OEM_PLUS. This handles the common case without requiring callers to know the OEM_PLUS alias.",
+      "evidence": "Confirmed in two files:\n\ncrates/ghost-mcp/src/main.rs line 914:\n  `let parts: Vec<&str> = keys.split('+').collect();`\n  Line 921: `let args = json!({ \"modifiers\": mods, \"key\": key[0] });`\n  Input `\"Ctrl++\"` splits to `[\"Ctrl\", \"\", \"\"]`; `key[0]` = `\"\"`.\n\ncrates/ghost-core/src/input/keyboard.rs lines 113-159:\n  `pub fn name_to_vk(name: &str) -> Option<VIRTUAL_KEY>` has no arm for `\"\"`, `\"+\"`, `\"oem"
+    },
+    {
+      "lens": "evidence-issues",
+      "title": "ghost_window op=launch schema claims 'name' works as exe path but implementation reads 'exe'",
+      "sev": "medium",
+      "file": "crates/ghost-mcp/src/main.rs",
+      "where": "lean_tools_schema() line 1347, handle_tool 'ghost_launch' line 419",
+      "problem": "The ghost_window lean schema at line 1347 documents: 'name: Window title (op=focus|state) or exe path (op=launch)'. An LLM agent reading this description will naturally pass {op:'launch', name:'notepad.exe'} because the description says name doubles as exe path. But handle_ghost_window routes op=launch to ghost_launch (line 959), which reads p['exe'] (line 419-420), not p['name']. The call fails with 'missing param: exe'. The schema has both a 'name' and an 'exe' field documented separately, but the description text causes the model to use the wrong one. An agent getting the error 'missing param: exe' while it passed 'name' has no clear path to fix the call.",
+      "fix": "Option (b) is the safer fix with zero schema churn: in the ghost_launch handler at line 419, change `p[\"exe\"].as_str()` to `p[\"exe\"].as_str().or_else(|| p[\"name\"].as_str())` so both field names work. Then clean up the schema description on `name` to remove the misleading \"or exe path (op=launch)\" clause, since `exe` is the canonical field and is already separately documented on line 1349.",
+      "evidence": "Line 1347 (lean schema): `\"name\": { \"type\": \"string\", \"description\": \"Window title (op=focus|state) or exe path (op=launch)\" }` -- explicitly says name doubles as exe path for launch. Line 1349 also documents a separate `\"exe\"` field: `\"description\": \"Executable path (op=launch)\"`. Line 959: op=launch routes to `handle_tool(session, \"ghost_launch\", p)` passing the same params map. Line 419: `let e"
+    },
+    {
+      "lens": "evidence-issues",
+      "title": "OcrTier silently swallows all errors from find_text_local, masking misconfiguration",
+      "sev": "low",
+      "file": "crates/ghost-session/src/tiers.rs",
+      "where": "OcrTier::locate() line 202-203",
+      "problem": "OcrTier::locate() at line 202 maps any Err from self.session.find_text_local() to TierResult::Miss with no logging. WinRT OCR errors (missing language pack, capture failure, WinRT init error) are indistinguishable from a legitimate 'text not on screen' result. An agent trying to locate text that is visually present will silently fall through to the VLM tier and incur API cost, with no log entry explaining why OCR failed. This matches VlmTier which has a tracing::warn for its errors (line 245-247), but OcrTier has no equivalent.",
+      "fix": "Apply the same pattern as VlmTier at line 203 in `crates/ghost-session/src/tiers.rs`:\n\n```rust\nErr(e) => {\n    tracing::warn!(error=%e, \"OcrTier locate failed (treated as Miss)\");\n    TierResult::Miss\n}\n```",
+      "evidence": "Confirmed at `crates/ghost-session/src/tiers.rs` line 203:\n\n```rust\nErr(_) => TierResult::Miss,\n```\n\nThe error is discarded with `_` binding and no log. VlmTier at lines 243-248 has the corrected pattern with a comment that explicitly labels this as a \"LOW\" issue:\n\n```rust\n// LOW (VlmTier error signal): log failures instead of silently swallowing\n// misconfigured-API-key and network errors.\nErr(e)"
+    },
+    {
+      "lens": "com-unsafe",
+      "title": "GDI BitmapGuard drops selected object on OOM panic",
+      "sev": "low",
+      "file": "crates/ghost-core/src/capture/screen.rs",
+      "where": "capture_screen_gdi, lines 89-128",
+      "problem": "The SelectObject restore at line 128 is done inline, not in a RAII Drop. Between line 89 (SelectObject bmp into mem_dc) and line 128 (SelectObject restore), the code at line 114 calls `vec![0u8; width * height * 4]` which panics on OOM. On panic, BitmapGuard::drop calls DeleteObject on bmp while it is still selected into mem_dc, violating the GDI contract ('An application should not delete a GDI object when it is still selected into a device context'). On some GDI drivers this causes silent heap corruption or a deferred crash.",
+      "fix": "Move the `vec!` allocation (line 114) to before `SelectObject` (line 89), or add a RAII struct immediately after line 89 that restores `old_gdi` on drop:\n\n```rust\nstruct SelectGuard { dc: HDC, old: HGDIOBJ }\nimpl Drop for SelectGuard {\n    fn drop(&mut self) { unsafe { SelectObject(self.dc, self.old); } }\n}\n// immediately after line 89:\nlet _restore = SelectGuard { dc: mem_dc.0, old: old_gdi };\n```\n\nThis ensures the restore runs before BitmapGuard and MemDcGuard drop, even on panic. The simpler alternative - move `vec![0u8; width * height * 4]` to before line 89 - eliminates the only panic source between select and restore entirely.",
+      "evidence": "Confirmed by reading /crates/ghost-core/src/capture/screen.rs lines 85-128:\n\n- Line 85: `let bmp = BitmapGuard(raw_bmp);` - RAII guard that calls `DeleteObject` on drop\n- Line 89: `let old_gdi = SelectObject(mem_dc.0, HGDIOBJ(bmp.0.0));` - bitmap selected into mem_dc\n- Line 114: `let mut bgra = vec![0u8; width * height * 4];` - allocation; can panic on OOM\n- Line 128: `let _ = SelectObject(mem_dc."
+    },
+    {
+      "lens": "com-unsafe",
+      "title": "GlobalUnlock called unconditionally even when GlobalLock fails",
+      "sev": "low",
+      "file": "crates/ghost-core/src/system/clipboard.rs",
+      "where": "get_clipboard, line 33",
+      "problem": "In get_clipboard(), GlobalUnlock(hglob) at line 33 is called in the outer else-branch that covers any non-null hglob, regardless of whether GlobalLock at line 22 returned null (failure). The inner if/else at line 23 correctly skips the data read when ptr is null, but GlobalUnlock executes either way. Per MSDN, GlobalUnlock should only be called if GlobalLock succeeded. Calling it after a failed lock decrements an uninitialized lock count and can corrupt the global heap object state.",
+      "fix": "Move GlobalUnlock inside the `!ptr.is_null()` branch so it only runs when GlobalLock succeeded. Replace lines 23-34 with: `let s = if !ptr.is_null() { let mut len = 0usize; while len < 10_000_000 && *ptr.add(len) != 0 { len += 1; } let slice = std::slice::from_raw_parts(ptr, len); let s = String::from_utf16_lossy(slice).to_string(); let _ = GlobalUnlock(hglob); s } else { String::new() };`",
+      "evidence": "Confirmed at clipboard.rs lines 22-34. GlobalLock result is captured in `ptr` (line 22). The `if !ptr.is_null()` branch (line 23) correctly gates the data read, but `let _ = GlobalUnlock(hglob);` at line 33 is positioned after the if/else block, inside only the outer `else { }` that checks `!hglob.0.is_null()`. It therefore executes unconditionally when hglob is non-null, regardless of whether Glo"
+    },
+    {
+      "lens": "concurrency",
+      "title": "wait_stable calls blocking AcquireNextFrame (up to 50ms) directly on the async executor thread",
+      "sev": "high",
+      "file": "crates/ghost-core/src/capture/idle.rs",
+      "where": "IdleDetector::wait_stable, line 75",
+      "problem": "wait_stable is an async fn that calls capture_screen_downsample_raw(8) synchronously on line 75. capture_screen_downsample_raw acquires CAPTURE_STATE (Mutex) and then calls capture_rgba -> capture_rgba_inner -> AcquireNextFrame(50ms timeout). That 50ms blocking OS call happens on the tokio executor thread while holding the global CAPTURE_STATE mutex, with no spawn_blocking wrapper. The loop polls every 16ms (tokio::time::sleep at line 86), so each iteration can block the entire executor (including all other pending async tasks and timer resolution) for up to 50ms. ghost-http's session thread uses new_current_thread, so this stalls all session commands while idle detection runs. The code comment in screen.rs lines 572-576 explicitly explains why screenshot() uses spawn_blocking for the same reason; wait_stable missed the same treatment.",
+      "fix": "In idle.rs, replace the synchronous call on line 75:\n  `let raw = crate::capture::screen::capture_screen_downsample_raw(8)?;`\nwith:\n  `let raw = tokio::task::spawn_blocking(|| crate::capture::screen::capture_screen_downsample_raw(8)).await.map_err(|e| CoreError::WorkerPanic(e.to_string()))??;`\n\nThis is exactly how screenshot() and screenshot_region() in session.rs handle the same DXGI AcquireNextFrame latency. CAPTURE_STATE is a global Mutex so cross-thread access is safe (D3D11/DXGI objects are MTA-safe per the comment at session.rs:573).",
+      "evidence": "Confirmed by reading the actual code:\n\nidle.rs line 75 (inside async fn wait_stable):\n  `let raw = crate::capture::screen::capture_screen_downsample_raw(8)?;`\n\nscreen.rs lines 235-239 (capture_screen_downsample_raw):\n  `let mut guard = CAPTURE_STATE.lock().unwrap();` then calls `capture_rgba(guard.as_mut().unwrap())`\n\nscreen.rs line 482 (capture_rgba_inner, called synchronously from capture_rgba):"
+    },
+    {
+      "lens": "concurrency",
+      "title": "CAPTURE_STATE mutex poisoning propagates as panic to all future callers",
+      "sev": "low",
+      "file": "crates/ghost-core/src/capture/screen.rs",
+      "where": "capture_screen / capture_screen_full_rgba / capture_screen_downsample_raw / capture_screen_region, lines 212-296",
+      "problem": "All four public capture entry points call CAPTURE_STATE.lock().unwrap(). If any capture call panics after locking (e.g., a panic inside capture_rgba_inner or inside encode_png_rgba with a bad buffer) the Mutex becomes permanently poisoned. Every subsequent call to any capture function then also panics on unwrap(), rendering the entire capture subsystem dead for the process lifetime. The DXGI COM objects (ID3D11Device, IDXGIOutputDuplication) are wrapped in CaptureContext with unsafe Send impls, meaning a COM-level assertion or AV could trigger a panic while the lock is held.",
+      "fix": "Replace all four `.lock().unwrap()` calls with `.lock().unwrap_or_else(|e| e.into_inner())` to recover from a poisoned mutex by reclaiming the inner value. Since the context is re-initialized when `None`, a recovered poisoned guard is safe to use - the next call will reinitialize the state. This is a one-line change per entry point:\n\n```rust\nlet mut guard = CAPTURE_STATE.lock().unwrap_or_else(|e| e.into_inner());\n```\n\nAdditionally, the internal `.unwrap()` calls at lines 477 and 506 inside `capture_rgba_inner` should be converted to `ok_or(CoreError::Win32 { code: 0, context: \"duplication unexpectedly None\" })?` to eliminate the only realistic in-lock panic path entirely.",
+      "evidence": "All four entry points are confirmed at the cited lines:\n- line 212: `let mut guard = CAPTURE_STATE.lock().unwrap();`\n- line 223: `let mut guard = CAPTURE_STATE.lock().unwrap();`\n- line 235: `let mut guard = CAPTURE_STATE.lock().unwrap();`\n- line 296: `let mut guard = CAPTURE_STATE.lock().unwrap();`\n\nThe finding is real but the severity is overstated. The reviewer claimed `encode_png_rgba` and COM-"
+    },
+    {
+      "lens": "security",
+      "title": "ghost_http_get/post: no SSRF allowlist",
+      "sev": "high",
+      "file": "crates/ghost-mcp/src/main.rs",
+      "where": "ghost_http_get handler lines 578-613, ghost_http_post lines 594-613",
+      "problem": "Both ghost_http_get and ghost_http_post accept arbitrary URLs with no allowlist or blocklist. The reqwest client follows redirects by default (no redirect policy set). A caller can hit http://169.254.169.254/latest/meta-data/ (AWS instance metadata), http://169.254.169.254/computeMetadata/v1/ (GCP), http://100.100.100.200/ (Alibaba), other localhost services (http://127.0.0.1:6379/ Redis, http://127.0.0.1:5432/ Postgres, etc.), or use a redirect chain to bypass IP-based checks. The ghost-http REST server (port 7878) exposes these same verbs without any authentication, so any process or browser page on the same machine can reach them. The raw response body (including cloud creds from metadata endpoints) is returned verbatim in the tool result.",
+      "fix": "In crates/ghost-mcp/src/main.rs:\n\n1. Add a `validate_url` function before the http_client builder that parses the URL with the `url` crate, rejects non-http/https schemes, resolves the hostname to an IP, and blocks RFC-1918 / loopback / link-local ranges (127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, ::1, fd00::/8). Return an error string on rejection.\n\n2. Add `.redirect(reqwest::redirect::Policy::none())` to the http_client() builder (line 120) to prevent redirect-chain bypass.\n\n3. Call `validate_url(url)?` at line 579 (before `http_client().get(url)`) and at line 595 (before `.post(url)`).\n\nNote: the ghost-http REST server (crates/ghost-http/src/main.rs) does not expose HTTP-fetch endpoints -- it only exposes desktop-automation verbs -- so no SSRF surface exists there.",
+      "evidence": "All three parts of the finding are confirmed by reading the actual source.\n\n1. No URL validation in ghost_http_get (main.rs:578-593):\n   ```\n   \"ghost_http_get\" => {\n       let url = p[\"url\"].as_str().ok_or(\"missing param: url\")?;\n       ...\n       let mut req = http_client().get(url);\n       ...\n       let body = resp.text().await.map_err(|e| e.to_string())?;\n       Ok(json!({ \"status\": status, \""
+    },
+    {
+      "lens": "security",
+      "title": "ghost-http CorsLayer::permissive() enables browser-based CSRF with no token",
+      "sev": "medium",
+      "file": "crates/ghost-http/src/main.rs",
+      "where": "line 298: .layer(tower_http::cors::CorsLayer::permissive())",
+      "problem": "The ghost-http server adds `Access-Control-Allow-Origin: *` and allows all methods/headers via CorsLayer::permissive(). Although it binds to 127.0.0.1 (loopback), the permissive CORS headers mean any web page open in a local browser can POST to http://127.0.0.1:7878/launch, /click, /run, etc. via fetch() \u2014 a classic localhost CSRF vector. There is no bearer token, Origin check, or CSRF mitigation. A malicious web page visited by the user can control the desktop via ghost-http.",
+      "fix": "Two independent changes are needed. First, replace CorsLayer::permissive() with no CORS layer at all (remove the line entirely), since the stated callers are curl and local scripts -- not browsers. If a browser caller is ever legitimately needed, use `CorsLayer::new().allow_origin(\"null\".parse::<HeaderValue>().unwrap())` to block cross-origin fetches explicitly. Second, add a shared-secret token check: add a `--token` CLI flag (or read `GHOST_HTTP_TOKEN` env var); add an axum middleware that rejects any request missing `Authorization: Bearer <token>` with 401. Both changes are small and additive -- the Cli struct and the router layer are already the right extension points.",
+      "evidence": "Confirmed at crates/ghost-http/src/main.rs line 298: `.layer(tower_http::cors::CorsLayer::permissive())`. The Cli struct (lines 19-29) has only `--addr` and `--timeout-ms` flags -- no `--token` or auth option. A full-text search for `token`, `auth`, `bearer`, `secret`, `Authorization`, `middleware`, `csrf` across all .rs and .md files in the crate returned zero matches in ghost-http. The server bi"
+    },
+    {
+      "lens": "security",
+      "title": "MCP stdin: unbounded line length allows OOM via single-line JSON",
+      "sev": "low",
+      "file": "crates/ghost-mcp/src/main.rs",
+      "where": "lines 164-191: for line in stdin.lock().lines()",
+      "problem": "The MCP main loop reads lines from stdin using std::io::BufRead::lines() with no maximum line length. A client can send a single line with an arbitrarily large payload (e.g. a multi-GB base64-encoded image embedded in the JSON arguments for ghost_screenshot or ghost_http_post body). Rust's BufRead::lines() will allocate until system memory is exhausted. This is a denial-of-service: the process is killed by OOM, dropping the MCP session. While MCP is typically pipe-based and the remote end is a trusted client, this still matters when ghost-mcp is exposed via a network bridge or when the client is a model that can be prompted to send large inputs.",
+      "fix": "Replace the `stdin.lock().lines()` iterator with a manual `read_line` loop capped at a reasonable limit (e.g. 64MB). At the top of main.rs add `const MAX_LINE: usize = 64 * 1024 * 1024;`, then replace the for-loop with: `let mut reader = std::io::BufReader::new(stdin.lock()); let mut buf = String::new(); while reader.read_line(&mut buf)? > 0 { if buf.len() > MAX_LINE { /* write error response and break or continue */ buf.clear(); continue; } ... buf.clear(); }`. This closes the OOM vector without affecting any legitimate payload size.",
+      "evidence": "Confirmed at C:/Users/Krist/projects/active/ghost/crates/ghost-mcp/src/main.rs line 164: `for line in stdin.lock().lines() {` - raw BufRead::lines() with no size cap. The entire main loop (lines 164-191) reads arbitrary-length lines, deserializes at line 176, and has no MAX_LINE constant, no read_line-with-limit pattern, and no wrapping reader. No accepted-debt comment documents this as intentiona"
+    },
+    {
+      "lens": "security",
+      "title": "ghost_wait ms: no upper-bound cap hangs the MCP server indefinitely",
+      "sev": "medium",
+      "file": "crates/ghost-mcp/src/main.rs",
+      "where": "line 521-522: let ms = p[\"ms\"].as_u64().ok_or(\"missing param: ms\")?; session.wait(ms).await;",
+      "problem": "ghost_wait with for=ms (the default path) passes the caller-supplied ms value directly to tokio::time::sleep with no upper-bound cap. A caller can pass ms=18446744073709551615 (u64::MAX, ~585 million years). Because ghost-mcp runs on a single-threaded tokio current-thread runtime, this sleep blocks all subsequent tool calls indefinitely. The server appears live (the process is running) but responds to nothing. The same path is reachable through ghost_batch_actions (op=wait) and ghost_run steps. The timeout_ms parameters on wait_until, wait_for_idle, wait_for_event also lack caps but those have their own internal abort logic; only the raw ms sleep does not.",
+      "fix": "Add a cap before the await in `crates/ghost-mcp/src/main.rs` at the `ghost_wait` dispatch site, and also inside `session.wait` as a defense-in-depth layer:\n\nIn `main.rs` lines 520-523, change to:\n```rust\n\"ghost_wait\" => {\n    let ms = p[\"ms\"].as_u64().ok_or(\"missing param: ms\")?;\n    if ms > 300_000 {\n        return Err(format!(\"ghost_wait: ms {} exceeds maximum allowed 300000\", ms));\n    }\n    session.wait(ms).await;\n```\n\nOr as a silent cap: `let ms = ms.min(300_000);`. Returning an error is preferable so the caller knows their value was rejected rather than silently truncated. 300 seconds (5 min) is generous for browser automation; 60 seconds would be more appropriate. The same cap should be applied to the `wait` op path in `run_batch_op` since it routes through `dispatch_tool_inner` -> same `ghost_wait` branch and is already covered by the fix above.",
+      "evidence": "Confirmed at three layers:\n\n1. `crates/ghost-mcp/src/main.rs` lines 520-523:\n   ```\n   \"ghost_wait\" => {\n       let ms = p[\"ms\"].as_u64().ok_or(\"missing param: ms\")?;\n       session.wait(ms).await;\n   ```\n   No cap on `ms` before the await.\n\n2. `crates/ghost-session/src/session.rs` lines 746-748:\n   ```\n   pub async fn wait(&self, ms: u64) {\n       tokio::time::sleep(Duration::from_millis(ms)).awa"
+    },
+    {
+      "lens": "security",
+      "title": "VLM API error body echoed into tool result can expose provider error details",
+      "sev": "low",
+      "file": "crates/ghost-session/src/vision.rs",
+      "where": "lines 188-190 (extract_via_openai_compat), 231-233 (extract_via_anthropic), 401-404 (locate_via_openai_compat), 520-522 (locate_via_anthropic)",
+      "problem": "When the NVIDIA or Anthropic API returns a non-2xx status, the raw HTTP response body is included verbatim in the GhostError message: `format!(\"openai-compat extract {status}: {body}\")`. This error propagates through GhostSession -> handle_tool -> wrap_envelope -> wrap_tool_result -> MCP text content, making the raw body visible to the MCP caller. API providers have been known to include echoed request fields or partial auth metadata in 401/403 error bodies. More concretely, a 429 body typically includes account tier info; a 403 body may include the masked key prefix. Additionally, when GHOST_VISION_BASE_URL points at a self-hosted endpoint, that endpoint's error body (which could contain local network topology, internal service names, or stack traces) is surfaced.",
+      "fix": "In each of the four error sites, cap the body before embedding it in the error message. Replace the pattern:\n\n```rust\nlet body = resp.text().await.unwrap_or_default();\nreturn Err(GhostError::Vision(format!(\"openai-compat extract {status}: {body}\")));\n```\n\nwith:\n\n```rust\nlet body = resp.text().await.unwrap_or_default();\nlet body_preview: String = body.chars().take(500).collect();\nreturn Err(GhostError::Vision(format!(\"openai-compat extract {status}: {body_preview}\")));\n```\n\nApply the same `body_preview` truncation to the three other sites (lines 231-233, 401-404, 519-522). A 500-char cap is sufficient for diagnostic use and prevents multi-KB stack traces or unexpectedly large error payloads from leaking through. No additional secret-pattern stripping is needed since the API key is sent as a request header and never echoed back in provider error bodies under normal operation.",
+      "evidence": "All four cited locations confirmed in `/crates/ghost-session/src/vision.rs`:\n\n- Line 188-190 (`extract_via_openai_compat`): `let body = resp.text().await.unwrap_or_default(); return Err(GhostError::Vision(format!(\"openai-compat extract {status}: {body}\")));`\n- Line 231-233 (`extract_via_anthropic`): `let body = resp.text().await.unwrap_or_default(); return Err(GhostError::Vision(format!(\"anthropic"
+    },
+    {
+      "lens": "generalization",
+      "title": "UI-TARS/Qwen norm-coord VLM response format silently fails in the live dispatch path",
+      "sev": "medium",
+      "file": "crates/ghost-session/src/vision.rs",
+      "where": "parse_coord_response (line 276)",
+      "problem": "The live VLM dispatch path uses a local `parse_coord_response` function that only handles pixel-space JSON (`{\"x\": ..., \"y\": ...}`). When any model that emits UI-TARS/Qwen action-call format (`click(start_box='(500, 375)')`) or bare tuple format is configured via `GHOST_VISION_BASE_URL` (e.g. a self-hosted Qwen-VL or Llama-3.2-Vision instance that adopts the UI-TARS protocol), the response contains no JSON object and `parse_coord_response` returns `Err(\"no JSON object in vision response\")`. The fully-featured `parse_vlm_response` in `crates/ghost-ground/src/parser.rs` (which handles action-call, bare-tuple, norm-coord, and prose-JSON formats) is exported from `ghost-ground` but never called anywhere in `ghost-session`. This means any UI-TARS-compatible model fails completely even though the handling code exists.",
+      "fix": "In vision.rs, replace the two call sites of `parse_coord_response` (line 414 in `locate_via_openai_compat` and line 532 in `locate_via_anthropic`) with calls to `ghost_ground::parser::parse_vlm_response`. Map the result to `Option<(i32, i32)>` by checking `parsed.not_found` and converting `ParsedCoord` using `ghost_ground::types::norm_to_px` when `space == CoordSpace::Norm`, or passing coordinates directly when `space == CoordSpace::Pixels`. The redundant local `parse_coord_response` function and its `Coord` struct can then be removed. The `final_size` parameter already present in both callers provides the dimensions needed for norm-to-pixel conversion.",
+      "evidence": "The finding is confirmed by the actual code, but the severity is lower than reported because of a partial mitigation.\n\nvision.rs line 276-299: `parse_coord_response` only handles pixel-space JSON:\n```rust\nfn parse_coord_response(text: &str) -> Result<Option<(i32, i32)>> {\n    ...\n    } else {\n        return Err(GhostError::Vision(format!(\"no JSON object in vision response: `{cleaned}`\")));\n    };\n"
+    },
+    {
+      "lens": "generalization",
+      "title": "OCR region clamping silently discards multi-monitor negative-coordinate windows",
+      "sev": "medium",
+      "file": "crates/ghost-core/src/ocr.rs",
+      "where": "capture_and_ocr (line 83)",
+      "problem": "In `capture_and_ocr`, the region left/top are clamped with `.max(0) as usize`. On a multi-monitor setup where the user's primary monitor is center or right (common on Windows), a window on the left monitor has a negative left coordinate (e.g. `(-1920, 0, 0, 1080)`). The clamp `l = l.max(0) as usize = 0` and `r = (r as usize).min(full_w) = 0`, producing `r <= l` which triggers the `invalid region rect` error. OCR and the OCR grounding tier then return `Miss` or `Err` for any window entirely on a negative-X monitor. The `find_text_local` and `click_text_local` tools silently fail to find any text in such windows.",
+      "fix": "Two-layer fix required:\n\n1. In capture/screen.rs, replace SM_CXSCREEN/SM_CYSCREEN with SM_CXVIRTUALSCREEN/SM_CYVIRTUALSCREEN and pass SM_XVIRTUALSCREEN/SM_YVIRTUALSCREEN as the BitBlt source origin to capture the full virtual desktop. For DXGI, enumerate all outputs and composite them, or use a DXGI factory that covers the virtual desktop.\n\n2. In ocr.rs (and identically in capture_screen_region in screen.rs), before clamping: read SM_XVIRTUALSCREEN/SM_YVIRTUALSCREEN and subtract the virtual origin so pixel coordinates are relative to the captured buffer, not the primary monitor origin. After fixing the capture layer to produce a full virtual-desktop buffer, the offset arithmetic becomes: `let l = (l - virt_x).max(0) as usize` etc.\n\nAt minimum (without fixing the capture layer), detect r <= l || b <= t after clamping and return a descriptive error: `\"invalid region rect: window may be on a non-primary monitor with negative coordinates\"` instead of the opaque \"invalid region rect\".",
+      "evidence": "Confirmed in two layers:\n\n1. crates/ghost-core/src/ocr.rs lines 83-88:\n```rust\nlet l = l.max(0) as usize;\nlet t = t.max(0) as usize;\nlet r = (r as usize).min(full_w);\nlet b = (b as usize).min(full_h);\nif r <= l || b <= t {\n    return Err(CoreError::Win32 { code: 0, context: \"invalid region rect\" });\n}\n```\nFor a window at (-1920, 0, 0, 1080): l clamps to 0, r clamps to min(0, full_w) = 0, then r <="
+    },
+    {
+      "lens": "generalization",
+      "title": "ghost_key with keys='+' silently routes to hotkey with empty modifier and empty key name",
+      "sev": "low",
+      "file": "crates/ghost-mcp/src/main.rs",
+      "where": "handle_ghost_key (line 914)",
+      "problem": "When `keys='+'` is supplied, `\"+\".split('+')` yields `[\"\", \"\"]` (two empty strings). `parts.len() == 2` so the hotkey path is taken with `modifiers=[Value::String(\"\")]` and `key=\"\"`. This reaches `session.hotkey(&[\"\"], \"\")` which calls `name_to_vk(\"\")` returning `None`, producing error `Win32 { code: 0, context: \"unknown modifier name\" }`. The error message gives no hint that the input `'+'` was the problem. Similarly, `keys='Ctrl+'` produces `modifiers=[\"Ctrl\"]` and `key=\"\"` (empty key), which fails with `\"unknown key name\"` - again no mention of the trailing `+`. While these are error paths and not panics, the diagnostics are misleading.",
+      "fix": "Add an empty-segment guard immediately after the split at line 914:\n  if parts.iter().any(|p| p.trim().is_empty()) {\n      return Err(format!(\"ghost_key: malformed 'keys' value {:?} -- segments after splitting on '+' must be non-empty (e.g. 'Ctrl+C', not 'Ctrl+' or '+')\", keys));\n  }\nThis catches keys=\"+\", keys=\"Ctrl+\", and keys=\"+C\" before they silently reach name_to_vk with empty strings.",
+      "evidence": "crates/ghost-mcp/src/main.rs lines 914-922:\n  let parts: Vec<&str> = keys.split('+').collect();\n  if parts.len() == 1 { ... }  // single-key path\n  let (modifiers, key) = parts.split_at(parts.len() - 1);\n  let mods: Vec<Value> = modifiers.iter().map(|m| Value::String(m.to_string())).collect();\n  let args = json!({ \"modifiers\": mods, \"key\": key[0] });\n  handle_tool(session, \"ghost_hotkey\", &args).a"
+    },
+    {
+      "lens": "generalization",
+      "title": "ghost_batch_actions has no upper bound on actions array size, enabling unbounded memory accumulation",
+      "sev": "low",
+      "file": "crates/ghost-mcp/src/main.rs",
+      "where": "handle_tool: ghost_batch_actions (line 551)",
+      "problem": "The `ghost_batch_actions` handler accepts an arbitrary-length `actions` array and pre-allocates `Vec::with_capacity(actions.len())` for results. With `stop_on_error=false`, every result (including each action's JSON response) accumulates in the `results` Vec for the full batch. A caller can send 100,000 actions; each OCR/screenshot action adds a sizable JSON blob to the in-memory results. There is no guard, no max-batch-size check, and no streaming \u2014 the entire result set is held until the final JSON is serialized and written. A malicious or buggy caller can force the MCP server to allocate multi-gigabyte result vecs.",
+      "fix": "Add a size guard at the top of the `ghost_batch_actions` arm, before the `Vec::with_capacity` call:\n\n```rust\nif actions.len() > 1000 {\n    return Err(format!(\"ghost_batch_actions: batch size {} exceeds limit 1000\", actions.len()));\n}\n```\n\nAlso add `\"maxItems\": 1000` to the `actions` array schema at line 1525 so MCP clients can validate before sending.",
+      "evidence": "Confirmed at `crates/ghost-mcp/src/main.rs` lines 550-571:\n\n```rust\n\"ghost_batch_actions\" => {\n    let actions = p[\"actions\"].as_array().ok_or(\"missing param: actions (array)\")?;\n    let stop_on_error = p[\"stop_on_error\"].as_bool().unwrap_or(true);\n    let mut results = Vec::with_capacity(actions.len());  // line 553: unbounded pre-alloc\n    ...\n    for (i, action) in actions.iter().enumerate() { "
+    },
+    {
+      "lens": "generalization",
+      "title": "ghost_run max_retries is unbounded \u2014 integer overflow risk on 32-bit usize and runaway loops",
+      "sev": "low",
+      "file": "crates/ghost-mcp/src/main.rs",
+      "where": "handle_ghost_run (line 1068)",
+      "problem": "`max_retries = p[\"max_retries\"].as_u64().unwrap_or(2) as usize`. On a 64-bit target, passing `max_retries=4294967295` (u32 max) gives a `usize` of 4 billion. The inner loop `for attempt in 0..=max_retries` will iterate 4 billion times per failing step before moving on, effectively hanging the server on any step that always fails. The server is single-threaded with no cancellation path inside the retry loop (the emergency stop `is_stopped()` IS checked inside each attempt's dispatch call, but only if the dispatched tool checks it \u2014 a fast-failing tool like an immediate `Err` from `ghost_run` routing would retry 4B times without yielding). There is no timeout or max enforced on the retry count itself.",
+      "fix": "At line 1068, clamp the value before casting:\n\n```rust\nlet max_retries = p[\"max_retries\"].as_u64().unwrap_or(2).min(10) as usize;\n```\n\n10 is a generous upper bound for any real automation flow. If higher retry counts are ever needed, it should be a deliberate API change with a documented reason, not an unchecked passthrough from untrusted JSON input.",
+      "evidence": "Line 1068 of C:/Users/Krist/projects/active/ghost/crates/ghost-mcp/src/main.rs:\n\n```\nlet max_retries = p[\"max_retries\"].as_u64().unwrap_or(2) as usize;\n```\n\nThe inner retry loop at line 1084:\n\n```\nfor attempt in 0..=max_retries {\n    let outcome = dispatch_tool_inner(session, op, step, true).await;\n    match outcome {\n        Ok(v) => { results.push(v); succeeded = true; break; }\n        Err(e) =>"
+    }
+  ],
+  "accepted_debt": [
+    "RefCell<GroundingStats> in GhostSession is unsound with tokio multi-thread runtime"
+  ]
+}

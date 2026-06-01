@@ -69,7 +69,9 @@ pub fn capture_region_raw(
             let r = (r as usize).min(full_w);
             let b = (b as usize).min(full_h);
             if r <= l || b <= t {
-                return Ok((full_rgba, full_w, full_h));
+                // MEDIUM-1: return Err instead of silently falling back to full-screen.
+                // Callers in session.rs use .ok(), so this cleanly skips verification.
+                return Err(CoreError::Win32 { code: 0, context: "capture_region_raw: degenerate rect after clamping" });
             }
             let cw = r - l;
             let ch = b - t;

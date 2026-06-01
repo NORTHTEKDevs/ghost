@@ -85,7 +85,10 @@ pub fn capture_and_ocr(region: Option<(i32, i32, i32, i32)>) -> Result<Vec<OcrWo
             let r = (r as usize).min(full_w);
             let b = (b as usize).min(full_h);
             if r <= l || b <= t {
-                return Err(CoreError::Win32 { code: 0, context: "invalid region rect" });
+                // MEDIUM-8: descriptive error — window is likely on a secondary monitor
+                // with negative left/top coordinates which clamp to 0, producing r==l.
+                // Full virtual-desktop support (SM_XVIRTUALSCREEN) is tracked as debt.
+                return Err(CoreError::Win32 { code: 0, context: "invalid region rect: window may be on a non-primary monitor with negative coordinates (virtual-desktop capture not yet supported)" });
             }
             let cw = r - l;
             let ch = b - t;

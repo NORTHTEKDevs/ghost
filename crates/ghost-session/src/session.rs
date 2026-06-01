@@ -53,7 +53,9 @@ pub struct GhostSession {
     locator_cache: LocatorCache,
     /// Reflection ring buffer: records recent grounding/action failures so the
     /// next VLM prompt can be prefixed with a negative hint.
-    pub reflection: crate::reflection::ReflectionBuffer,
+    /// RefCell is sound: GhostSession is !Send and all calls run on the single
+    /// block_on thread; no tokio::spawn moves this session across threads.
+    pub reflection: RefCell<crate::reflection::ReflectionBuffer>,
     /// Cumulative grounding cascade telemetry. RefCell because `ground()` takes `&self`
     /// (MCP handlers only have &GhostSession) but needs to mutate stats. Safe because
     /// all session calls run on the single STA tokio block_on thread.
@@ -92,7 +94,7 @@ impl GhostSession {
             tree,
             cache: Arc::new(UiaCache::new()),
             locator_cache: LocatorCache::new(),
-            reflection: crate::reflection::ReflectionBuffer::default(),
+            reflection: RefCell::new(crate::reflection::ReflectionBuffer::default()),
             grounding_stats: RefCell::new(GroundingStats::default()),
             _com_guard: com_guard,
         })
@@ -357,7 +359,7 @@ impl GhostSession {
         // Prefix the description with a reflection hint if there are recent failures.
         // This steers the VLM away from repeating the same coordinate mistake.
         let augmented_description: String;
-        let effective_description = if let Some(hint) = self.reflection.failure_hint() {
+        let effective_description = if let Some(hint) = self.reflection.borrow().failure_hint() {
             augmented_description = format!("{hint}\n\nTarget: {description}");
             &augmented_description
         } else {
@@ -365,12 +367,22 @@ impl GhostSession {
         };
 
         let coords = crate::vision::vision_locate(effective_description, &jpeg, final_size).await?;
+        // HIGH-4: wire the reflection buffer so failure_hint() is not always empty.
+        // RefCell borrow is safe: session runs on a single block_on thread (!Send).
+        let obs = crate::reflection::hash_obs(description);
         match coords {
-            Some((vx, vy)) => Ok(crop.to_screen(vx, vy)),
-            None => Err(GhostError::ElementNotFound {
-                query: format!("description={description}"),
-                screenshot: None,
-            }),
+            Some((vx, vy)) => {
+                let (sx, sy) = crop.to_screen(vx, vy);
+                self.reflection.borrow_mut().record_success(obs, format!("locate '{description}' -> ({sx},{sy})"));
+                Ok((sx, sy))
+            }
+            None => {
+                self.reflection.borrow_mut().record_failure(obs, format!("locate '{description}'"), "not found");
+                Err(GhostError::ElementNotFound {
+                    query: format!("description={description}"),
+                    screenshot: None,
+                })
+            }
         }
     }
 
@@ -656,14 +668,18 @@ impl GhostSession {
         let key_vk = name_to_vk(key).ok_or_else(|| GhostError::Core(
             ghost_core::error::CoreError::Win32 { code: 0, context: "unknown key name" }
         ))?;
+        let mut pressed = Vec::new();
         for vk in &mod_vks {
             core_key_down(*vk).map_err(GhostError::Core)?;
+            pressed.push(*vk);
         }
-        press_key(key_vk).map_err(GhostError::Core)?;
-        for vk in mod_vks.iter().rev() {
-            core_key_up(*vk).map_err(GhostError::Core)?;
+        // HIGH-1: release held modifiers on BOTH success and error paths so a
+        // SendInput failure can never leave Ctrl/Shift/Alt stuck down.
+        let result = press_key(key_vk).map_err(GhostError::Core);
+        for vk in pressed.iter().rev() {
+            let _ = core_key_up(*vk);
         }
-        Ok(())
+        result
     }
 
     /// Hold a key down without releasing.
@@ -907,8 +923,12 @@ impl GhostSession {
 
         // LOW-9: use foreground_window_rect() for both captures so the region stays valid
         // even if the element moves after the action.
+        // HIGH-2: DXGI AcquireNextFrame can block 5-50ms; must not block the tokio thread.
         let capture_rect = self.foreground_window_rect();
-        let before_capture = capture_region_raw(capture_rect).ok();
+        let before_capture = tokio::task::spawn_blocking(move || capture_region_raw(capture_rect))
+            .await
+            .ok()
+            .and_then(|r| r.ok());
 
         match action {
             "click" => {
@@ -947,7 +967,10 @@ impl GhostSession {
         tokio::time::sleep(Duration::from_millis(50)).await;
         // LOW-9: re-query foreground rect for after-capture (element may have moved/closed).
         let after_capture_rect = self.foreground_window_rect();
-        let after_capture = capture_region_raw(after_capture_rect).ok();
+        let after_capture = tokio::task::spawn_blocking(move || capture_region_raw(after_capture_rect))
+            .await
+            .ok()
+            .and_then(|r| r.ok());
 
         let verification = match (before_capture, after_capture) {
             (Some((before, bw, bh)), Some((after, aw, ah))) if bw == aw && bh == ah => {

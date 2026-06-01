@@ -120,9 +120,67 @@ fn http_client() -> &'static reqwest::Client {
         reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .user_agent("ghost-mcp/0.2.0")
+            // HIGH-5 (SSRF): disable redirect following to prevent redirect-chain bypass.
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .expect("failed to build reqwest client")
     })
+}
+
+/// HIGH-5 (SSRF): validate that a URL is safe to fetch.
+/// Rejects non-http(s) schemes and private/loopback/link-local IP ranges
+/// unless GHOST_HTTP_ALLOW_PRIVATE=1 is set in the environment.
+fn validate_url(url: &str) -> std::result::Result<(), String> {
+    let parsed = reqwest::Url::parse(url)
+        .map_err(|e| format!("invalid URL: {e}"))?;
+
+    let scheme = parsed.scheme();
+    if scheme != "http" && scheme != "https" {
+        return Err(format!("URL scheme '{scheme}' not allowed; only http/https are permitted"));
+    }
+
+    // Allow private ranges only when explicitly opted in.
+    if std::env::var("GHOST_HTTP_ALLOW_PRIVATE").as_deref() == Ok("1") {
+        return Ok(());
+    }
+
+    // Resolve host to check for private/loopback/link-local IP ranges.
+    let host = parsed.host_str().unwrap_or("");
+    // Block obvious hostname aliases immediately (no DNS needed).
+    if host == "localhost" {
+        return Err("URL targets localhost — blocked (SSRF prevention). Set GHOST_HTTP_ALLOW_PRIVATE=1 to allow".into());
+    }
+
+    // Parse the host as an IP address and block private ranges.
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        let blocked = match ip {
+            std::net::IpAddr::V4(v4) => {
+                v4.is_loopback()           // 127.0.0.0/8
+                || v4.is_private()         // 10/8, 172.16/12, 192.168/16
+                || v4.is_link_local()      // 169.254/16 (metadata endpoints)
+                || v4.is_broadcast()
+                || v4.is_unspecified()
+            }
+            std::net::IpAddr::V6(v6) => {
+                v6.is_loopback()           // ::1
+                || v6.is_unspecified()     // ::
+                // fc00::/7 (unique local) — check first two bits
+                || (v6.octets()[0] & 0xfe) == 0xfc
+                // fe80::/10 (link-local)
+                || (v6.octets()[0] == 0xfe && (v6.octets()[1] & 0xc0) == 0x80)
+            }
+        };
+        if blocked {
+            return Err(format!(
+                "URL targets a private/reserved IP ({ip}) — blocked (SSRF prevention). Set GHOST_HTTP_ALLOW_PRIVATE=1 to allow"
+            ));
+        }
+    }
+    // Note: hostname-based DNS resolution is NOT done here (would require async).
+    // The primary protection is the IP literal check above. Hostname-based bypasses
+    // (e.g. attacker-controlled DNS resolving to 127.0.0.1) are a known limitation
+    // of this synchronous validation approach.
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -161,19 +219,32 @@ async fn main() {
     let stdout = std::io::stdout();
     let mut out = std::io::BufWriter::new(stdout.lock());
 
-    for line in stdin.lock().lines() {
-        let line = match line {
-            Ok(l) => l,
+    // LOW: cap stdin line length to prevent OOM from a single oversized JSON line.
+    const MAX_LINE: usize = 64 * 1024 * 1024; // 64 MB
+    let mut reader = std::io::BufReader::new(stdin.lock());
+    let mut raw_line = String::new();
+
+    loop {
+        raw_line.clear();
+        let n = match reader.read_line(&mut raw_line) {
+            Ok(0) => break, // EOF
+            Ok(n) => n,
             Err(e) => {
                 tracing::error!("stdin read error: {}", e);
                 break;
             }
         };
+        if n > MAX_LINE {
+            tracing::warn!(line_len = n, "stdin: oversized line ({n} bytes > {MAX_LINE}) — discarding");
+            raw_line.clear();
+            continue;
+        }
+        let line = raw_line.trim_end_matches(['\n', '\r']);
         if line.trim().is_empty() {
             continue;
         }
 
-        let req: McpRequest = match serde_json::from_str(&line) {
+        let req: McpRequest = match serde_json::from_str(line) {
             Ok(r) => r,
             Err(e) => {
                 let _ = writeln!(
@@ -416,7 +487,10 @@ async fn handle_tool(
             Ok(json!({ key: base64_encode(&bytes), "size_bytes": bytes.len() }))
         }
         "ghost_launch" => {
-            let exe = p["exe"].as_str().ok_or("missing param: exe")?;
+            // MEDIUM-4: accept both 'exe' and 'name' (schema says name doubles as exe path).
+            let exe = p["exe"].as_str()
+                .or_else(|| p["name"].as_str())
+                .ok_or("missing param: exe (or name)")?;
             let pid = session.launch(exe).await.map_err(|e| e.to_string())?;
             Ok(json!({ "pid": pid }))
         }
@@ -519,6 +593,10 @@ async fn handle_tool(
         }
         "ghost_wait" => {
             let ms = p["ms"].as_u64().ok_or("missing param: ms")?;
+            // MEDIUM-6: cap to prevent indefinite server hangs from u64::MAX input.
+            if ms > 300_000 {
+                return Err(format!("ghost_wait: ms {ms} exceeds maximum allowed 300000 (5 min)"));
+            }
             session.wait(ms).await;
             Ok(json!({ "ok": true }))
         }
@@ -549,6 +627,10 @@ async fn handle_tool(
         }
         "ghost_batch_actions" => {
             let actions = p["actions"].as_array().ok_or("missing param: actions (array)")?;
+            // LOW: cap batch size to prevent multi-GB result vec accumulation.
+            if actions.len() > 1000 {
+                return Err(format!("ghost_batch_actions: batch size {} exceeds limit 1000", actions.len()));
+            }
             let stop_on_error = p["stop_on_error"].as_bool().unwrap_or(true);
             let mut results = Vec::with_capacity(actions.len());
             let mut errors: Vec<Value> = Vec::new();
@@ -577,6 +659,7 @@ async fn handle_tool(
         }
         "ghost_http_get" => {
             let url = p["url"].as_str().ok_or("missing param: url")?;
+            validate_url(url)?;
             let headers_val = p["headers"].as_object();
             let mut req = http_client().get(url);
             if let Some(hdrs) = headers_val {
@@ -593,6 +676,7 @@ async fn handle_tool(
         }
         "ghost_http_post" => {
             let url = p["url"].as_str().ok_or("missing param: url")?;
+            validate_url(url)?;
             let body = p["body"].as_str().unwrap_or("");
             let content_type = p["content_type"].as_str().unwrap_or("application/json");
             let headers_val = p["headers"].as_object();
@@ -911,12 +995,36 @@ async fn handle_ghost_key(
         return handle_tool(session, "ghost_key_up", &args).await;
     }
     // Split on '+' — last segment is the key, all prior segments are modifiers.
-    let parts: Vec<&str> = keys.split('+').collect();
+    // MEDIUM-3: detect keys whose name contains '+' (Ctrl++ for zoom-in, etc.).
+    // If the last segment after splitting is empty, the trailing '+' IS the key.
+    let raw_parts: Vec<&str> = keys.split('+').collect();
+    // Replace an empty trailing segment with "+" so Ctrl++ → modifiers=[Ctrl], key="+"
+    let parts: Vec<&str> = {
+        let mut v = raw_parts;
+        if v.last() == Some(&"") {
+            *v.last_mut().unwrap() = "+";
+            // Also collapse any empty middle segments — they're malformed.
+            if v.iter().take(v.len() - 1).any(|s| s.is_empty()) {
+                return Err(format!(
+                    "ghost_key: malformed 'keys' value {:?} — empty segment after splitting on '+' (e.g. 'Ctrl+' is invalid; use 'Ctrl++' for Ctrl+Plus)",
+                    keys
+                ));
+            }
+        }
+        v
+    };
     if parts.len() == 1 {
         let args = json!({ "key": parts[0] });
         return handle_tool(session, "ghost_press", &args).await;
     }
     let (modifiers, key) = parts.split_at(parts.len() - 1);
+    // Guard against any remaining empty modifier segments.
+    if modifiers.iter().any(|m| m.is_empty()) {
+        return Err(format!(
+            "ghost_key: malformed 'keys' value {:?} — modifier segment is empty",
+            keys
+        ));
+    }
     let mods: Vec<Value> = modifiers.iter().map(|m| Value::String(m.to_string())).collect();
     let args = json!({ "modifiers": mods, "key": key[0] });
     handle_tool(session, "ghost_hotkey", &args).await
@@ -1065,7 +1173,8 @@ async fn handle_ghost_run(
     };
 
     let total = steps.len() as u64;
-    let max_retries = p["max_retries"].as_u64().unwrap_or(2) as usize;
+    // HIGH-3: clamp max_retries to prevent runaway loops (e.g. u64::MAX passed as JSON).
+    let max_retries = p["max_retries"].as_u64().unwrap_or(2).min(10) as usize;
     let stop_on_error = p["stop_on_error"].as_bool().unwrap_or(true);
 
     let mut results: Vec<Value> = Vec::with_capacity(steps.len());
@@ -1097,6 +1206,10 @@ async fn handle_ghost_run(
                     // The actual error string is the authoritative failure reason for callers.
                     if attempt < max_retries {
                         tracing::warn!(step = i, op, attempt, error = %e, "ghost_run: step failed, will retry");
+                        // HIGH-3: exponential back-off so transient failures (focus settle,
+                        // OCR lag, app mid-load) have time to resolve before the next attempt.
+                        let delay_ms = (50u64 << attempt.min(9)).min(500);
+                        tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
                     }
                     last_err = Some(e);
                 }
@@ -1344,7 +1457,7 @@ fn lean_tools_schema() -> Value {
           "description": "Window management. op=list: all windows. op=focus: bring to foreground (name required). op=state: maximize|minimize|restore|close (name+state). op=launch: start exe.",
           "inputSchema": { "type": "object", "properties": {
               "op": { "type": "string", "enum": ["list","focus","state","launch"], "description": "Operation (default list)" },
-              "name": { "type": "string", "description": "Window title (op=focus|state) or exe path (op=launch)" },
+              "name": { "type": "string", "description": "Window title (op=focus|state). Also accepted as alias for 'exe' on op=launch." },
               "state": { "type": "string", "enum": ["maximize","minimize","restore","close"], "description": "op=state" },
               "exe": { "type": "string", "description": "Executable path (op=launch)" }
           }}},
@@ -1652,7 +1765,7 @@ fn legacy_tools_schema_full() -> Value {
           "inputSchema": { "type": "object", "required": ["action"], "properties": {
               "name": { "type": "string", "description": "Accessible name of target element (case-insensitive substring)" },
               "role": { "type": "string", "description": "Control type role: button, edit, checkbox, etc." },
-              "action": { "type": "string", "enum": ["click", "type"], "description": "Action to perform after finding the element" },
+              "action": { "type": "string", "enum": ["click", "type", "double_click", "right_click", "hover"], "description": "Action to perform after finding the element" },
               "text": { "type": "string", "description": "Text to type (required when action=type)" },
               "mode": { "type": "string", "enum": ["instant", "deliberate", "instant_only"], "description": "Dispatch mode. 'instant' (default): local tiers, auto-escalates to VLM on miss. 'deliberate': adds cloud VLM from first attempt. 'instant_only': local tiers only, never calls VLM." }
           }}}
@@ -1707,6 +1820,8 @@ async fn run_batch_op(
         "wait_for_event" => "ghost_wait_for_event",
         "screenshot_region" => "ghost_screenshot_region",
         "describe_screen_fast" => "ghost_describe_screen_fast",
+        // MEDIUM-2: ghost_act was absent from batch dispatch, causing silent failure.
+        "act" | "ghost_act" => "ghost_act",
         other => return Err(format!("unknown batch op: {other}")),
     };
     Box::pin(handle_tool(session, method, params)).await

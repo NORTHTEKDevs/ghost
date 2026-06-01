@@ -45,8 +45,10 @@ pub fn downsample_to_4x4(pixels: &[u8], width: usize, height: usize) -> [u8; 64]
     out
 }
 
-/// Stub DXGI-backed idle detector. Real implementation polls `IDXGIOutputDuplication`.
-/// Constructor returns `Err(IdleUnavailable)` if DXGI can't be initialized (no display, etc).
+/// DXGI-backed idle detector. Polls screen state via `capture_screen_downsample_raw`
+/// with blake3 hash comparison across consecutive frames. Returns `Ok` once
+/// `stable_frames` consecutive captures produce identical hashes.
+/// Constructor returns `Err` if DXGI can't be initialized (no display, etc).
 pub struct IdleDetector {
     _placeholder: (),
 }
@@ -72,7 +74,11 @@ impl IdleDetector {
                 return Err(CoreError::JobTimeout);
             }
             // Hash a raw 8x8 downsample of the DXGI surface — no PNG encoding.
-            let raw = crate::capture::screen::capture_screen_downsample_raw(8)?;
+            // HIGH-2: DXGI AcquireNextFrame blocks up to 50ms; must not run on the
+            // tokio executor thread. Same pattern as screenshot() in session.rs.
+            let raw = tokio::task::spawn_blocking(|| crate::capture::screen::capture_screen_downsample_raw(8))
+                .await
+                .map_err(|e| CoreError::WorkerPanic(e.to_string()))??;
             let hash = hash_frame(&raw);
             if Some(hash) == last_hash {
                 count += 1;
