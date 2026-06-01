@@ -1,4 +1,4 @@
-use std::sync::Mutex;
+use std::sync::{Mutex, atomic::{AtomicBool, Ordering}};
 use crate::error::CoreError;
 
 // ---------------------------------------------------------------------------
@@ -10,47 +10,88 @@ use crate::error::CoreError;
 //
 // NOTE: GDI captures in BGRA order. We swap to RGBA on read.
 
+// ---------------------------------------------------------------------------
+// RAII guards for GDI handles — guarantee release on every path including panic.
+// ---------------------------------------------------------------------------
+
+struct ScreenDcGuard(windows::Win32::Graphics::Gdi::HDC);
+impl Drop for ScreenDcGuard {
+    fn drop(&mut self) {
+        unsafe {
+            use windows::Win32::Graphics::Gdi::ReleaseDC;
+            use windows::Win32::Foundation::HWND;
+            let _ = ReleaseDC(HWND(std::ptr::null_mut()), self.0);
+        }
+    }
+}
+
+struct MemDcGuard(windows::Win32::Graphics::Gdi::HDC);
+impl Drop for MemDcGuard {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = windows::Win32::Graphics::Gdi::DeleteDC(self.0);
+        }
+    }
+}
+
+struct BitmapGuard(windows::Win32::Graphics::Gdi::HBITMAP);
+impl Drop for BitmapGuard {
+    fn drop(&mut self) {
+        unsafe {
+            use windows::Win32::Graphics::Gdi::{DeleteObject, HGDIOBJ};
+            let _ = DeleteObject(HGDIOBJ(self.0.0));
+        }
+    }
+}
+
 /// Capture the primary virtual desktop using GDI BitBlt.
 /// Returns tightly-packed RGBA plus width and height.
 pub fn capture_screen_gdi() -> Result<(Vec<u8>, usize, usize), CoreError> {
     unsafe {
         use windows::Win32::Graphics::Gdi::{
-            CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject,
-            GetDC, ReleaseDC, SelectObject, BitBlt, GetDIBits,
-            BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, SRCCOPY,
-            BI_RGB,
+            CreateCompatibleBitmap, CreateCompatibleDC, SelectObject, BitBlt, GetDIBits,
+            BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, SRCCOPY, BI_RGB, HGDIOBJ,
         };
         use windows::Win32::Foundation::HWND;
 
-        let screen_dc = GetDC(HWND(std::ptr::null_mut()));
-        if screen_dc.is_invalid() {
+        let raw_screen_dc = windows::Win32::Graphics::Gdi::GetDC(HWND(std::ptr::null_mut()));
+        if raw_screen_dc.is_invalid() {
             return Err(CoreError::Win32 { code: 0, context: "GDI GetDC failed" });
         }
+        // RAII: screen DC is released on all paths from here.
+        let screen_dc = ScreenDcGuard(raw_screen_dc);
+
         // GetDC(NULL) returns the full virtual desktop; use SM_CXVIRTUALSCREEN / SM_CYVIRTUALSCREEN
         // for multi-monitor setups. For single-monitor use SM_CXSCREEN / SM_CYSCREEN.
         use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
         let width = GetSystemMetrics(SM_CXSCREEN) as usize;
         let height = GetSystemMetrics(SM_CYSCREEN) as usize;
         if width == 0 || height == 0 {
-            let _ = ReleaseDC(HWND(std::ptr::null_mut()), screen_dc);
             return Err(CoreError::Win32 { code: 0, context: "GDI GetSystemMetrics returned 0" });
         }
 
-        let mem_dc = CreateCompatibleDC(screen_dc);
-        if mem_dc.is_invalid() {
-            let _ = ReleaseDC(HWND(std::ptr::null_mut()), screen_dc);
+        let raw_mem_dc = CreateCompatibleDC(screen_dc.0);
+        if raw_mem_dc.is_invalid() {
             return Err(CoreError::Win32 { code: 0, context: "GDI CreateCompatibleDC failed" });
         }
+        // RAII: mem DC deleted on all paths from here.
+        let mem_dc = MemDcGuard(raw_mem_dc);
 
-        let bmp = CreateCompatibleBitmap(screen_dc, width as i32, height as i32);
-        if bmp.is_invalid() {
-            let _ = DeleteDC(mem_dc);
-            let _ = ReleaseDC(HWND(std::ptr::null_mut()), screen_dc);
+        let raw_bmp = CreateCompatibleBitmap(screen_dc.0, width as i32, height as i32);
+        if raw_bmp.is_invalid() {
             return Err(CoreError::Win32 { code: 0, context: "GDI CreateCompatibleBitmap failed" });
         }
+        // RAII: bitmap deleted on all paths from here.
+        let bmp = BitmapGuard(raw_bmp);
 
-        let old_bmp = SelectObject(mem_dc, bmp);
-        let blit_result = BitBlt(mem_dc, 0, 0, width as i32, height as i32, screen_dc, 0, 0, SRCCOPY);
+        // Select our bitmap into the mem DC; save the old one so we can restore it
+        // before deleting the DC (required by GDI contract).
+        let old_gdi = SelectObject(mem_dc.0, HGDIOBJ(bmp.0.0));
+        // Restore the original bitmap on drop so DeleteDC is safe.
+        // We do this inline after GetDIBits rather than in a Drop because we need
+        // the bmp handle to still be alive at restore time.
+
+        let blit_result = BitBlt(mem_dc.0, 0, 0, width as i32, height as i32, screen_dc.0, 0, 0, SRCCOPY);
 
         // Read pixels regardless of BitBlt result (partial data is better than nothing).
         let mut bmi = BITMAPINFO {
@@ -72,8 +113,8 @@ pub fn capture_screen_gdi() -> Result<(Vec<u8>, usize, usize), CoreError> {
 
         let mut bgra = vec![0u8; width * height * 4];
         let scanlines = GetDIBits(
-            mem_dc,
-            bmp,
+            mem_dc.0,
+            bmp.0,
             0,
             height as u32,
             Some(bgra.as_mut_ptr() as *mut _),
@@ -81,11 +122,11 @@ pub fn capture_screen_gdi() -> Result<(Vec<u8>, usize, usize), CoreError> {
             DIB_RGB_COLORS,
         );
 
-        // Cleanup GDI objects.
-        let _ = SelectObject(mem_dc, old_bmp);
-        let _ = DeleteObject(bmp);
-        let _ = DeleteDC(mem_dc);
-        let _ = ReleaseDC(HWND(std::ptr::null_mut()), screen_dc);
+        // Restore the original bitmap before the RAII guards delete mem_dc and bmp.
+        // This is required: a DC must not be deleted while a non-stock GDI object
+        // is selected into it.
+        let _ = SelectObject(mem_dc.0, old_gdi);
+        // bmp and mem_dc and screen_dc are all dropped (freed) here when this scope exits.
 
         if blit_result.is_err() {
             return Err(CoreError::Win32 { code: 0, context: "GDI BitBlt failed" });
@@ -149,6 +190,11 @@ unsafe impl Send for CaptureContext {}
 unsafe impl Sync for CaptureContext {}
 
 static CAPTURE_STATE: Mutex<Option<CaptureContext>> = Mutex::new(None);
+
+/// Sticky flag: once DXGI is observed returning all-black frames, skip DXGI entirely
+/// and go straight to GDI on every subsequent call. One-way; never reset during the
+/// process lifetime. Safe on machines where DXGI works: flag is never set.
+static DXGI_ALWAYS_BLACK: AtomicBool = AtomicBool::new(false);
 
 // DXGI_ERROR_ACCESS_LOST / DXGI_ERROR_ACCESS_DENIED are used via
 // windows::Win32::Graphics::Dxgi directly in capture_rgba_inner.
@@ -370,12 +416,20 @@ unsafe fn acquire_duplication(ctx: &mut CaptureContext) -> Result<(), CoreError>
 /// Black-frame fallback: DXGI Desktop Duplication returns all-zero frames on some
 /// systems (HDR monitors, certain NVIDIA driver versions, RDP sessions). When detected,
 /// the function falls back to GDI BitBlt capture which works universally.
+///
+/// Sticky optimisation: once is_frame_black() fires, DXGI_ALWAYS_BLACK is set and
+/// all subsequent calls skip DXGI entirely (avoiding ~50ms of wasted work per frame).
 fn capture_rgba(ctx: &mut CaptureContext) -> Result<(Vec<u8>, usize, usize), CoreError> {
+    // Fast path: DXGI already known-broken on this system — skip it entirely.
+    if DXGI_ALWAYS_BLACK.load(Ordering::Relaxed) {
+        return capture_screen_gdi();
+    }
     let result = unsafe { capture_rgba_inner(ctx, true) }?;
     // If the captured frame is entirely black, DXGI is not working correctly on this
-    // system. Fall back to GDI BitBlt which captures correctly on all Windows configs.
+    // system. Set the sticky flag so future calls skip straight to GDI.
     if is_frame_black(&result.0) {
-        tracing::warn!("DXGI capture returned all-black frame; falling back to GDI BitBlt (HDR/driver/RDP compat)");
+        tracing::warn!("DXGI capture returned all-black frame; setting sticky GDI-only flag and falling back to GDI BitBlt (HDR/driver/RDP compat)");
+        DXGI_ALWAYS_BLACK.store(true, Ordering::Relaxed);
         return capture_screen_gdi();
     }
     Ok(result)
@@ -681,6 +735,20 @@ mod tests {
     fn is_frame_black_single_white_pixel() {
         let buf = vec![255u8, 255, 255, 255]; // 1 white pixel
         assert!(!is_frame_black(&buf));
+    }
+
+    /// Verify the sticky flag starts false and can be set.
+    /// The actual auto-set path is exercised by the live test below;
+    /// this test just validates the AtomicBool wiring is reachable from tests.
+    #[test]
+    fn dxgi_always_black_flag_starts_false_and_toggles() {
+        // Save current state and reset to false for deterministic test.
+        let prior = DXGI_ALWAYS_BLACK.swap(false, Ordering::Relaxed);
+        assert!(!DXGI_ALWAYS_BLACK.load(Ordering::Relaxed));
+        DXGI_ALWAYS_BLACK.store(true, Ordering::Relaxed);
+        assert!(DXGI_ALWAYS_BLACK.load(Ordering::Relaxed));
+        // Restore original state so other tests are unaffected.
+        DXGI_ALWAYS_BLACK.store(prior, Ordering::Relaxed);
     }
 
     /// Live test: repeated captures reuse the duplication session (reacquire_count stays low).
