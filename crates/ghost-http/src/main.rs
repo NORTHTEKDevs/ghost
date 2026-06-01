@@ -295,7 +295,9 @@ async fn main() {
         .route("/describe", post(h_describe))
         .route("/clipboard", get(h_get_clip).post(h_set_clip))
         .route("/run", post(h_run))
-        .layer(tower_http::cors::CorsLayer::permissive())
+        // MEDIUM-5: removed CorsLayer::permissive() — it allowed any web page on the same
+        // machine to POST to ghost-http via fetch() (localhost CSRF). Callers are curl/local
+        // scripts, not browsers. No CORS headers = browsers block cross-origin requests.
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(&cli.addr).await

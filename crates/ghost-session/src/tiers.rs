@@ -200,7 +200,10 @@ impl<'s> GroundingTier for OcrTier<'s> {
                     TierResult::Hit(Grounded::from_point((x, y), CONFIDENCE_OCR, Tier::Ocr))
                 }
                 Ok(None) => TierResult::Miss,
-                Err(_) => TierResult::Miss,
+                Err(e) => {
+                    tracing::warn!(error=%e, "OcrTier locate failed (treated as Miss)");
+                    TierResult::Miss
+                }
             }
         })
     }

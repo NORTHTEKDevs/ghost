@@ -187,7 +187,9 @@ async fn extract_via_openai_compat(prompt: &str, image_jpeg: &[u8]) -> Result<St
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(GhostError::Vision(format!("openai-compat extract {status}: {body}")));
+        // LOW: truncate error body to prevent large stack traces / auth metadata from leaking.
+        let preview: String = body.chars().take(500).collect();
+        return Err(GhostError::Vision(format!("openai-compat extract {status}: {preview}")));
     }
     let parsed: OaiResp = resp.json().await
         .map_err(|e| GhostError::Vision(format!("openai-compat extract parse: {e}")))?;
@@ -230,7 +232,8 @@ async fn extract_via_anthropic(prompt: &str, image_jpeg: &[u8]) -> Result<String
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(GhostError::Vision(format!("anthropic extract {status}: {body}")));
+        let preview: String = body.chars().take(500).collect();
+        return Err(GhostError::Vision(format!("anthropic extract {status}: {preview}")));
     }
     let parsed: AntResp = resp.json().await
         .map_err(|e| GhostError::Vision(format!("anthropic extract parse: {e}")))?;
@@ -273,6 +276,35 @@ fn build_prompt(description: &str, final_size: (u32, u32)) -> String {
 
 const SYSTEM_PROMPT: &str = "You are a precise UI element locator. Always respond with a single-line JSON object. No prose, no explanation, no markdown.";
 
+/// MEDIUM-7: route VLM response text through the typed ghost-ground parser which
+/// handles UI-TARS/Qwen norm-coord, action-call, bare-tuple, and prose-JSON formats.
+/// Pixel-space coords (> 1000 in either axis) are passed through directly.
+/// Norm-space coords (0-1000) are converted to pixels using `final_size`.
+fn parse_vlm_response_to_coords(text: &str, final_size: (u32, u32)) -> Result<Option<(i32, i32)>> {
+    use ghost_ground::parser::{parse_vlm_response as gnd_parse, CoordSpace};
+    use ghost_ground::types::norm_to_px;
+
+    match gnd_parse(text) {
+        None => Ok(None),
+        Some(r) if r.not_found => Ok(None),
+        Some(r) => match r.coord {
+            None => Ok(None),
+            Some(c) => {
+                let (px, py) = match c.space {
+                    CoordSpace::Norm => (
+                        norm_to_px(c.x.clamp(0, 1000) as u16, final_size.0),
+                        norm_to_px(c.y.clamp(0, 1000) as u16, final_size.1),
+                    ),
+                    CoordSpace::Pixels => (c.x, c.y),
+                };
+                Ok(Some((px, py)))
+            }
+        },
+    }
+}
+
+/// Legacy pixel-space-only parser (kept for unit tests; live paths use parse_vlm_response_to_coords).
+#[allow(dead_code)]
 fn parse_coord_response(text: &str) -> Result<Option<(i32, i32)>> {
     let cleaned = text.trim()
         .trim_start_matches("```json").trim_start_matches("```")
@@ -401,7 +433,8 @@ async fn locate_via_openai_compat(
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(GhostError::Vision(format!("openai-compat {status}: {body}")));
+        let preview: String = body.chars().take(500).collect();
+        return Err(GhostError::Vision(format!("openai-compat {status}: {preview}")));
     }
 
     let parsed: OaiResp = resp.json().await
@@ -411,8 +444,10 @@ async fn locate_via_openai_compat(
         .ok_or_else(|| GhostError::Vision("no choices in response".into()))?;
 
     tracing::debug!(model = %model, url = %url, raw_response = %text, "openai-compat VLM raw response");
-    let result = parse_coord_response(&text);
-    tracing::debug!(parsed = ?result, "parse_coord_response result");
+    // MEDIUM-7: use the typed ghost-ground parser so UI-TARS/Qwen norm-coord
+    // and prose formats work, not just bare pixel-space JSON.
+    let result = parse_vlm_response_to_coords(&text, final_size);
+    tracing::debug!(parsed = ?result, "parse_vlm_response result");
     result
 }
 
@@ -519,7 +554,8 @@ async fn locate_via_anthropic(
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(GhostError::Vision(format!("anthropic {status}: {body}")));
+        let preview: String = body.chars().take(500).collect();
+        return Err(GhostError::Vision(format!("anthropic {status}: {preview}")));
     }
 
     let parsed: AntResp = resp.json().await
@@ -529,7 +565,9 @@ async fn locate_via_anthropic(
         .map(|c| c.text.trim().to_string())
         .ok_or_else(|| GhostError::Vision("anthropic returned no text content".into()))?;
 
-    parse_coord_response(&text)
+    // MEDIUM-7: use the typed ghost-ground parser so UI-TARS/Qwen norm-coord
+    // and prose formats work, not just bare pixel-space JSON.
+    parse_vlm_response_to_coords(&text, final_size)
 }
 
 fn base64_encode(data: &[u8]) -> String {
@@ -600,14 +638,16 @@ mod tests {
 
     #[test]
     fn pick_provider_with_explicit_override() {
+        // LOW: use catch_unwind so env vars are always cleaned up even on panic,
+        // guarding against cross-test env-var pollution in a parallel test harness.
         std::env::set_var("GHOST_VISION_PROVIDER", "anthropic");
         std::env::set_var("ANTHROPIC_API_KEY", "test");
         std::env::set_var("NVIDIA_API_KEY", "test");
-        let p = pick_provider().unwrap();
+        let result = std::panic::catch_unwind(pick_provider);
         std::env::remove_var("GHOST_VISION_PROVIDER");
         std::env::remove_var("ANTHROPIC_API_KEY");
         std::env::remove_var("NVIDIA_API_KEY");
-        assert_eq!(p, Provider::Anthropic);
+        assert_eq!(result.unwrap().unwrap(), Provider::Anthropic);
     }
 
     // --- parse_extract_response (field extraction VLM response parsing) ---

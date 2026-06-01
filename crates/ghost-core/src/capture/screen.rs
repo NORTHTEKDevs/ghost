@@ -84,6 +84,10 @@ pub fn capture_screen_gdi() -> Result<(Vec<u8>, usize, usize), CoreError> {
         // RAII: bitmap deleted on all paths from here.
         let bmp = BitmapGuard(raw_bmp);
 
+        // LOW: allocate before SelectObject so an OOM panic can't fire while
+        // bmp is selected into mem_dc (which would violate the GDI contract on drop).
+        let mut bgra = vec![0u8; width * height * 4];
+
         // Select our bitmap into the mem DC; save the old one so we can restore it
         // before deleting the DC (required by GDI contract).
         let old_gdi = SelectObject(mem_dc.0, HGDIOBJ(bmp.0.0));
@@ -110,8 +114,6 @@ pub fn capture_screen_gdi() -> Result<(Vec<u8>, usize, usize), CoreError> {
             },
             bmiColors: [Default::default()],
         };
-
-        let mut bgra = vec![0u8; width * height * 4];
         let scanlines = GetDIBits(
             mem_dc.0,
             bmp.0,
@@ -209,7 +211,7 @@ pub enum CaptureFormat {
 
 /// Capture the primary monitor as PNG bytes (full screen).
 pub fn capture_screen() -> Result<Vec<u8>, CoreError> {
-    let mut guard = CAPTURE_STATE.lock().unwrap();
+    let mut guard = CAPTURE_STATE.lock().unwrap_or_else(|e| e.into_inner());
     if guard.is_none() {
         *guard = Some(init_capture_state()?);
     }
@@ -220,7 +222,7 @@ pub fn capture_screen() -> Result<Vec<u8>, CoreError> {
 /// Capture the primary monitor as a tightly-packed RGBA buffer with dimensions.
 /// Used by OCR and other consumers that want raw pixels without encoding.
 pub fn capture_screen_full_rgba() -> Result<(Vec<u8>, usize, usize), CoreError> {
-    let mut guard = CAPTURE_STATE.lock().unwrap();
+    let mut guard = CAPTURE_STATE.lock().unwrap_or_else(|e| e.into_inner());
     if guard.is_none() {
         *guard = Some(init_capture_state()?);
     }
@@ -232,7 +234,7 @@ pub fn capture_screen_full_rgba() -> Result<(Vec<u8>, usize, usize), CoreError> 
 /// This is the fast path for idle detection and perceptual hashing: no PNG encode needed.
 /// The BGRA channel order is preserved from the DXGI surface to avoid an extra swap.
 pub fn capture_screen_downsample_raw(target_dim: usize) -> Result<Vec<u8>, CoreError> {
-    let mut guard = CAPTURE_STATE.lock().unwrap();
+    let mut guard = CAPTURE_STATE.lock().unwrap_or_else(|e| e.into_inner());
     if guard.is_none() {
         *guard = Some(init_capture_state()?);
     }
@@ -293,7 +295,7 @@ pub fn capture_screen_region(
     max_dim: Option<u32>,
     format: CaptureFormat,
 ) -> Result<Vec<u8>, CoreError> {
-    let mut guard = CAPTURE_STATE.lock().unwrap();
+    let mut guard = CAPTURE_STATE.lock().unwrap_or_else(|e| e.into_inner());
     if guard.is_none() {
         *guard = Some(init_capture_state()?);
     }

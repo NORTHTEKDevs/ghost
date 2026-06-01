@@ -2,7 +2,7 @@ use crate::error::CoreError;
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use std::collections::VecDeque;
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -27,6 +27,9 @@ pub struct StaPool {
     panic_log: Arc<Mutex<VecDeque<Instant>>>,
     circuit_open: Arc<AtomicBool>,
     job_timeout: Duration,
+    /// MEDIUM-9: count orphaned jobs (timed out but still executing in worker).
+    /// Exposed via `health()` for observability; non-zero means concurrency is reduced.
+    orphaned_jobs: Arc<AtomicUsize>,
 }
 
 impl StaPool {
@@ -38,15 +41,23 @@ impl StaPool {
         let (tx, rx) = unbounded::<JobEnvelope>();
         let panic_log = Arc::new(Mutex::new(VecDeque::<Instant>::new()));
         let circuit_open = Arc::new(AtomicBool::new(false));
+        let orphaned_jobs = Arc::new(AtomicUsize::new(0));
         for i in 0..workers {
-            Self::spawn_worker(i, rx.clone(), panic_log.clone(), circuit_open.clone())?;
+            Self::spawn_worker(i, rx.clone(), panic_log.clone(), circuit_open.clone(), orphaned_jobs.clone())?;
         }
         Ok(Self {
             tx,
             panic_log,
             circuit_open,
             job_timeout,
+            orphaned_jobs,
         })
+    }
+
+    /// Return the number of currently orphaned (timed-out) jobs still executing.
+    /// Non-zero values indicate reduced pool concurrency.
+    pub fn orphaned_job_count(&self) -> usize {
+        self.orphaned_jobs.load(Ordering::Acquire)
     }
 
     fn spawn_worker(
@@ -54,6 +65,7 @@ impl StaPool {
         rx: Receiver<JobEnvelope>,
         panic_log: Arc<Mutex<VecDeque<Instant>>>,
         circuit_open: Arc<AtomicBool>,
+        orphaned_jobs: Arc<AtomicUsize>,
     ) -> Result<(), CoreError> {
         thread::Builder::new()
             .name(format!("ghost-sta-{id}"))
@@ -70,13 +82,22 @@ impl StaPool {
                     let result = catch_unwind(AssertUnwindSafe(|| job(uia_ref)));
                     match result {
                         Ok(r) => {
-                            let _ = reply.send(r);
+                            // MEDIUM-9: if caller already timed out (channel closed),
+                            // this was an orphaned job — decrement counter and log.
+                            if reply.send(r).is_err() {
+                                let remaining = orphaned_jobs.fetch_sub(1, Ordering::AcqRel).saturating_sub(1);
+                                tracing::warn!(worker = id, orphaned_remaining = remaining, "ghost-sta: orphaned job completed (caller already timed out)");
+                            }
                         }
                         Err(panic_payload) => {
                             let msg = extract_panic_msg(&panic_payload);
                             record_panic(&panic_log, &circuit_open);
                             tracing::warn!("ghost-sta-{id} caught panic: {msg}");
-                            let _ = reply.send(Err(CoreError::WorkerPanic(msg)));
+                            if reply.send(Err(CoreError::WorkerPanic(msg))).is_err() {
+                                // Caller timed out; this was also orphaned.
+                                let remaining = orphaned_jobs.fetch_sub(1, Ordering::AcqRel).saturating_sub(1);
+                                tracing::warn!(worker = id, orphaned_remaining = remaining, "ghost-sta: orphaned panicking job completed");
+                            }
                         }
                     }
                 }
@@ -123,9 +144,12 @@ impl StaPool {
             }
             Ok(Err(_)) => Err(CoreError::ComInit("worker cancel".into())),
             Err(_) => {
-                tracing::warn!(
-                    "orphaning STA job after {:?} timeout",
-                    self.job_timeout
+                // MEDIUM-9: track orphaned jobs; log at error level so alerting can fire.
+                let orphaned = self.orphaned_jobs.fetch_add(1, Ordering::AcqRel) + 1;
+                tracing::error!(
+                    timeout_ms = self.job_timeout.as_millis(),
+                    orphaned_jobs = orphaned,
+                    "ghost-sta: job timed out — worker is executing orphaned job (effective concurrency reduced)"
                 );
                 Err(CoreError::JobTimeout)
             }

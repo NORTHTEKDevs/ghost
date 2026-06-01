@@ -20,17 +20,20 @@ pub fn get_clipboard() -> Result<String, CoreError> {
                     String::new()
                 } else {
                     let ptr = GlobalLock(hglob) as *const u16;
+                    // LOW: only call GlobalUnlock when GlobalLock succeeded (ptr non-null).
+                    // Calling Unlock after a failed Lock corrupts the global heap lock count.
                     let s = if !ptr.is_null() {
                         let mut len = 0usize;
                         while len < 10_000_000 && *ptr.add(len) != 0 {
                             len += 1;
                         }
                         let slice = std::slice::from_raw_parts(ptr, len);
-                        String::from_utf16_lossy(slice).to_string()
+                        let result = String::from_utf16_lossy(slice).to_string();
+                        let _ = GlobalUnlock(hglob);
+                        result
                     } else {
                         String::new()
                     };
-                    let _ = GlobalUnlock(hglob);
                     s
                 }
             }
