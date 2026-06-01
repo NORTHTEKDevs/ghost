@@ -6,7 +6,7 @@ description = "Command-line interface for Ghost Windows desktop automation"
 keywords = ["automation", "windows", "cli", "desktop"]
 categories = ["command-line-utilities", "os::windows-apis"]
 license = "MIT"
-repository = "https://github.com/FrostbyteDevTeam/ghost"
+repository = "https://github.com/NORTHTEKDevs/ghost"
 
 [[bin]]
 name = "ghost"
