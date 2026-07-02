@@ -44,9 +44,85 @@ impl Drop for BitmapGuard {
     }
 }
 
-/// Capture the primary virtual desktop using GDI BitBlt.
+/// Capture the primary monitor using GDI BitBlt.
 /// Returns tightly-packed RGBA plus width and height.
 pub fn capture_screen_gdi() -> Result<(Vec<u8>, usize, usize), CoreError> {
+    let (width, height) = primary_screen_size()?;
+    capture_rect_gdi(0, 0, width, height)
+}
+
+/// Primary monitor pixel size via GetSystemMetrics.
+fn primary_screen_size() -> Result<(usize, usize), CoreError> {
+    use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
+    let width = unsafe { GetSystemMetrics(SM_CXSCREEN) } as usize;
+    let height = unsafe { GetSystemMetrics(SM_CYSCREEN) } as usize;
+    if width == 0 || height == 0 {
+        return Err(CoreError::Win32 { code: 0, context: "GDI GetSystemMetrics returned 0" });
+    }
+    Ok((width, height))
+}
+
+/// Virtual-screen bounds (left, top, right, bottom) spanning ALL monitors.
+/// Left/top can be negative when a secondary monitor sits left of / above the primary.
+pub fn virtual_screen_bounds() -> (i32, i32, i32, i32) {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
+    };
+    unsafe {
+        let l = GetSystemMetrics(SM_XVIRTUALSCREEN);
+        let t = GetSystemMetrics(SM_YVIRTUALSCREEN);
+        (l, t, l + GetSystemMetrics(SM_CXVIRTUALSCREEN), t + GetSystemMetrics(SM_CYVIRTUALSCREEN))
+    }
+}
+
+/// True if `rect` lies entirely within `bounds` (both (l, t, r, b)).
+/// Pure helper so the off-primary routing decision is unit-testable.
+pub fn rect_within(rect: (i32, i32, i32, i32), bounds: (i32, i32, i32, i32)) -> bool {
+    rect.0 >= bounds.0 && rect.1 >= bounds.1 && rect.2 <= bounds.2 && rect.3 <= bounds.3
+}
+
+/// True if `rect` lies entirely on the primary monitor — the fast DXGI path
+/// only covers the primary output (EnumOutputs(0)).
+///
+/// FOLLOW-UP: this trusts index 0 == primary and SM_CXSCREEN as its size. On
+/// unusual adapters EnumOutputs(0) may not be the Windows-designated primary;
+/// to fully close that gap, match each output's DXGI_OUTPUT_DESC.DesktopCoordinates
+/// against this rect instead of assuming index 0. Pre-existing behavior; the GDI
+/// virtual-rect fallback already covers the off-primary case correctly.
+pub fn rect_on_primary(rect: (i32, i32, i32, i32)) -> bool {
+    match primary_screen_size() {
+        Ok((w, h)) => rect_within(rect, (0, 0, w as i32, h as i32)),
+        Err(_) => false,
+    }
+}
+
+/// Capture an arbitrary virtual-screen rect via GDI BitBlt — works on ANY
+/// monitor (GetDC(NULL) spans the virtual desktop; negative source coords are
+/// valid for displays left of / above the primary). Rect is clamped to the
+/// virtual-screen bounds. Slower than DXGI (~30-100ms) but the only path for
+/// off-primary windows until per-output duplication lands.
+pub fn capture_virtual_rect_gdi(
+    l: i32, t: i32, r: i32, b: i32,
+) -> Result<(Vec<u8>, usize, usize), CoreError> {
+    let (vl, vt, vr, vb) = virtual_screen_bounds();
+    let l = l.max(vl);
+    let t = t.max(vt);
+    let r = r.min(vr);
+    let b = b.min(vb);
+    if r <= l || b <= t {
+        return Err(CoreError::Win32 { code: 0, context: "capture_virtual_rect_gdi: rect outside virtual screen" });
+    }
+    capture_rect_gdi(l, t, (r - l) as usize, (b - t) as usize)
+}
+
+/// GDI BitBlt capture of `width` x `height` pixels starting at virtual-screen
+/// coordinate (src_x, src_y). Returns tightly-packed RGBA.
+fn capture_rect_gdi(
+    src_x: i32,
+    src_y: i32,
+    width: usize,
+    height: usize,
+) -> Result<(Vec<u8>, usize, usize), CoreError> {
     unsafe {
         use windows::Win32::Graphics::Gdi::{
             CreateCompatibleBitmap, CreateCompatibleDC, SelectObject, BitBlt, GetDIBits,
@@ -54,21 +130,16 @@ pub fn capture_screen_gdi() -> Result<(Vec<u8>, usize, usize), CoreError> {
         };
         use windows::Win32::Foundation::HWND;
 
+        if width == 0 || height == 0 {
+            return Err(CoreError::Win32 { code: 0, context: "capture_rect_gdi: zero-sized rect" });
+        }
+
         let raw_screen_dc = windows::Win32::Graphics::Gdi::GetDC(HWND(std::ptr::null_mut()));
         if raw_screen_dc.is_invalid() {
             return Err(CoreError::Win32 { code: 0, context: "GDI GetDC failed" });
         }
         // RAII: screen DC is released on all paths from here.
         let screen_dc = ScreenDcGuard(raw_screen_dc);
-
-        // GetDC(NULL) returns the full virtual desktop; use SM_CXVIRTUALSCREEN / SM_CYVIRTUALSCREEN
-        // for multi-monitor setups. For single-monitor use SM_CXSCREEN / SM_CYSCREEN.
-        use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
-        let width = GetSystemMetrics(SM_CXSCREEN) as usize;
-        let height = GetSystemMetrics(SM_CYSCREEN) as usize;
-        if width == 0 || height == 0 {
-            return Err(CoreError::Win32 { code: 0, context: "GDI GetSystemMetrics returned 0" });
-        }
 
         let raw_mem_dc = CreateCompatibleDC(screen_dc.0);
         if raw_mem_dc.is_invalid() {
@@ -95,7 +166,7 @@ pub fn capture_screen_gdi() -> Result<(Vec<u8>, usize, usize), CoreError> {
         // We do this inline after GetDIBits rather than in a Drop because we need
         // the bmp handle to still be alive at restore time.
 
-        let blit_result = BitBlt(mem_dc.0, 0, 0, width as i32, height as i32, screen_dc.0, 0, 0, SRCCOPY);
+        let blit_result = BitBlt(mem_dc.0, 0, 0, width as i32, height as i32, screen_dc.0, src_x, src_y, SRCCOPY);
 
         // Read pixels regardless of BitBlt result (partial data is better than nothing).
         let mut bmi = BITMAPINFO {
@@ -298,6 +369,14 @@ pub fn capture_screen_region(
     max_dim: Option<u32>,
     format: CaptureFormat,
 ) -> Result<Vec<u8>, CoreError> {
+    // Off-primary rects: DXGI only duplicates the primary output; route through
+    // the GDI virtual-screen path so screenshots work on any monitor.
+    if let Some((l, t, r, b)) = rect {
+        if !rect_on_primary((l, t, r, b)) {
+            let (rgba, w, h) = capture_virtual_rect_gdi(l, t, r, b)?;
+            return encode_region(rgba, w, h, max_dim, format);
+        }
+    }
     let mut guard = CAPTURE_STATE.lock().unwrap_or_else(|e| e.into_inner());
     if guard.is_none() {
         *guard = Some(init_capture_state()?);
@@ -326,6 +405,18 @@ pub fn capture_screen_region(
         (full_rgba, full_w, full_h)
     };
 
+    encode_region(rgba, w, h, max_dim, format)
+}
+
+/// Downscale (to `max_dim` longest edge, if given) then encode raw RGBA.
+/// Shared by the DXGI and GDI-virtual-rect paths of `capture_screen_region`.
+fn encode_region(
+    rgba: Vec<u8>,
+    w: usize,
+    h: usize,
+    max_dim: Option<u32>,
+    format: CaptureFormat,
+) -> Result<Vec<u8>, CoreError> {
     let (final_rgba, fw, fh) = if let Some(target) = max_dim {
         let long_edge = w.max(h) as u32;
         if long_edge > target {
@@ -616,6 +707,32 @@ pub(crate) fn encode_jpeg_rgba(rgba_data: &[u8], width: u32, height: u32, qualit
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rect_within_basic() {
+        let bounds = (0, 0, 1920, 1080);
+        assert!(rect_within((10, 10, 100, 100), bounds));
+        assert!(rect_within((0, 0, 1920, 1080), bounds)); // exact edges
+        assert!(!rect_within((-1, 0, 100, 100), bounds)); // left of bounds
+        assert!(!rect_within((0, 0, 1921, 100), bounds)); // past right edge
+        assert!(!rect_within((1900, 1000, 2100, 1200), bounds)); // second-monitor rect
+    }
+
+    #[test]
+    fn rect_within_negative_origin_bounds() {
+        // Secondary monitor to the left: virtual bounds start negative.
+        let bounds = (-1920, 0, 1920, 1080);
+        assert!(rect_within((-1900, 10, -100, 500), bounds)); // on the left monitor
+        assert!(!rect_within((-2000, 10, -100, 500), bounds)); // past left edge
+    }
+
+    #[test]
+    fn virtual_bounds_contains_primary() {
+        // Virtual screen must always contain the primary (0,0)-(w,h).
+        let (vl, vt, vr, vb) = virtual_screen_bounds();
+        assert!(vl <= 0 && vt <= 0, "virtual origin should be <= (0,0): {vl},{vt}");
+        assert!(vr > 0 && vb > 0, "virtual extent should be positive: {vr},{vb}");
+    }
 
     #[test]
     fn bgra_to_rgba_swaps_channels() {

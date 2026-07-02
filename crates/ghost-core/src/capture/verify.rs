@@ -67,6 +67,15 @@ pub fn compute_verification(
 pub fn capture_region_raw(
     rect: Option<(i32, i32, i32, i32)>,
 ) -> Result<(Vec<u8>, usize, usize), CoreError> {
+    // Off-primary rects (window on a secondary monitor) can't be served by the
+    // primary-output DXGI path — route them through the GDI virtual-screen
+    // capture so verification/OCR work on any monitor instead of silently
+    // cropping garbage from the primary.
+    if let Some((l, t, r, b)) = rect {
+        if !super::screen::rect_on_primary((l, t, r, b)) {
+            return super::screen::capture_virtual_rect_gdi(l, t, r, b);
+        }
+    }
     let (full_rgba, full_w, full_h) = super::screen::capture_screen_full_rgba()?;
     match rect {
         None => Ok((full_rgba, full_w, full_h)),

@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.7.2] - 2026-07-01 — Multi-Monitor & Interaction Robustness
+
+### Added / Fixed
+
+- **Multi-monitor capture**: screenshots and act-verification now work on ANY
+  monitor. The DXGI fast path only duplicates the primary output; rects that
+  fall off-primary (or straddle a monitor boundary) now route to a GDI
+  virtual-screen capture that spans the whole desktop (negative coordinates for
+  monitors left of / above the primary included). Previously an action or
+  screenshot on a secondary monitor silently cropped garbage from the primary.
+- **Scroll-into-view before acting**: `ghost_act` detects UIA-offscreen elements
+  (scrolled out of a list, collapsed, hidden tab) and calls ScrollItemPattern +
+  a 60ms settle before re-reading the rect, so clicks in long/virtualized lists
+  land on the real element instead of empty space.
+- **Disabled-control guard on all actions**: `double_click`/`right_click`/`hover`
+  now fail fast on a disabled element like `click`/`type` already did (was a
+  silent no-op returning ok).
+
+### Tests
+
+- 337 passing (was 334). New coverage for virtual-screen / on-primary rect
+  routing helpers.
+
 ## [0.7.1] - 2026-07-01 — Targeting, Reading, Preemption
 
 ### Added

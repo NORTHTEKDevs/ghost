@@ -51,6 +51,30 @@ impl UiaElement {
         unsafe { self.0.CurrentIsEnabled().map(|b| b.as_bool()).unwrap_or(false) }
     }
 
+    /// True if the element is off-screen (UIA IsOffscreen: scrolled out of view,
+    /// collapsed, or on a hidden tab). Such elements have stale bounding rects.
+    pub fn is_offscreen(&self) -> bool {
+        unsafe { self.0.CurrentIsOffscreen().map(|b| b.as_bool()).unwrap_or(false) }
+    }
+
+    /// Best-effort scroll-into-view via ScrollItemPattern. Elements inside a
+    /// scrolled container (long lists, virtualized grids) report a rect that's
+    /// off-screen until scrolled to; without this a click lands on empty space.
+    /// No-op (Ok) when the pattern is unavailable — caller proceeds regardless.
+    pub fn scroll_into_view(&self) -> Result<(), crate::error::CoreError> {
+        use windows::Win32::UI::Accessibility::{
+            IUIAutomationScrollItemPattern, UIA_ScrollItemPatternId,
+        };
+        unsafe {
+            if let Ok(pattern) = self.0.GetCurrentPattern(UIA_ScrollItemPatternId) {
+                if let Ok(sip) = pattern.cast::<IUIAutomationScrollItemPattern>() {
+                    let _ = sip.ScrollIntoView();
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Set UIA focus to this element via IUIAutomationElement::SetFocus().
     pub fn set_focus(&self) -> Result<(), crate::error::CoreError> {
         unsafe {

@@ -21,6 +21,21 @@ impl GhostElement {
         self.inner.bounding_rect().map(|r| (r.left, r.top, r.right, r.bottom))
     }
 
+    /// True if the element is enabled (interactable).
+    pub fn is_enabled(&self) -> bool {
+        self.inner.is_enabled()
+    }
+
+    /// True if the element is scrolled/collapsed out of view (stale rect).
+    pub fn is_offscreen(&self) -> bool {
+        self.inner.is_offscreen()
+    }
+
+    /// Best-effort scroll-into-view via ScrollItemPattern (no-op if unsupported).
+    pub fn scroll_into_view(&self) -> Result<()> {
+        self.inner.scroll_into_view().map_err(GhostError::Core)
+    }
+
     /// Click this element using InvokePattern or coordinate fallback.
     ///
     /// Note: This is synchronous because `UiaElement` holds COM pointers which are `!Send`.

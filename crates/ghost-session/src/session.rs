@@ -992,6 +992,24 @@ impl GhostSession {
         text: Option<&str>,
     ) -> Result<serde_json::Value> {
         let name = el.name();
+
+        // Fail fast on disabled controls for ALL actions — the coordinate paths
+        // (double_click/right_click/hover) previously bypassed the click/type
+        // disabled guard and clicked a dead control, returning a misleading ok.
+        if !el.is_enabled() {
+            return Err(GhostError::ElementNotInteractable {
+                element: name,
+                reason: "element is disabled".into(),
+            });
+        }
+
+        // If the element is scrolled out of view, bring it into view first so its
+        // rect is live (a stale off-screen rect makes clicks land on empty space).
+        if el.is_offscreen() {
+            let _ = el.scroll_into_view();
+            // Give the container a beat to settle its layout before re-reading.
+            tokio::time::sleep(Duration::from_millis(60)).await;
+        }
         let rect = el.bounding_rect();
 
         // Anchor the OS foreground to the window that owns the target element.
