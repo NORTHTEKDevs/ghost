@@ -908,6 +908,41 @@ impl GhostSession {
         }
     }
 
+    /// Wait until an element matching `by` (name or role) appears (`appears=true`)
+    /// or disappears (`appears=false`) in the foreground window, WITHOUT clicking
+    /// anything first. The common "wait until the Save button exists" primitive.
+    /// Event-bus-driven backoff, same schedule as click_and_wait_for_text.
+    #[tracing::instrument(skip(self), fields(?by, appears, timeout_ms))]
+    pub async fn wait_for_element(&self, by: By, appears: bool, timeout_ms: u64) -> Result<()> {
+        let start = std::time::Instant::now();
+        let deadline = Duration::from_millis(timeout_ms);
+        let bus = EventBus::global();
+        let mut last_seq = bus.seq();
+        loop {
+            if is_stopped() { return Err(GhostError::Stopped); }
+            let probe = match &by {
+                By::Name(n) => self.tree.find_by_name_fast(n).map_err(GhostError::Core)?,
+                By::Role(r) => self.tree.find_by_role_fast(r).map_err(GhostError::Core)?,
+                By::Description(_) => return Err(GhostError::Vision(
+                    "wait_for_element supports name or role, not description".into())),
+            };
+            if probe.is_some() == appears {
+                return Ok(());
+            }
+            if start.elapsed() >= deadline {
+                return Err(GhostError::Timeout {
+                    action: format!("wait_for_element:{by:?}:appears={appears}"),
+                    ms: timeout_ms,
+                });
+            }
+            let elapsed_ms = start.elapsed().as_millis() as u64;
+            let backoff = if elapsed_ms < 500 { 25 } else if elapsed_ms < 2000 { 75 } else { 150 };
+            if let Ok(s) = bus.wait_for_change(last_seq, backoff).await {
+                last_seq = s;
+            }
+        }
+    }
+
     /// Fill each `(locator, text)` pair, optionally click submit, then wait for idle.
     pub async fn fill_form(
         &self,
@@ -1033,58 +1068,82 @@ impl GhostSession {
         // Best-effort UIA focus on top (non-fatal: InvokePattern/ValuePattern work without it)
         let _ = el.set_focus();
 
-        // MEDIUM-5: snapshot the foreground HWND before the action to detect focus changes.
-        let fg_before = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
-
-        // LOW-9: use foreground_window_rect() for both captures so the region stays valid
-        // even if the element moves after the action.
-        // HIGH-2: DXGI AcquireNextFrame can block 5-50ms; must not block the tokio thread.
-        let capture_rect = self.foreground_window_rect();
-        let before_capture = tokio::task::spawn_blocking(move || capture_region_raw(capture_rect))
-            .await
-            .ok()
-            .and_then(|r| r.ok());
-
-        match action {
-            "click" => {
-                el.click()?;
-            }
-            "type" => {
-                let t = text.ok_or_else(|| GhostError::Vision("ghost_act: action=type requires text param".into()))?;
-                el.type_text(t)?;
-            }
-            // HIGH-2: no clean UIA pattern for these — resolve element bounding-rect center
-            // and dispatch coordinate equivalents (same path as OCR/VLM tier).
-            "double_click" | "right_click" | "hover" => {
-                let center = rect.map(|(l, t, r, b)| ((l + r) / 2, (t + b) / 2))
-                    .ok_or_else(|| GhostError::Vision(format!("ghost_act: action={action} requires element with bounding rect")))?;
-                let (cx, cy) = center;
-                match action {
-                    "double_click" => {
-                        self.double_click_at(cx, cy).await?;
-                    }
-                    "right_click" => {
-                        self.right_click_at(cx, cy).await?;
-                    }
-                    "hover" => {
-                        self.hover(cx, cy).await?;
-                    }
-                    _ => unreachable!(),
-                }
-            }
-            other => {
-                return Err(GhostError::Vision(format!("ghost_act: unknown action '{other}'; use click|type|double_click|right_click|hover")));
-            }
+        // Reject unknown actions once, up front, before the retry loop.
+        if !matches!(action, "click" | "type" | "double_click" | "right_click" | "hover") {
+            return Err(GhostError::Vision(format!("ghost_act: unknown action '{action}'; use click|type|double_click|right_click|hover")));
         }
 
-        // Adaptive post-action verification: fast UIs confirm on the first ~40ms
-        // capture; async renders (web/Electron) get up to ~240ms before we report
-        // no change. Honest signal either way — `verified` is never assumed.
-        let verification = self.verify_screen_change(before_capture, fg_before).await;
+        // Retry-until-verified: dispatch, then check for a screen change. If the
+        // action produced NO detected change, re-focus and dispatch once more.
+        //
+        // ONLY `type` is retryable — it is idempotent (ValuePattern.SetValue and
+        // the clear-then-type fallback both REPLACE the field, so a second
+        // dispatch can't double the text). click/double_click/right_click are
+        // NOT retried: a verified=false is ambiguous (the effect may simply be
+        // slower than the ~240ms verify window, e.g. a Submit that navigates), so
+        // re-clicking risks a double-submit / double-charge / double-delete.
+        // Those actions dispatch once and report verified honestly instead.
+        let retryable = action == "type";
+        let mut verification;
+        let mut attempts = 0u32;
+        loop {
+            attempts += 1;
+
+            // MEDIUM-5: snapshot the foreground HWND before the action to detect focus changes.
+            let fg_before = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
+            // LOW-9/HIGH-2: capture the foreground region off the tokio thread.
+            let capture_rect = self.foreground_window_rect();
+            let before_capture = tokio::task::spawn_blocking(move || capture_region_raw(capture_rect))
+                .await
+                .ok()
+                .and_then(|r| r.ok());
+
+            match action {
+                "click" => el.click()?,
+                "type" => {
+                    let t = text.ok_or_else(|| GhostError::Vision("ghost_act: action=type requires text param".into()))?;
+                    el.type_text(t)?;
+                }
+                // HIGH-2: no clean UIA pattern — dispatch coordinate equivalents.
+                "double_click" | "right_click" | "hover" => {
+                    let (cx, cy) = rect.map(|(l, t, r, b)| ((l + r) / 2, (t + b) / 2))
+                        .ok_or_else(|| GhostError::Vision(format!("ghost_act: action={action} requires element with bounding rect")))?;
+                    match action {
+                        "double_click" => self.double_click_at(cx, cy).await?,
+                        "right_click" => self.right_click_at(cx, cy).await?,
+                        "hover" => self.hover(cx, cy).await?,
+                        _ => unreachable!(),
+                    }
+                }
+                _ => unreachable!(),
+            }
+
+            // Adaptive post-action verification: fast UIs confirm on the first
+            // ~40ms capture; async renders get up to ~240ms before "no change".
+            verification = self.verify_screen_change(before_capture, fg_before).await;
+
+            let changed = verification.as_ref().map(|v| v.changed).unwrap_or(false);
+            let can_verify = verification.is_some();
+            if changed || !retryable || !can_verify || attempts >= 2 {
+                break;
+            }
+            // No change and we can verify — re-anchor focus and try once more.
+            if let Some((l, t, r, b)) = rect {
+                let (cx, cy) = ((l + r) / 2, (t + b) / 2);
+                let _ = tokio::task::spawn_blocking(move || {
+                    ghost_core::uia::tree::focus_window_under_point(cx, cy)
+                }).await;
+            }
+            let _ = el.set_focus();
+        }
 
         let rect_json = rect.map(|(l, t, r, b)| serde_json::json!({"left": l, "top": t, "right": r, "bottom": b}))
             .unwrap_or(serde_json::Value::Null);
-        Ok(Self::act_result_json(name.into(), rect_json, verification, focus_confirmed))
+        let mut out = Self::act_result_json(name.into(), rect_json, verification, focus_confirmed);
+        if let Some(obj) = out.as_object_mut() {
+            obj.insert("attempts".into(), serde_json::json!(attempts));
+        }
+        Ok(out)
     }
 
     /// Coordinate-based action with the same focus-anchoring and verification
@@ -1100,6 +1159,19 @@ impl GhostSession {
         .and_then(|r| r.ok())
         .unwrap_or(false);
 
+        // Occlusion diagnostic: what element actually sits at (x,y) right now?
+        // This is a blind coordinate dispatch (OCR/VLM tier), so the point may be
+        // covered by a modal/tooltip that appeared after grounding. Non-fatal —
+        // surfaced as hit_element so a mis-hit is diagnosable instead of silent.
+        // Also capture whether the hit element is a text field, to gate the
+        // destructive clear-before-type below (a mis-grounded type onto an
+        // Explorer file list must NOT fire Ctrl+A+Delete).
+        let hit = self.tree.element_from_point(x, y).ok().flatten();
+        let hit_is_editable = hit.as_ref()
+            .map(|e| ghost_core::uia::patterns::is_editable_role(e.control_type()))
+            .unwrap_or(false);
+        let hit_element = hit.map(|e| e.name());
+
         let fg_before = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
         let capture_rect = self.foreground_window_rect();
         let before_capture = tokio::task::spawn_blocking(move || capture_region_raw(capture_rect))
@@ -1112,6 +1184,13 @@ impl GhostSession {
             "type" => {
                 let t = text.ok_or_else(|| GhostError::Vision("act_at: action=type requires text param".into()))?;
                 self.click_at(x, y).await?;
+                // Clear existing content first so type replaces rather than
+                // appends — but ONLY when the point is a known text field. On a
+                // non-editable hit (a file row, a button, the desktop) Ctrl+A +
+                // Delete would select-all + delete, so skip the clear there.
+                if hit_is_editable {
+                    let _ = ghost_core::input::keyboard::clear_focused_field();
+                }
                 ghost_core::input::keyboard::type_text(t).map_err(GhostError::Core)?;
             }
             "double_click" => self.double_click_at(x, y).await?,
@@ -1125,7 +1204,11 @@ impl GhostSession {
         }
 
         let verification = self.verify_screen_change(before_capture, fg_before).await;
-        Ok(Self::act_result_json(serde_json::Value::Null, serde_json::Value::Null, verification, focus_confirmed))
+        let mut out = Self::act_result_json(serde_json::Value::Null, serde_json::Value::Null, verification, focus_confirmed);
+        if let (Some(obj), Some(hit)) = (out.as_object_mut(), hit_element) {
+            obj.insert("hit_element".into(), serde_json::Value::String(hit));
+        }
+        Ok(out)
     }
 
     /// Poll for a post-action screen delta on the VERIFY_POLL_MS schedule,
