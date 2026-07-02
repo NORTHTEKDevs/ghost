@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.7.7] - 2026-07-02 — Reproducible Benchmark + Symbol Keys
+
+### Added
+
+- **`bench/` — a reproducible, honest benchmark.** Drives the real `ghost-mcp`
+  binary through 12 Windows desktop tasks and scores each by re-observing the
+  actual result (e.g. the Calculator display really reads 42), not by trusting a
+  tool call returned ok. Self-contained, runs on any Windows 10/11 box, exit 0
+  iff all pass. Ships Ghost's own measured numbers only (12/12, ~2.5s/task) plus
+  an honest protocol for comparing to other tools without fabricating their
+  columns. See `bench/README.md`.
+
+### Fixed (found by the benchmark on its first run)
+
+- **`ghost_key` / `ghost_press` can now send symbol keys** (`*`, `/`, `-`, `.`,
+  `=`, etc.). Previously only named keys and a few OEM symbols had a VK mapping,
+  so `keys="*"` (multiply) was a silent no-op — an agent typing any operator hit
+  it immediately. A single character with no VK mapping is now sent as a Unicode
+  character (layout-independent, exact glyph); multi-char unknown names still error.
+
 ## [0.7.6] - 2026-07-02 — Stuck-Modifier Safety
 
 ### Fixed (found by convergence audit)

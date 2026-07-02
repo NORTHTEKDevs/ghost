@@ -215,7 +215,34 @@ ghost-cli     ghost-http     ghost-mcp     Rust SDK
 
 Supporting crates: `ghost-cache` (UIA snapshot + delta), `ghost-intent` (FSM + JSONLogic executor).
 
-## Benchmarks (v0.3.0, Windows 11, Ryzen)
+## Benchmark — task success, not "did the call return ok"
+
+`bench/` holds a reproducible end-to-end benchmark: it drives the real
+`ghost-mcp` binary through 12 Windows desktop tasks and scores each by
+**re-observing the actual result** (does the Calculator display really read 42?
+is the typed value really present?), never by trusting a tool call's return.
+
+Latest run (see [`bench/results/latest.md`](bench/results/latest.md)):
+
+> **12/12 tasks passed (100%)**, median 2.5 s per task (full wall-clock incl.
+> app launch) — perception, click/keyboard action+verify, waits, window
+> management, text extraction, disambiguation, flow chaining, structured errors,
+> element screenshots, and value assertions.
+
+Reproduce on any Windows 10/11 machine:
+
+```bash
+cargo build --release -p ghost-mcp
+python bench/run_bench.py       # exit 0 iff every task passed
+```
+
+We deliberately publish only Ghost's own measured numbers — never invented
+columns for other tools. `bench/README.md` gives an honest protocol for
+comparing against Playwright-MCP / Computer Use / UI-TARS, and explains why a
+naive same-suite comparison isn't apples-to-apples (Playwright is browser-only;
+vision agents need an API + VM).
+
+### Microbenchmarks (v0.3.0, Windows 11, Ryzen)
 
 | Operation            | Measured  | Budget   |
 | -------------------- | --------- | -------- |

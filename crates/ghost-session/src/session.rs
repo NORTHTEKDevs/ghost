@@ -666,12 +666,21 @@ impl GhostSession {
     }
 
     /// Press and release a named key: Enter, Tab, Escape, F5, ArrowUp, Ctrl, etc.
+    /// A single character with no VK mapping (an operator/punctuation symbol like
+    /// `*`, `/`, `-`, `.`, `=`) is sent as a Unicode character — layout-independent
+    /// and exactly the intended glyph — instead of failing. Multi-char unknown
+    /// names still error.
     pub async fn press(&self, key: &str) -> Result<()> {
         if is_stopped() { return Err(GhostError::Stopped); }
-        let vk = name_to_vk(key).ok_or_else(|| GhostError::Core(
-            ghost_core::error::CoreError::Win32 { code: 0, context: "unknown key name" }
-        ))?;
-        press_key(vk).map_err(GhostError::Core)
+        if let Some(vk) = name_to_vk(key) {
+            return press_key(vk).map_err(GhostError::Core);
+        }
+        if key.chars().count() == 1 {
+            return ghost_core::input::keyboard::type_text(key).map_err(GhostError::Core);
+        }
+        Err(GhostError::Core(ghost_core::error::CoreError::Win32 {
+            code: 0, context: "unknown key name",
+        }))
     }
 
     /// Press a modifier+key combo: modifiers=["Ctrl"], key="c" for Ctrl+C.

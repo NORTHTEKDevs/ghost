@@ -1,0 +1,110 @@
+{
+  "summary": {
+    "tasks": 12,
+    "passed": 12,
+    "failed": 0,
+    "success_rate": 100.0,
+    "latency_ms_median": 2472.1,
+    "latency_ms_max": 3547.7,
+    "timestamp": "2026-07-02T09:41:49Z",
+    "binary": "C:\\Users\\Krist\\projects\\active\\ghost\\target\\release\\ghost-mcp.exe"
+  },
+  "results": [
+    {
+      "id": "find_button",
+      "description": "Locate a named button and return real coordinates",
+      "passed": true,
+      "detail": "center={'x': 90, 'y': 376} source=uia",
+      "grounding_source": "uia",
+      "latency_ms": 2407.3
+    },
+    {
+      "id": "click_compute",
+      "description": "Click 6 x 7 = and verify display reads 42",
+      "passed": true,
+      "detail": "display='Display is 42'",
+      "grounding_source": "uia",
+      "latency_ms": 3547.7
+    },
+    {
+      "id": "keyboard_compute",
+      "description": "Type 9*9= and verify display reads 81",
+      "passed": true,
+      "detail": "display='Display is 81'",
+      "grounding_source": "keyboard",
+      "latency_ms": 2969.0
+    },
+    {
+      "id": "act_verified",
+      "description": "Action reports honest verified/focus_confirmed",
+      "passed": true,
+      "detail": "verified=True focus=True",
+      "grounding_source": "uia",
+      "latency_ms": 2428.7
+    },
+    {
+      "id": "wait_for_element",
+      "description": "Wait for a button to appear after launch",
+      "passed": true,
+      "detail": "appeared=True confirmed=True",
+      "grounding_source": null,
+      "latency_ms": 1181.4
+    },
+    {
+      "id": "window_list_state",
+      "description": "Window appears in list with a state field",
+      "passed": true,
+      "detail": "found=1 state=normal",
+      "grounding_source": null,
+      "latency_ms": 2276.8
+    },
+    {
+      "id": "read_text",
+      "description": "Read UI element labels from the a11y tree",
+      "passed": true,
+      "detail": "read_back='Display is 123'",
+      "grounding_source": null,
+      "latency_ms": 2743.0
+    },
+    {
+      "id": "index_disambiguation",
+      "description": "Select nth match with a matches count",
+      "passed": true,
+      "detail": "matches=26 name='Minimize Calculator'",
+      "grounding_source": "uia",
+      "latency_ms": 2370.9
+    },
+    {
+      "id": "run_chaining",
+      "description": "ghost_run step output feeds the next step",
+      "passed": true,
+      "detail": "completed=8/8 display='Display is 13'",
+      "grounding_source": null,
+      "latency_ms": 2515.5
+    },
+    {
+      "id": "structured_error",
+      "description": "Missing element yields code + suggested_action",
+      "passed": true,
+      "detail": "code=-32001 has_suggestion=True",
+      "grounding_source": null,
+      "latency_ms": 3069.0
+    },
+    {
+      "id": "screenshot_element",
+      "description": "Crop a screenshot to one element",
+      "passed": true,
+      "detail": "size_bytes=1031 valid_image=True",
+      "grounding_source": null,
+      "latency_ms": 2314.9
+    },
+    {
+      "id": "value_equals_assert",
+      "description": "Assert an element's real value after typing",
+      "passed": true,
+      "detail": "read_back='benchmark-value' assert_passed=True",
+      "grounding_source": "uia",
+      "latency_ms": 3322.2
+    }
+  ]
+}
