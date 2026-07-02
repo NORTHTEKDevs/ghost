@@ -31,6 +31,34 @@ pub(crate) fn role_alias_matches(searched: &str, el_role: &str) -> bool {
 /// resolve in well under 1k visits.
 const SEARCH_NODE_BUDGET: usize = 3000;
 
+/// Max UIA nodes visited per text-extraction walk. Higher than the search
+/// budget: reading a full page legitimately touches more nodes, and the walk
+/// does no per-node pattern queries except on edit/document elements.
+const TEXT_NODE_BUDGET: usize = 8000;
+
+/// Roles whose accessible NAME carries visible text content.
+const TEXT_NAME_ROLES: &[&str] = &[
+    "text", "hyperlink", "listitem", "treeitem", "tabitem", "menuitem",
+    "button", "checkbox", "radiobutton", "combobox", "dataitem", "headeritem",
+];
+
+/// Roles whose ValuePattern (get_text) carries the content.
+const TEXT_VALUE_ROLES: &[&str] = &["edit", "document"];
+
+/// Truncate `s` to at most `max` bytes WITHOUT splitting a UTF-8 character —
+/// `String::truncate` panics off a char boundary, which would crash the whole
+/// server on ordinary Unicode content (accents, CJK, emoji).
+fn truncate_at_char_boundary(s: &mut String, max: usize) {
+    if s.len() <= max {
+        return;
+    }
+    let mut cut = max;
+    while cut > 0 && !s.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    s.truncate(cut);
+}
+
 pub struct UiaTree {
     automation: IUIAutomation,
 }
@@ -213,55 +241,196 @@ impl UiaTree {
         }
     }
 
-    /// Return structured list of interactive elements. Optionally scoped to a window by partial name.
+    /// Resolve the UIA element to walk for a given optional window scope.
     ///
     /// A window scope that matches nothing is an ERROR (`ProcessNotFound`), not a
     /// silent full-desktop walk: dumping every window's elements (including
     /// minimized ones at -32000 coords) produced huge, misleading responses.
+    ///
+    /// # Safety
+    /// COM calls; must run on the session STA thread.
+    unsafe fn resolve_scope_root(
+        &self,
+        walker: &IUIAutomationTreeWalker,
+        window_name: Option<&str>,
+    ) -> Result<IUIAutomationElement, CoreError> {
+        let Some(wname) = window_name else {
+            return self.automation.GetRootElement()
+                .map_err(|e| CoreError::ComInit(e.to_string()));
+        };
+        let wname_lower = wname.to_lowercase();
+        let desktop = self.automation.GetRootElement()
+            .map_err(|e| CoreError::ComInit(e.to_string()))?;
+        let mut child = walker.GetFirstChildElement(&desktop).ok();
+        while let Some(c) = child {
+            let el = UiaElement(c.clone());
+            if el.name().to_lowercase().contains(&wname_lower) {
+                return Ok(c);
+            }
+            child = walker.GetNextSiblingElement(&c).ok();
+        }
+        // Not a direct UIA child of the desktop (minimized/cloaked windows often
+        // aren't). Fall back to an HWND title match so agents can still scope to
+        // windows they just interacted with.
+        let win = list_windows()?
+            .into_iter()
+            .find(|w| w.name.to_lowercase().contains(&wname_lower))
+            .ok_or_else(|| CoreError::ProcessNotFound { name: wname.to_string() })?;
+        if win.state == "minimized" {
+            // Element coords of a minimized window are garbage (-32000).
+            return Err(CoreError::WindowMinimized { name: win.name });
+        }
+        self.automation.ElementFromHandle(HWND(win.hwnd))
+            .map_err(|e| CoreError::ComInit(e.to_string()))
+    }
+
+    /// Return structured list of interactive elements. Optionally scoped to a window by partial name.
     pub fn describe_screen(&self, window_name: Option<&str>) -> Result<Vec<ElementDescriptor>, CoreError> {
         unsafe {
             // Acquire walker once — used for both the window-title scan and the collect pass.
             let walker = self.get_walker()?;
-            let root = if let Some(wname) = window_name {
-                let wname_lower = wname.to_lowercase();
-                let desktop = self.automation.GetRootElement()
-                    .map_err(|e| CoreError::ComInit(e.to_string()))?;
-                let mut child = walker.GetFirstChildElement(&desktop).ok();
-                let mut found = None;
-                while let Some(c) = child {
-                    let el = UiaElement(c.clone());
-                    if el.name().to_lowercase().contains(&wname_lower) {
-                        found = Some(c);
-                        break;
-                    }
-                    child = walker.GetNextSiblingElement(&c).ok();
-                }
-                match found {
-                    Some(el) => el,
-                    None => {
-                        // Not a direct UIA child of the desktop (minimized/cloaked windows
-                        // often aren't). Fall back to an HWND title match so agents can
-                        // still scope to windows they just interacted with.
-                        let win = list_windows()?
-                            .into_iter()
-                            .find(|w| w.name.to_lowercase().contains(&wname_lower))
-                            .ok_or_else(|| CoreError::ProcessNotFound { name: wname.to_string() })?;
-                        if win.state == "minimized" {
-                            // Element coords of a minimized window are garbage (-32000).
-                            return Err(CoreError::WindowMinimized { name: win.name });
-                        }
-                        self.automation.ElementFromHandle(HWND(win.hwnd))
-                            .map_err(|e| CoreError::ComInit(e.to_string()))?
-                    }
-                }
-            } else {
-                self.automation.GetRootElement()
-                    .map_err(|e| CoreError::ComInit(e.to_string()))?
-            };
+            let root = self.resolve_scope_root(&walker, window_name)?;
             let mut results = Vec::new();
             self.collect_interactive(&root, &mut results, 0, &walker)?;
             Ok(results)
         }
+    }
+
+    /// Collect up to `cap` elements matching `name` (case-insensitive contains)
+    /// AND `role` (with aliases) within the subtree rooted at `hwnd`. A criterion
+    /// that is None always matches; at least one must be Some. Unlike the
+    /// first-match find_* functions, this enables disambiguation (`matches`
+    /// count, nth-match selection) when several elements share a name/role.
+    pub fn find_all_in_hwnd(
+        &self,
+        hwnd: HWND,
+        name: Option<&str>,
+        role: Option<&str>,
+        cap: usize,
+    ) -> Result<Vec<UiaElement>, CoreError> {
+        if name.is_none() && role.is_none() {
+            return Ok(Vec::new());
+        }
+        let name_lower = name.map(|n| n.to_lowercase());
+        unsafe {
+            let root = self.automation.ElementFromHandle(hwnd)
+                .map_err(|e| CoreError::ComInit(e.to_string()))?;
+            let walker = self.get_walker()?;
+            let mut out = Vec::new();
+            let mut budget = SEARCH_NODE_BUDGET;
+            self.collect_matching(&root, name_lower.as_deref(), role, &walker, 0, &mut budget, cap, &mut out)?;
+            Ok(out)
+        }
+    }
+
+    unsafe fn collect_matching(
+        &self,
+        element: &IUIAutomationElement,
+        name: Option<&str>,
+        role: Option<&str>,
+        walker: &IUIAutomationTreeWalker,
+        depth: usize,
+        budget: &mut usize,
+        cap: usize,
+        out: &mut Vec<UiaElement>,
+    ) -> Result<(), CoreError> {
+        if depth > 50 || *budget == 0 || out.len() >= cap {
+            return Ok(());
+        }
+        *budget -= 1;
+        let el = UiaElement(element.clone());
+        let name_ok = name.map_or(true, |n| el.name().to_lowercase().contains(n));
+        let role_ok = role.map_or(true, |r| {
+            let er = role_id_to_name(el.control_type());
+            er == r || role_alias_matches(r, er)
+        });
+        // depth > 0: never match the subtree root (the window element itself) —
+        // a window title containing the searched name would otherwise become
+        // match #0 and shift every real element's index.
+        if depth > 0 && name_ok && role_ok {
+            out.push(el);
+        }
+        let mut child = walker.GetFirstChildElement(element).ok();
+        while let Some(c) = child {
+            self.collect_matching(&c, name, role, walker, depth + 1, budget, cap, out)?;
+            if out.len() >= cap || *budget == 0 {
+                return Ok(());
+            }
+            child = walker.GetNextSiblingElement(&c).ok();
+        }
+        Ok(())
+    }
+
+    /// Extract readable text from a window (or the full desktop). Walks the
+    /// subtree collecting accessible names of text-carrying roles plus
+    /// ValuePattern content of edit/document elements — the cheap way to READ
+    /// a page or app (vs screenshots/element dumps). Returns (text, truncated).
+    pub fn collect_text(
+        &self,
+        window_name: Option<&str>,
+        max_chars: usize,
+    ) -> Result<(String, bool), CoreError> {
+        unsafe {
+            let walker = self.get_walker()?;
+            let root = self.resolve_scope_root(&walker, window_name)?;
+            let mut out = String::new();
+            let mut budget = TEXT_NODE_BUDGET;
+            let truncated = self.collect_text_rec(&root, &walker, 0, &mut budget, max_chars, &mut out)?;
+            Ok((out, truncated))
+        }
+    }
+
+    unsafe fn collect_text_rec(
+        &self,
+        element: &IUIAutomationElement,
+        walker: &IUIAutomationTreeWalker,
+        depth: usize,
+        budget: &mut usize,
+        max_chars: usize,
+        out: &mut String,
+    ) -> Result<bool, CoreError> {
+        if depth > 50 || *budget == 0 {
+            return Ok(false);
+        }
+        if out.len() >= max_chars {
+            return Ok(true);
+        }
+        *budget -= 1;
+        let el = UiaElement(element.clone());
+        let role = role_id_to_name(el.control_type());
+        let piece = if TEXT_VALUE_ROLES.contains(&role) {
+            let t = el.get_text();
+            if t.is_empty() { el.name() } else { t }
+        } else if TEXT_NAME_ROLES.contains(&role) {
+            el.name()
+        } else {
+            String::new()
+        };
+        if !piece.is_empty() {
+            // Skip immediate duplicates (containers often repeat child text).
+            let is_dup = out.len() > piece.len()
+                && out.ends_with('\n')
+                && out[..out.len() - 1].ends_with(&piece);
+            if !is_dup {
+                out.push_str(&piece);
+                out.push('\n');
+                if out.len() >= max_chars {
+                    truncate_at_char_boundary(out, max_chars);
+                    return Ok(true);
+                }
+            }
+        }
+        let mut child = walker.GetFirstChildElement(element).ok();
+        while let Some(c) = child {
+            if self.collect_text_rec(&c, walker, depth + 1, budget, max_chars, out)? {
+                return Ok(true);
+            }
+            if *budget == 0 {
+                return Ok(false);
+            }
+            child = walker.GetNextSiblingElement(&c).ok();
+        }
+        Ok(false)
     }
 
     /// Recursive interactive-element collector. `walker` is acquired once by the caller.
@@ -575,5 +744,24 @@ mod tests {
         let result = ensure_foreground(hwnd, 0);
         assert!(result.is_ok(), "ensure_foreground must not panic or error: {:?}", result);
         assert_eq!(result.unwrap(), true, "already-foreground window should return Ok(true)");
+    }
+
+    #[test]
+    fn truncate_at_char_boundary_never_splits_utf8() {
+        let mut s = String::from("caf\u{e9}\n"); // é is 2 bytes; byte 4 is mid-char
+        truncate_at_char_boundary(&mut s, 4);
+        assert_eq!(s, "caf");
+
+        let mut s2 = String::from("ab\u{1F600}cd"); // emoji is 4 bytes starting at byte 2
+        truncate_at_char_boundary(&mut s2, 3);
+        assert_eq!(s2, "ab");
+
+        let mut s3 = String::from("plain ascii");
+        truncate_at_char_boundary(&mut s3, 5);
+        assert_eq!(s3, "plain");
+
+        let mut s4 = String::from("short");
+        truncate_at_char_boundary(&mut s4, 100);
+        assert_eq!(s4, "short");
     }
 }

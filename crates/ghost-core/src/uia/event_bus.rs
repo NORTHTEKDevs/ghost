@@ -17,7 +17,8 @@ use tokio::time::{timeout, Duration};
 use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook};
 use windows::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, GetMessageW, TranslateMessage,
-    EVENT_OBJECT_FOCUS, EVENT_OBJECT_STATECHANGE,
+    EVENT_OBJECT_FOCUS, EVENT_OBJECT_REORDER, EVENT_OBJECT_SHOW,
+    EVENT_OBJECT_STATECHANGE, EVENT_OBJECT_VALUECHANGE,
     EVENT_SYSTEM_FOREGROUND,
     MSG, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
 };
@@ -151,6 +152,41 @@ fn pump_thread(_bus: &'static EventBus) {
         let _hook_state = HookGuard(SetWinEventHook(
             EVENT_OBJECT_STATECHANGE,
             EVENT_OBJECT_STATECHANGE,
+            None,
+            Some(win_event_proc),
+            0,
+            0,
+            WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS,
+        ));
+
+        // Hook 4: content changes — text/value updates (VALUECHANGE), children
+        // re-ordered (REORDER: lists updating, DOM mutations), and elements
+        // becoming visible (SHOW: dialogs, async-rendered content). Without
+        // these, find()/wait primitives only woke on focus/foreground/state
+        // events and fell back to 25-150ms polling for ordinary content
+        // changes. OBJID filter in win_event_proc + the 10ms debounce in
+        // find()'s wake path keep event storms from causing walk thrash.
+        let _hook_value = HookGuard(SetWinEventHook(
+            EVENT_OBJECT_VALUECHANGE,
+            EVENT_OBJECT_VALUECHANGE,
+            None,
+            Some(win_event_proc),
+            0,
+            0,
+            WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS,
+        ));
+        let _hook_reorder = HookGuard(SetWinEventHook(
+            EVENT_OBJECT_REORDER,
+            EVENT_OBJECT_REORDER,
+            None,
+            Some(win_event_proc),
+            0,
+            0,
+            WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS,
+        ));
+        let _hook_show = HookGuard(SetWinEventHook(
+            EVENT_OBJECT_SHOW,
+            EVENT_OBJECT_SHOW,
             None,
             Some(win_event_proc),
             0,

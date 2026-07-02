@@ -142,7 +142,7 @@ Add to Claude Desktop config (`%APPDATA%\Claude\claude_desktop_config.json`):
 
 Works with any MCP client (Claude, Cursor, etc.) — 17 lean verbs advertised (legacy names stay dispatchable) covering see/find/act/keys/scroll/drag/clipboard/screenshot/windows/waits/query/run.
 
-## Reliability Model (v0.7.0)
+## Reliability Model (v0.7.x)
 
 Desktop automation driven from an MCP client has a hostile focus environment: between tool
 calls, the client's own terminal usually retakes OS focus. Ghost is built for that:
@@ -152,12 +152,19 @@ calls, the client's own terminal usually retakes OS focus. Ghost is built for th
 - **Every action response is honest**: `verified` (did the screen actually change),
   `focus_confirmed` (was the right window foreground), and a `warning` when either is off —
   never a blind `ok:true`. Check `verified` before re-issuing an action.
-- **`ghost_key` takes `window`** — with it, keys are guaranteed to land in that window or the
-  call errors. Without it, keys go to whatever owns OS focus (avoid for anything critical).
+- **Anchor to a window** — `ghost_key`, `ghost_find`, and `ghost_act` all take `window`;
+  with it, input/resolution is guaranteed to target that window or the call errors. Use it
+  for any multi-window flow.
+- **Disambiguate duplicates** — `index` selects the nth match when several elements share a
+  name/role (multiple "Close Tab" buttons); responses carry a `matches` count.
+- **Read, don't screenshot** — `ghost_see mode=text` extracts a window/page's readable text
+  straight from the accessibility tree: faster and ~10x cheaper in tokens than images.
 - **Latency is visible**: every response carries `ms`, and `escalated: true` flags when a
   find had to pay a network VLM round trip (local tiers: cache → UIA → OCR are all on-device).
 - **Windows never disappear**: minimized windows stay in `ghost_window list` (with `state`)
   and `op=focus` auto-restores them.
+- **Stop always works**: `ghost_stop` preempts the in-flight call the moment it arrives
+  (dedicated stdin reader), and Ctrl+Alt+G remains the OS-level kill switch.
 
 ## Emergency Stop
 
