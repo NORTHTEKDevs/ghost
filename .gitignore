@@ -8,3 +8,5 @@ Thumbs.db
 diag_*.png
 dist/
 public/ghost_*.png
+__pycache__/
+*.pyc
