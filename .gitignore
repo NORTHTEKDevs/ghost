@@ -6,3 +6,5 @@
 Thumbs.db
 *.log
 diag_*.png
+dist/
+public/ghost_*.png

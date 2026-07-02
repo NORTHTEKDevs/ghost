@@ -38,12 +38,51 @@ enum Provider {
     Anthropic,
 }
 
+/// VLM request timeout. A 30s single-shot call was far beyond acceptable MCP
+/// tool-call latency (and the serial stdio loop blocks every queued request
+/// behind it). Default 8s; override via GHOST_VLM_TIMEOUT_MS for slow providers.
+fn vlm_timeout() -> std::time::Duration {
+    let ms = std::env::var("GHOST_VLM_TIMEOUT_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|&v| v >= 1000)
+        .unwrap_or(8000);
+    std::time::Duration::from_millis(ms)
+}
+
+/// Send with one bounded retry on transient failures (connect errors / 5xx).
+/// Timeouts are deliberately NOT retried — that would double worst-case latency.
+async fn send_with_retry(builder: reqwest::RequestBuilder, ctx: &str) -> Result<reqwest::Response> {
+    let retry = builder.try_clone();
+    match builder.send().await {
+        Ok(resp) if resp.status().is_server_error() => match retry {
+            Some(b) => {
+                let status = resp.status();
+                tracing::warn!(%status, ctx, "vision request got 5xx; retrying once");
+                b.send().await
+                    .map_err(|e| GhostError::Vision(format!("{ctx} request (retry after {status}): {e}")))
+            }
+            None => Ok(resp),
+        },
+        Ok(resp) => Ok(resp),
+        Err(e) if e.is_connect() => match retry {
+            Some(b) => {
+                tracing::warn!(error = %e, ctx, "vision request connect error; retrying once");
+                b.send().await
+                    .map_err(|e2| GhostError::Vision(format!("{ctx} request (retry after connect error): {e2}")))
+            }
+            None => Err(GhostError::Vision(format!("{ctx} request: {e}"))),
+        },
+        Err(e) => Err(GhostError::Vision(format!("{ctx} request: {e}"))),
+    }
+}
+
 fn http_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
         reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .user_agent("ghost-vision/0.5.0")
+            .timeout(vlm_timeout())
+            .user_agent("ghost-vision/0.6.0")
             .build()
             .expect("vision http client")
     })
@@ -175,15 +214,15 @@ async fn extract_via_openai_compat(prompt: &str, image_jpeg: &[u8]) -> Result<St
         max_tokens: 512,
         temperature: 0.0,
     };
-    let resp = http_client()
-        .post(&url)
-        .header("authorization", format!("Bearer {api_key}"))
-        .header("content-type", "application/json")
-        .header("accept", "application/json")
-        .json(&req)
-        .send()
-        .await
-        .map_err(|e| GhostError::Vision(format!("openai-compat extract request: {e}")))?;
+    let resp = send_with_retry(
+        http_client()
+            .post(&url)
+            .header("authorization", format!("Bearer {api_key}"))
+            .header("content-type", "application/json")
+            .header("accept", "application/json")
+            .json(&req),
+        "openai-compat extract",
+    ).await?;
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
@@ -220,15 +259,15 @@ async fn extract_via_anthropic(prompt: &str, image_jpeg: &[u8]) -> Result<String
             ],
         }],
     };
-    let resp = http_client()
-        .post(ANTHROPIC_URL)
-        .header("x-api-key", api_key)
-        .header("anthropic-version", ANTHROPIC_VERSION)
-        .header("content-type", "application/json")
-        .json(&req)
-        .send()
-        .await
-        .map_err(|e| GhostError::Vision(format!("anthropic extract request: {e}")))?;
+    let resp = send_with_retry(
+        http_client()
+            .post(ANTHROPIC_URL)
+            .header("x-api-key", api_key)
+            .header("anthropic-version", ANTHROPIC_VERSION)
+            .header("content-type", "application/json")
+            .json(&req),
+        "anthropic extract",
+    ).await?;
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
@@ -420,15 +459,15 @@ async fn locate_via_openai_compat(
         temperature: 0.0,
     };
 
-    let resp = http_client()
-        .post(&url)
-        .header("authorization", format!("Bearer {api_key}"))
-        .header("content-type", "application/json")
-        .header("accept", "application/json")
-        .json(&req)
-        .send()
-        .await
-        .map_err(|e| GhostError::Vision(format!("openai-compat request failed: {e}")))?;
+    let resp = send_with_retry(
+        http_client()
+            .post(&url)
+            .header("authorization", format!("Bearer {api_key}"))
+            .header("content-type", "application/json")
+            .header("accept", "application/json")
+            .json(&req),
+        "openai-compat locate",
+    ).await?;
 
     if !resp.status().is_success() {
         let status = resp.status();
@@ -541,15 +580,15 @@ async fn locate_via_anthropic(
         }],
     };
 
-    let resp = http_client()
-        .post(ANTHROPIC_URL)
-        .header("x-api-key", api_key)
-        .header("anthropic-version", ANTHROPIC_VERSION)
-        .header("content-type", "application/json")
-        .json(&req)
-        .send()
-        .await
-        .map_err(|e| GhostError::Vision(format!("anthropic request failed: {e}")))?;
+    let resp = send_with_retry(
+        http_client()
+            .post(ANTHROPIC_URL)
+            .header("x-api-key", api_key)
+            .header("anthropic-version", ANTHROPIC_VERSION)
+            .header("content-type", "application/json")
+            .json(&req),
+        "anthropic locate",
+    ).await?;
 
     if !resp.status().is_success() {
         let status = resp.status();

@@ -5,7 +5,7 @@
 //! `Verification { changed, delta_score, foreground_ok }`.
 
 use crate::error::CoreError;
-use crate::capture::idle::{hash_frame, downsample_to_4x4};
+use crate::capture::idle::downsample_grid;
 
 /// Result of act-then-verify screen-delta check.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -18,17 +18,20 @@ pub struct Verification {
     pub foreground_ok: bool,
 }
 
-/// Pixel difference threshold above which we declare the screen "changed".
-/// 64-byte (4x4 RGBA) hash comparison: we compare byte-by-byte and treat
-/// any non-zero number of differing hash bytes as "changed" (delta_score > 0).
-/// The threshold for `changed = true` is delta_score > 0.0 (any perceptible change).
-const CHANGE_THRESHOLD: f32 = 0.0;
+/// Verification grid resolution. 32x32 cells sees a single typed word in a
+/// full-size window (the old 4x4 grid averaged small text changes away and,
+/// because it hashed the grid, produced a binary 0-or-1 delta_score).
+const VERIFY_GRID_DIM: usize = 32;
+
+/// Per-channel tolerance when comparing cell averages — absorbs capture noise
+/// without masking real changes (a typed word shifts its cells by far more).
+const CELL_TOLERANCE: u8 = 2;
 
 /// Compute a perceptual verification by comparing a BEFORE and AFTER raw RGBA buffer.
 ///
-/// Both buffers are expected to be raw RGBA (or any 4-channel) pixel data.
-/// They are downsampled to a 4x4 grid (64 bytes) and hashed via Blake3.
-/// `delta_score` = fraction of hash bytes that differ (0.0-1.0).
+/// Both buffers are downsampled to a 32x32 grid of per-cell channel averages,
+/// then compared cell-by-cell with a small tolerance. `delta_score` = fraction
+/// of cells that changed (0.0-1.0), a real perceptual distance.
 ///
 /// This is the pure, COM-free computation used by tests. The session layer
 /// calls this after capturing BEFORE and AFTER frames.
@@ -39,18 +42,22 @@ pub fn compute_verification(
     height: usize,
     foreground_ok: bool,
 ) -> Verification {
-    let before_ds = downsample_to_4x4(before_rgba, width, height);
-    let after_ds = downsample_to_4x4(after_rgba, width, height);
-    let before_hash = hash_frame(&before_ds);
-    let after_hash = hash_frame(&after_ds);
+    let before_ds = downsample_grid(before_rgba, width, height, VERIFY_GRID_DIM);
+    let after_ds = downsample_grid(after_rgba, width, height, VERIFY_GRID_DIM);
 
-    // Count differing bytes as a simple distance metric.
-    let diff_bytes = before_hash.iter()
-        .zip(after_hash.iter())
-        .filter(|(a, b)| a != b)
-        .count();
-    let delta_score = diff_bytes as f32 / before_hash.len() as f32;
-    let changed = delta_score > CHANGE_THRESHOLD;
+    let total_cells = VERIFY_GRID_DIM * VERIFY_GRID_DIM;
+    let mut changed_cells = 0usize;
+    for cell in 0..total_cells {
+        let base = cell * 4;
+        let cell_changed = (0..4).any(|c| {
+            before_ds[base + c].abs_diff(after_ds[base + c]) > CELL_TOLERANCE
+        });
+        if cell_changed {
+            changed_cells += 1;
+        }
+    }
+    let delta_score = changed_cells as f32 / total_cells as f32;
+    let changed = changed_cells > 0;
 
     Verification { changed, delta_score, foreground_ok }
 }
@@ -132,17 +139,45 @@ mod tests {
         assert!(v.delta_score >= 0.0 && v.delta_score <= 1.0);
     }
 
-    /// A small single-pixel change in a large uniform frame should still register.
+    /// A small single-pixel change in a large uniform frame must register: with a
+    /// 32x32 grid, one pixel of a 64x64 frame is 1/4 of its 2x2 cell — a 255-value
+    /// flip shifts the cell average by ~64, far beyond tolerance.
     #[test]
     fn small_change_in_uniform_frame_is_detected() {
         let before = solid_rgba(128, 128, 128, 255, 64, 64);
         let mut after = before.clone();
-        after[0] = 0; // change one pixel
+        after[0] = 0; // change one pixel's red channel
         let v = compute_verification(&before, &after, 64, 64, true);
-        // After 4x4 downsampling, a single pixel in a 64x64 frame affects 1 of 16 cells.
-        // The averaged-down value may or may not change, depending on the cell size.
-        // We just check the verification completes without panic.
-        let _ = v;
+        assert!(v.changed, "single-pixel change must be detected (delta={})", v.delta_score);
+        assert!(v.delta_score > 0.0 && v.delta_score < 0.05, "small change must have small delta, got {}", v.delta_score);
+    }
+
+    /// A typed word (small dark run on a light background) must be detected —
+    /// this is the exact case the old 4x4 grid averaged away.
+    #[test]
+    fn typed_text_sized_change_is_detected() {
+        let w = 1280usize;
+        let h = 720usize;
+        let before = solid_rgba(250, 250, 250, 255, w, h);
+        let mut after = before.clone();
+        // Simulate ~10 characters: an 80x14 dark strip near the top-left.
+        for y in 100..114 {
+            for x in 200..280 {
+                let idx = (y * w + x) * 4;
+                after[idx] = 20; after[idx + 1] = 20; after[idx + 2] = 20;
+            }
+        }
+        let v = compute_verification(&before, &after, w, h, true);
+        assert!(v.changed, "typed-text-sized change must be detected (delta={})", v.delta_score);
+    }
+
+    /// Capture noise (±1 per channel everywhere) must NOT count as a change.
+    #[test]
+    fn capture_noise_within_tolerance_is_ignored() {
+        let before = solid_rgba(128, 128, 128, 255, 64, 64);
+        let after = solid_rgba(129, 129, 129, 255, 64, 64);
+        let v = compute_verification(&before, &after, 64, 64, true);
+        assert!(!v.changed, "1-value global noise must be within tolerance (delta={})", v.delta_score);
     }
 
     /// Verification result serializes/deserializes as JSON.

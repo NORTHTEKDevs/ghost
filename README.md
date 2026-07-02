@@ -18,13 +18,12 @@ No Claude required. No browser required. No CDP. Unblockable because it drives t
 
 ## Install
 
-Download prebuilt Windows binaries from the [Releases page](https://github.com/NORTHTEKDevs/ghost/releases/latest):
+**Option A — Ready-to-run kit ($20, one-time).** Prebuilt, verified Windows binaries (`ghost.exe`,
+`ghost-http.exe`, `ghost-mcp.exe`) plus a quick-start, MCP config, and examples — no Rust toolchain, runs in
+two minutes. Get it at **[northtek.io/ghost](https://northtek.io/ghost)**. (This just buys convenience; the
+source below is free.)
 
-- `ghost.exe` — CLI
-- `ghost-http.exe` — REST server
-- `ghost-mcp.exe` — MCP server
-
-Or build from source:
+**Option B — Build from source (free, MIT).** Ghost is open source. Compile it yourself:
 
 ```bash
 git clone https://github.com/NORTHTEKDevs/ghost
@@ -32,6 +31,8 @@ cd ghost
 cargo build --release --bin ghost --bin ghost-http --bin ghost-mcp
 # binaries in target/release/
 ```
+
+Requirements: Windows 10+ (and Rust stable only if building from source).
 
 ## Quick Start — CLI
 
@@ -139,7 +140,24 @@ Add to Claude Desktop config (`%APPDATA%\Claude\claude_desktop_config.json`):
 }
 ```
 
-Works with any MCP client (Claude, Cursor, etc.) — exposes 37 tools covering find/click/type/keys/mouse/clipboard/screenshot/windows/waits/intents/cache.
+Works with any MCP client (Claude, Cursor, etc.) — 17 lean verbs advertised (legacy names stay dispatchable) covering see/find/act/keys/scroll/drag/clipboard/screenshot/windows/waits/query/run.
+
+## Reliability Model (v0.7.0)
+
+Desktop automation driven from an MCP client has a hostile focus environment: between tool
+calls, the client's own terminal usually retakes OS focus. Ghost is built for that:
+
+- **`ghost_act` is atomic** — find → bring the target's window to the foreground
+  (AttachThreadInput, confirmed) → act → verify via screen delta. One call, no cross-call race.
+- **Every action response is honest**: `verified` (did the screen actually change),
+  `focus_confirmed` (was the right window foreground), and a `warning` when either is off —
+  never a blind `ok:true`. Check `verified` before re-issuing an action.
+- **`ghost_key` takes `window`** — with it, keys are guaranteed to land in that window or the
+  call errors. Without it, keys go to whatever owns OS focus (avoid for anything critical).
+- **Latency is visible**: every response carries `ms`, and `escalated: true` flags when a
+  find had to pay a network VLM round trip (local tiers: cache → UIA → OCR are all on-device).
+- **Windows never disappear**: minimized windows stay in `ghost_window list` (with `state`)
+  and `op=focus` auto-restores them.
 
 ## Emergency Stop
 

@@ -24,6 +24,9 @@ pub enum CoreError {
     #[error("Target window is gone")]
     WindowGone,
 
+    #[error("Window '{name}' is minimized; restore it first (ghost_window op=focus name={name})")]
+    WindowMinimized { name: String },
+
     #[error("Could not confirm foreground for window: {window}")]
     FocusFailed { window: String },
 }
