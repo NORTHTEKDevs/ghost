@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.7.1] - 2026-07-01 — Targeting, Reading, Preemption
+
+### Added
+
+- **`window` param on `ghost_find`/`ghost_act`**: focuses + confirms the target
+  window (title substring) before resolution, so UIA fast paths, OCR crops, and
+  cache keys all anchor to the INTENDED window in multi-window flows — closes
+  the remaining wrong-window-first-match hole.
+- **`index` param on `ghost_find`/`ghost_act`**: act on / return the nth match
+  (0-based) when several elements share a name/role (e.g. multiple "Close Tab"
+  buttons); name+role AND-combine on this path and responses carry a `matches`
+  count. Out-of-range gives an actionable error with the match count.
+- **`ghost_see mode=text`**: extract the readable text of a window/page
+  directly from the accessibility tree (names of text-carrying roles +
+  ValuePattern content of edit/document). The cheapest way to READ a page —
+  no screenshot, no element dump. `limit` = char cap (default 20000).
+- **Preemptible emergency stop**: stdin now runs on a dedicated reader thread;
+  a `ghost_stop` request sets the stop flag the moment it ARRIVES instead of
+  waiting in the serial queue. Live-verified: a queued 10s `ghost_wait` is
+  interrupted in ~1ms. `ghost_wait` also polls the stop flag (100ms) and
+  reports interruption as an error instead of sleeping through it.
+- **Content-change WinEvent hooks** (`EVENT_OBJECT_VALUECHANGE` / `REORDER` /
+  `SHOW`): find()/wait primitives now wake on text updates, list mutations,
+  and elements becoming visible instead of falling back to 25-150ms polling;
+  a 10ms debounce on the wake path prevents walk-thrash during event bursts.
+
+### Tests
+
+- 333 passing (was 330). Live e2e: stop preemption 1ms, mode=text reads typed
+  content, index disambiguation with matches count.
+
 ## [0.7.0] - 2026-07-01 — Reliability & Latency Overhaul
 
 Root-caused and fixed the three classes of field failures: actions that need

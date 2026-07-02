@@ -306,7 +306,12 @@ impl GhostSession {
                               else { 150 };
                 attempt += 1;
                 match bus.wait_for_change(last_seq, backoff).await {
-                    Ok(s) => { last_seq = s; }
+                    Ok(s) => {
+                        last_seq = s;
+                        // Debounce: content-change hooks (VALUECHANGE/REORDER/SHOW)
+                        // can burst; coalesce before paying for another UIA walk.
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
                     Err(_) => {}
                 }
             }
@@ -783,9 +788,20 @@ impl GhostSession {
         set_window_state(name, ws).map_err(GhostError::Core)
     }
 
-    /// Wait N milliseconds.
-    pub async fn wait(&self, ms: u64) {
-        tokio::time::sleep(Duration::from_millis(ms)).await;
+    /// Wait N milliseconds. Polls the emergency-stop flag so ghost_stop (or
+    /// Ctrl+Alt+G) can interrupt a long sleep; returns false if interrupted.
+    pub async fn wait(&self, ms: u64) -> bool {
+        let deadline = std::time::Instant::now() + Duration::from_millis(ms);
+        loop {
+            if is_stopped() {
+                return false;
+            }
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                return true;
+            }
+            tokio::time::sleep(remaining.min(Duration::from_millis(100))).await;
+        }
     }
 
     /// Current event-bus sequence. Increments on each system foreground change.
@@ -938,6 +954,43 @@ impl GhostSession {
     pub async fn act(&self, by: By, action: &str, text: Option<&str>) -> Result<serde_json::Value> {
         // find() already upserts into the locator cache on success.
         let el = self.find(by).await?;
+        self.act_on_element(el, action, text).await
+    }
+
+    /// Collect all elements in the FOREGROUND window matching name and/or role
+    /// (both criteria AND-combined when both given). Enables disambiguation:
+    /// callers pick the nth match instead of trusting first-match-wins.
+    pub async fn find_all_foreground(
+        &self,
+        name: Option<&str>,
+        role: Option<&str>,
+        cap: usize,
+    ) -> Result<Vec<crate::GhostElement>> {
+        let hwnd = crate::tiers::foreground_hwnd();
+        if hwnd == 0 {
+            return Err(GhostError::Core(ghost_core::error::CoreError::WindowGone));
+        }
+        let els = self.tree
+            .find_all_in_hwnd(windows::Win32::Foundation::HWND(hwnd as *mut _), name, role, cap)
+            .map_err(GhostError::Core)?;
+        Ok(els.into_iter().map(crate::GhostElement::new).collect())
+    }
+
+    /// Extract readable text from a window (or the foreground scope handled by
+    /// the caller). Cheap page/app READING without screenshots.
+    pub async fn read_text(&self, window: Option<&str>, max_chars: usize) -> Result<(String, bool)> {
+        self.tree.collect_text(window, max_chars).map_err(GhostError::Core)
+    }
+
+    /// Dispatch an action against an already-resolved element, with foreground
+    /// anchoring and screen-delta verification. Shared by act() and the
+    /// index-selected (nth-match) path.
+    pub async fn act_on_element(
+        &self,
+        el: crate::GhostElement,
+        action: &str,
+        text: Option<&str>,
+    ) -> Result<serde_json::Value> {
         let name = el.name();
         let rect = el.bounding_rect();
 

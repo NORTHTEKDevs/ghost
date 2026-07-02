@@ -220,35 +220,57 @@ async fn main() {
         }
     };
 
-    let stdin = std::io::stdin();
     let stdout = std::io::stdout();
     let mut out = std::io::BufWriter::new(stdout.lock());
 
-    // LOW: cap stdin line length to prevent OOM from a single oversized JSON line.
-    const MAX_LINE: usize = 64 * 1024 * 1024; // 64 MB
-    let mut reader = std::io::BufReader::new(stdin.lock());
-    let mut raw_line = String::new();
-
-    loop {
-        raw_line.clear();
-        let n = match reader.read_line(&mut raw_line) {
-            Ok(0) => break, // EOF
-            Ok(n) => n,
-            Err(e) => {
-                tracing::error!("stdin read error: {}", e);
-                break;
+    // Stdin runs on a dedicated reader thread feeding a channel. Dispatch stays
+    // serial (COM-STA invariant) but a ghost_stop request now sets the global
+    // stop flag THE MOMENT it arrives — previously the stop tool sat in the same
+    // serial queue and could not preempt a long wait or an in-flight VLM call.
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(256);
+    std::thread::Builder::new()
+        .name("ghost-stdin-reader".into())
+        .spawn(move || {
+            // LOW: cap stdin line length to prevent OOM from a single oversized JSON line.
+            const MAX_LINE: usize = 64 * 1024 * 1024; // 64 MB
+            let stdin = std::io::stdin();
+            let mut reader = std::io::BufReader::new(stdin.lock());
+            let mut raw_line = String::new();
+            loop {
+                raw_line.clear();
+                let n = match reader.read_line(&mut raw_line) {
+                    Ok(0) => break, // EOF
+                    Ok(n) => n,
+                    Err(e) => {
+                        tracing::error!("stdin read error: {}", e);
+                        break;
+                    }
+                };
+                if n > MAX_LINE {
+                    tracing::warn!(line_len = n, "stdin: oversized line ({n} bytes > {MAX_LINE}) — discarding");
+                    continue;
+                }
+                let line = raw_line.trim_end_matches(['\n', '\r']);
+                if line.trim().is_empty() {
+                    continue;
+                }
+                // Cheap substring prefilter: avoid a second full JSON parse of
+                // every (possibly huge) line just to detect stop requests.
+                if line.contains("ghost_stop") && is_stop_request(line) {
+                    ghost_core::input::hotkey::trigger_stop();
+                }
+                // Bounded channel + blocking_send: a client that pipelines
+                // requests without reading responses blocks here (and then on
+                // the stdin pipe) instead of growing an unbounded queue.
+                if tx.blocking_send(line.to_string()).is_err() {
+                    break; // dispatcher gone
+                }
             }
-        };
-        if n > MAX_LINE {
-            tracing::warn!(line_len = n, "stdin: oversized line ({n} bytes > {MAX_LINE}) — discarding");
-            raw_line.clear();
-            continue;
-        }
-        let line = raw_line.trim_end_matches(['\n', '\r']);
-        if line.trim().is_empty() {
-            continue;
-        }
+        })
+        .expect("failed to spawn ghost-stdin-reader thread");
 
+    while let Some(line) = rx.recv().await {
+        let line = line.as_str();
         let req: McpRequest = match serde_json::from_str(line) {
             Ok(r) => r,
             Err(e) => {
@@ -288,6 +310,23 @@ async fn main() {
         let _ = out.write_all(&encoded);
         let _ = out.write_all(b"\n");
         let _ = out.flush();
+    }
+}
+
+/// Detect a stop request on the raw wire line, before dispatch. Matches both
+/// the spec form (tools/call name=ghost_stop) and the legacy raw-method form.
+/// Runs on the stdin reader thread; must not touch the session.
+fn is_stop_request(line: &str) -> bool {
+    let Ok(v) = serde_json::from_str::<Value>(line) else { return false };
+    match v.get("method").and_then(|m| m.as_str()) {
+        Some("ghost_stop") => true,
+        Some("tools/call") => {
+            v.get("params")
+                .and_then(|p| p.get("name"))
+                .and_then(|n| n.as_str())
+                == Some("ghost_stop")
+        }
+        _ => false,
     }
 }
 
@@ -361,7 +400,7 @@ async fn handle(
             Ok(json!({
                 "protocolVersion": "2024-11-05",
                 "capabilities": { "tools": {} },
-                "serverInfo": { "name": "ghost", "version": "0.7.0" }
+                "serverInfo": { "name": "ghost", "version": "0.7.1" }
             }))
         }
         "initialized" | "notifications/initialized" => Ok(json!({})),
@@ -421,6 +460,18 @@ async fn handle_tool(
     match method {
         "ghost_find" => {
             let (mode_label, mode) = parse_locate_mode(p);
+            // Optional window anchor: focus + confirm the target window first so
+            // every downstream foreground-based path (UIA fast walk, OCR crop,
+            // cache hwnd key) resolves against the INTENDED window, not whatever
+            // happens to be foreground.
+            if let Some(window) = p["window"].as_str() {
+                session.ensure_window_foreground(window).await
+                    .map_err(|e| format!("ghost_find: could not focus window '{window}': {e}"))?;
+            }
+            // index → nth-match disambiguation (UIA-only path; name+role AND-combined).
+            if let Some(idx) = p["index"].as_u64() {
+                return find_nth(session, p, idx as usize).await;
+            }
             // Route through the grounding cascade so source/confidence are returned.
             let target = parse_target(p)?;
             let grounded = session.ground(target, mode).await.map_err(|e| e.to_string())?;
@@ -622,7 +673,10 @@ async fn handle_tool(
             if ms > 300_000 {
                 return Err(format!("ghost_wait: ms {ms} exceeds maximum allowed 300000 (5 min)"));
             }
-            session.wait(ms).await;
+            let completed = session.wait(ms).await;
+            if !completed {
+                return Err("ghost_wait: interrupted by emergency stop".into());
+            }
             Ok(json!({ "ok": true }))
         }
         "ghost_describe_screen" => {
@@ -647,6 +701,27 @@ async fn handle_tool(
         "ghost_describe_screen_fast" => {
             let elements = session.describe_screen_fast().await.map_err(|e| e.to_string())?;
             Ok(elements_response(&elements, p))
+        }
+        "ghost_read_text" => {
+            let window = p["window"].as_str();
+            let max_chars = p.get("limit").and_then(|v| v.as_u64())
+                .map(|v| v as usize)
+                .filter(|v| *v > 0)
+                .unwrap_or(20_000);
+            let (text, truncated) = match session.read_text(window, max_chars).await {
+                Ok(r) => r,
+                Err(e) => {
+                    let msg = e.to_string();
+                    if msg.contains("not found") || msg.contains("minimized") {
+                        let titles: Vec<String> = session.list_windows().await
+                            .map(|ws| ws.iter().map(|w| format!("{} [{}]", w.name, w.state)).collect())
+                            .unwrap_or_default();
+                        return Err(format!("{msg}. Open windows: {}", titles.join(" | ")));
+                    }
+                    return Err(msg);
+                }
+            };
+            Ok(json!({ "text": text, "chars": text.len(), "truncated": truncated }))
         }
         "ghost_batch_actions" => {
             let actions = p["actions"].as_array().ok_or("missing param: actions (array)")?;
@@ -841,6 +916,24 @@ async fn handle_tool(
             // Read text_input first (documented name), fall back to text (legacy).
             let text = p["text_input"].as_str().or_else(|| p["text"].as_str());
             let (mode_label, mode) = parse_locate_mode(p);
+            // Optional window anchor — see ghost_find.
+            if let Some(window) = p["window"].as_str() {
+                session.ensure_window_foreground(window).await
+                    .map_err(|e| format!("ghost_act: could not focus window '{window}': {e}"))?;
+            }
+            // index → act on the nth match (disambiguation when several elements
+            // share a name/role, e.g. multiple "Close Tab" buttons).
+            if let Some(idx) = p["index"].as_u64() {
+                let (el, total) = resolve_nth_element(session, p, idx as usize).await?;
+                let mut result = session.act_on_element(el, action, text).await.map_err(|e| e.to_string())?;
+                if let Some(obj) = result.as_object_mut() {
+                    obj.insert("source".into(), Value::String("uia".into()));
+                    obj.insert("dispatch_mode".into(), Value::String(mode_label.into()));
+                    obj.insert("matches".into(), json!(total));
+                    obj.insert("index".into(), json!(idx));
+                }
+                return Ok(result);
+            }
             let target = parse_target(p)?;
 
             // Try cascade first to get grounded position + winning tier.
@@ -925,6 +1018,52 @@ pub fn parse_target(p: &Value) -> std::result::Result<Target, String> {
     Err("params must include 'name', 'role', 'description', or 'text'".into())
 }
 
+/// Resolve the nth element matching name and/or role in the foreground window.
+/// Returns (element, total_matches). Errors with a helpful count when the index
+/// is out of range or no criteria were given.
+async fn resolve_nth_element(
+    session: &GhostSession,
+    p: &Value,
+    idx: usize,
+) -> std::result::Result<(ghost_session::GhostElement, usize), String> {
+    let name = p["name"].as_str();
+    let role = p["role"].as_str();
+    if name.is_none() && role.is_none() {
+        return Err("index requires 'name' and/or 'role' to match against".into());
+    }
+    // Cap generously past the requested index so `matches` is meaningful.
+    let cap = idx.saturating_add(26);
+    let els = session.find_all_foreground(name, role, cap).await.map_err(|e| e.to_string())?;
+    let total = els.len();
+    let el = els.into_iter().nth(idx).ok_or_else(|| {
+        format!("index {idx} out of range: {total} match(es) in the foreground window for name={name:?} role={role:?}")
+    })?;
+    Ok((el, total))
+}
+
+/// ghost_find with index: nth-match UIA resolution (no cascade, no VLM).
+async fn find_nth(
+    session: &GhostSession,
+    p: &Value,
+    idx: usize,
+) -> std::result::Result<Value, String> {
+    let (el, total) = resolve_nth_element(session, p, idx).await?;
+    let rect = el.bounding_rect()
+        .ok_or_else(|| format!("index {idx}: matched element has no bounding rect"))?;
+    let (l, t, r, b) = rect;
+    Ok(json!({
+        "center": { "x": (l + r) / 2, "y": (t + b) / 2 },
+        "rect": { "left": l, "top": t, "right": r, "bottom": b },
+        "source": "uia",
+        "confidence": 0.9,
+        "dispatch_mode": "instant",
+        "name": el.name(),
+        "has_rect": true,
+        "matches": total,
+        "index": idx,
+    }))
+}
+
 /// Coordinate-based action dispatch. Delegates to `session.act_at`, which anchors
 /// the OS foreground to the window under the point BEFORE any input and runs the
 /// same screen-delta verification as the UIA path (previously this path had no
@@ -1002,6 +1141,7 @@ async fn handle_ghost_see(
     match mode {
         "full" => handle_tool(session, "ghost_describe_screen", p).await,
         "delta" => handle_tool(session, "ghost_describe_screen_delta", p).await,
+        "text" => handle_tool(session, "ghost_read_text", p).await,
         _ => handle_tool(session, "ghost_describe_screen_fast", p).await,
     }
 }
@@ -1398,12 +1538,12 @@ fn lean_tools_schema() -> Value {
     json!([
         // --- Perception ---
         { "name": "ghost_see",
-          "description": "Describe the active screen's UI elements. mode=fast (default, foreground only, 5-50x faster), mode=full (full walk, scope with window=; unknown window is an ERROR listing open windows, not a desktop dump), mode=delta (only changed elements since since_seq). Off-screen/zero-area elements are filtered; output capped at 150 elements (raise with limit).",
+          "description": "Describe the active screen. mode=fast (default, foreground elements, 5-50x faster), mode=full (full walk, scope with window=; unknown window is an ERROR listing open windows), mode=delta (changed elements since since_seq), mode=text (READ the visible text of a window/page — cheapest way to read content, no screenshot needed). Elements: off-screen/zero-area filtered, capped at 150 (limit). Text: capped at 20000 chars (limit).",
           "inputSchema": { "type": "object", "properties": {
-              "mode": { "type": "string", "enum": ["fast", "full", "delta"], "description": "fast=foreground UIA walk (default), full=full tree, delta=changed only" },
-              "window": { "type": "string", "description": "Partial title to scope full walk (mode=full only)" },
+              "mode": { "type": "string", "enum": ["fast", "full", "delta", "text"], "description": "fast=foreground elements (default), full=full tree, delta=changed only, text=readable text content" },
+              "window": { "type": "string", "description": "Partial title to scope the walk (mode=full|text)" },
               "since_seq": { "type": "integer", "description": "Prior snapshot seq for delta mode" },
-              "limit": { "type": "integer", "description": "Max elements returned (default 150, 0 = unlimited)" }
+              "limit": { "type": "integer", "description": "Max elements (default 150) or chars for mode=text (default 20000); 0 = unlimited elements" }
           }}},
         { "name": "ghost_find",
           "description": "Ground a target (name|role|description|text|coords) via the cascade: cache→UIA→OCR→VLM. Returns center (always), rect (has_rect=true for UIA/Cache), source, confidence, name, escalated (true = local tiers missed and a network VLM call was paid).",
@@ -1412,6 +1552,8 @@ fn lean_tools_schema() -> Value {
               "role": { "type": "string", "description": "Control type: button, edit, checkbox, list, menu, tab, toolbar" },
               "description": { "type": "string", "description": "Natural-language description for VLM grounding" },
               "text": { "type": "string", "description": "On-screen text for OCR-based location" },
+              "window": { "type": "string", "description": "Anchor: focus+confirm this window (title substring) before resolving — use for multi-window flows" },
+              "index": { "type": "integer", "description": "Select the nth match (0-based) when several elements share the name/role; name+role AND-combine on this path; returns matches count" },
               "mode": { "type": "string", "enum": ["instant", "deliberate", "instant_only"], "description": "'instant' (default): local tiers, auto-escalates to VLM on miss. 'deliberate': VLM from first attempt. 'instant_only': no VLM." }
           }}},
         // --- Action ---
@@ -1423,6 +1565,8 @@ fn lean_tools_schema() -> Value {
               "action": { "type": "string", "enum": ["click", "type", "double_click", "right_click", "hover"],
                           "description": "Action to perform" },
               "text_input": { "type": "string", "description": "Text to type when action=type (use this to avoid param collision with text-target)" },
+              "window": { "type": "string", "description": "Anchor: focus+confirm this window (title substring) before resolving/acting — use for multi-window flows" },
+              "index": { "type": "integer", "description": "Act on the nth match (0-based) when several elements share the name/role" },
               "mode": { "type": "string", "enum": ["instant", "deliberate", "instant_only"] }
           }}},
         { "name": "ghost_key",
@@ -1945,6 +2089,25 @@ mod tests {
         assert_eq!(out["truncated"], json!(true));
     }
 
+    #[test]
+    fn stop_request_detected_in_tools_call_form() {
+        let line = r#"{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"ghost_stop","arguments":{}}}"#;
+        assert!(is_stop_request(line));
+    }
+
+    #[test]
+    fn stop_request_detected_in_legacy_raw_form() {
+        let line = r#"{"jsonrpc":"2.0","id":9,"method":"ghost_stop"}"#;
+        assert!(is_stop_request(line));
+    }
+
+    #[test]
+    fn non_stop_requests_not_detected() {
+        assert!(!is_stop_request(r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ghost_see","arguments":{}}}"#));
+        assert!(!is_stop_request(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#));
+        assert!(!is_stop_request("not json"));
+    }
+
     // RFC 4648 base64 test vectors
     #[test]
     fn base64_empty() {
@@ -2215,7 +2378,7 @@ mod tests {
         let resp = json!({
             "protocolVersion": "2024-11-05",
             "capabilities": { "tools": {} },
-            "serverInfo": { "name": "ghost", "version": "0.7.0" }
+            "serverInfo": { "name": "ghost", "version": "0.7.1" }
         });
         assert_eq!(resp["protocolVersion"], "2024-11-05");
         assert!(resp["capabilities"]["tools"].is_object());
