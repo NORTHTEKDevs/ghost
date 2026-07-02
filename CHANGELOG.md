@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.7.6] - 2026-07-02 — Stuck-Modifier Safety
+
+### Fixed (found by convergence audit)
+
+- **`hotkey` can no longer leave a modifier stuck down**: if a modifier key-down
+  succeeded (e.g. Ctrl) but a later one failed (e.g. Shift in Ctrl+Shift+T), the
+  early return skipped the release loop, leaving Ctrl physically held — which
+  corrupts all subsequent keyboard input system-wide. Every exit path now
+  releases the modifiers already pressed.
+- **`ghost_stop` now releases held modifiers immediately** on arrival (in the
+  stdin reader fast-path), instead of only when the queued stop later dispatches
+  — so a stuck Ctrl/Shift/Alt from an in-flight or held `key_down` is cleared at
+  once.
+
 ## [0.7.5] - 2026-07-02 — Paste Fallback for Rich-Text Editors
 
 ### Added

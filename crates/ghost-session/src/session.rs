@@ -687,13 +687,25 @@ impl GhostSession {
         let key_vk = name_to_vk(key).ok_or_else(|| GhostError::Core(
             ghost_core::error::CoreError::Win32 { code: 0, context: "unknown key name" }
         ))?;
+        // Release held modifiers on EVERY exit path so a SendInput failure can
+        // never leave Ctrl/Shift/Alt stuck down (a stuck modifier corrupts all
+        // later keyboard input system-wide). This must cover a failure DURING the
+        // modifiers-down loop too — if key-down succeeds for Ctrl but fails for
+        // Shift, the already-pressed Ctrl must still be released before returning.
         let mut pressed = Vec::new();
-        for vk in &mod_vks {
-            core_key_down(*vk).map_err(GhostError::Core)?;
-            pressed.push(*vk);
+        let down_result: Result<()> = (|| {
+            for vk in &mod_vks {
+                core_key_down(*vk).map_err(GhostError::Core)?;
+                pressed.push(*vk);
+            }
+            Ok(())
+        })();
+        if let Err(e) = down_result {
+            for vk in pressed.iter().rev() {
+                let _ = core_key_up(*vk);
+            }
+            return Err(e);
         }
-        // HIGH-1: release held modifiers on BOTH success and error paths so a
-        // SendInput failure can never leave Ctrl/Shift/Alt stuck down.
         let result = press_key(key_vk).map_err(GhostError::Core);
         for vk in pressed.iter().rev() {
             let _ = core_key_up(*vk);
