@@ -759,6 +759,27 @@ impl GhostSession {
         core_set_clipboard(text).map_err(GhostError::Core)
     }
 
+    /// Enter `text` by pasting: save the current clipboard, set it to `text`,
+    /// send Ctrl+V, then restore the original clipboard. This is the reliable
+    /// path for rich-text web editors (Monaco, ProseMirror, Slate) that ignore
+    /// both ValuePattern.SetValue and synthesized per-char keystrokes but DO
+    /// honor a real paste. The clipboard is always restored, even on error.
+    pub async fn paste_text(&self, text: &str) -> Result<()> {
+        if is_stopped() { return Err(GhostError::Stopped); }
+        // Best-effort save of the existing clipboard (may be empty/non-text).
+        let saved = core_get_clipboard().ok();
+        core_set_clipboard(text).map_err(GhostError::Core)?;
+        // Small settle so the clipboard write is visible to the target app.
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let paste_result = self.hotkey(&["Ctrl"], "v").await;
+        // Let the paste consume the clipboard before we overwrite it back.
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        if let Some(prev) = saved {
+            let _ = core_set_clipboard(&prev);
+        }
+        paste_result
+    }
+
     /// Bring the window whose title contains `name` to the foreground and confirm it,
     /// restoring it first if minimized. Errors loudly on failure — callers use this
     /// to guarantee keyboard input lands in the intended window.
@@ -1137,11 +1158,42 @@ impl GhostSession {
             let _ = el.set_focus();
         }
 
+        // Paste fallback: if a `type` still shows no change after keystroke
+        // retries, the target is likely a rich-text web editor (Monaco,
+        // ProseMirror) that ignores both SetValue and synthesized keystrokes but
+        // honors a real paste. Escalate once via clipboard paste (save/restore).
+        //
+        // Gated to EDITABLE elements and made idempotent (select-all before
+        // paste = replace): if the earlier type actually worked but verify simply
+        // missed a small change (false negative), clear+paste re-produces the SAME
+        // final content instead of doubling it.
+        let mut used_paste = false;
+        if action == "type"
+            && el.is_editable()
+            && verification.as_ref().map(|v| !v.changed).unwrap_or(false)
+        {
+            if let Some(t) = text {
+                let _ = el.set_focus();
+                let fg_before = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
+                let capture_rect = self.foreground_window_rect();
+                let before_capture = tokio::task::spawn_blocking(move || capture_region_raw(capture_rect))
+                    .await.ok().and_then(|r| r.ok());
+                let _ = ghost_core::input::keyboard::clear_focused_field();
+                if self.paste_text(t).await.is_ok() {
+                    used_paste = true;
+                    verification = self.verify_screen_change(before_capture, fg_before).await;
+                }
+            }
+        }
+
         let rect_json = rect.map(|(l, t, r, b)| serde_json::json!({"left": l, "top": t, "right": r, "bottom": b}))
             .unwrap_or(serde_json::Value::Null);
         let mut out = Self::act_result_json(name.into(), rect_json, verification, focus_confirmed);
         if let Some(obj) = out.as_object_mut() {
             obj.insert("attempts".into(), serde_json::json!(attempts));
+            if used_paste {
+                obj.insert("used_paste_fallback".into(), serde_json::json!(true));
+            }
         }
         Ok(out)
     }

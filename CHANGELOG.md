@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.7.5] - 2026-07-02 — Paste Fallback for Rich-Text Editors
+
+### Added
+
+- **Clipboard-paste fallback for `type`**: when a `type` still shows no change
+  after keystroke retries AND the target is an editable control, Ghost escalates
+  to a real paste (save clipboard → set → Ctrl+V → restore). This is the path
+  rich-text web editors (Monaco, ProseMirror, Slate) accept when they ignore
+  both ValuePattern.SetValue and synthesized keystrokes. Made idempotent
+  (select-all before paste = replace) so a false-negative verification can't
+  double the text, gated to editable roles, and the original clipboard is always
+  restored. Results carry `used_paste_fallback` when it fires.
+
 ## [0.7.4] - 2026-07-02 — Hardening + Flow Chaining
 
 ### Fixed (found by convergence audit)
