@@ -26,6 +26,12 @@ impl GhostElement {
         self.inner.is_enabled()
     }
 
+    /// True if the element is a text-editable control (edit/document/combobox) —
+    /// safe to clear (Ctrl+A+Delete) and paste into.
+    pub fn is_editable(&self) -> bool {
+        ghost_core::uia::patterns::is_editable_role(self.inner.control_type())
+    }
+
     /// True if the element is scrolled/collapsed out of view (stale rect).
     pub fn is_offscreen(&self) -> bool {
         self.inner.is_offscreen()
