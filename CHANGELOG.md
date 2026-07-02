@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.7.4] - 2026-07-02 — Hardening + Flow Chaining
+
+### Fixed (found by convergence audit)
+
+- **`ghost_see`/describe can no longer hang the server**: `collect_interactive`
+  gained a 6000-node budget (the other UIA walkers already had one). A wide,
+  shallow accessibility tree (big list, Chromium DOM) previously walked in full,
+  blocking the single-threaded server uninterruptibly.
+- **`ghost_key "Ctrl++"`** (Ctrl+Plus / zoom) now parses correctly — the old
+  parser rejected the exact syntax its own error message recommended. A single
+  trailing `+` (e.g. `"Ctrl+"`, a truncated combo) correctly errors instead of
+  silently firing Ctrl+Plus.
+- **`ghost_screenshot_region` with an inverted rect** (e.g. `[50,0,-1,100]`) now
+  errors instead of clamping the negative edge to the screen edge and silently
+  returning a huge region.
+
+### Added
+
+- **`ghost_run` step chaining**: a param value of `"${steps.N.path}"` is replaced
+  with a field from step N's result before dispatch (e.g. find an element in step
+  0, then `ghost_click_at` at `"${steps.0.center.x}"`). Whole-string refs keep
+  their type; embedded refs are stringified; unresolved refs are left verbatim.
+- **`ghost_assert value-equals` / `value-contains`**: compares an element's actual
+  value (ValuePattern) to expected text — the fill-then-verify check.
+- **`ghost_screenshot` element/region crop**: pass name/role to capture one
+  element, or rect=[l,t,r,b] for a region (VLM-in-the-loop debugging).
+
+### Tests
+
+- 346 passing (was 341). New coverage for key parsing, step-ref substitution,
+  and inverted-rect rejection.
+
 ## [0.7.3] - 2026-07-02 — Actionability, Waits, Structured Errors
 
 ### Added

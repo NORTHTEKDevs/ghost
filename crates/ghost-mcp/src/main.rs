@@ -430,7 +430,7 @@ async fn handle(
             Ok(json!({
                 "protocolVersion": "2024-11-05",
                 "capabilities": { "tools": {} },
-                "serverInfo": { "name": "ghost", "version": "0.7.3" }
+                "serverInfo": { "name": "ghost", "version": "0.7.4" }
             }))
         }
         "initialized" | "notifications/initialized" => Ok(json!({})),
@@ -560,7 +560,26 @@ async fn handle_tool(
                 Ok(json!({ "jpeg_base64": base64_encode(&bytes), "size_bytes": bytes.len() }))
             } else {
                 let (rect_mode, max_dim, jpeg_quality) = screenshot_default_opts(&p);
-                let rect = if rect_mode { session.foreground_window_rect() } else { None };
+                // Element/region scope: if name/role given, crop to that element's
+                // rect; if an explicit rect [l,t,r,b] is given, use it. Lets an
+                // agent screenshot a single component for VLM-in-the-loop checks.
+                let rect = if p.get("name").is_some() || p.get("role").is_some() {
+                    let by = parse_by(&p)?;
+                    let el = session.find(by).await.map_err(|e| e.to_string())?;
+                    Some(el.bounding_rect().ok_or("ghost_screenshot: element has no bounding rect")?)
+                } else if let Some(arr) = p.get("rect").and_then(|r| r.as_array()) {
+                    if arr.len() != 4 { return Err("ghost_screenshot: rect must be [left,top,right,bottom]".into()); }
+                    Some((
+                        arr[0].as_i64().ok_or("rect[0] not int")? as i32,
+                        arr[1].as_i64().ok_or("rect[1] not int")? as i32,
+                        arr[2].as_i64().ok_or("rect[2] not int")? as i32,
+                        arr[3].as_i64().ok_or("rect[3] not int")? as i32,
+                    ))
+                } else if rect_mode {
+                    session.foreground_window_rect()
+                } else {
+                    None
+                };
                 let mut bytes = session.screenshot_region(rect, Some(max_dim), Some(jpeg_quality)).await.map_err(|e| e.to_string())?;
                 // Hard guard: if still too large (no foreground window → full screen), re-encode smaller
                 if bytes.len() > 1_500_000 {
@@ -1209,40 +1228,41 @@ async fn handle_ghost_key(
         let args = json!({ "key": k });
         return handle_tool(session, "ghost_key_up", &args).await;
     }
-    // Split on '+' — last segment is the key, all prior segments are modifiers.
-    // MEDIUM-3: detect keys whose name contains '+' (Ctrl++ for zoom-in, etc.).
-    // If the last segment after splitting is empty, the trailing '+' IS the key.
-    let raw_parts: Vec<&str> = keys.split('+').collect();
-    // Replace an empty trailing segment with "+" so Ctrl++ → modifiers=[Ctrl], key="+"
-    let parts: Vec<&str> = {
-        let mut v = raw_parts;
-        if v.last() == Some(&"") {
-            *v.last_mut().unwrap() = "+";
-            // Also collapse any empty middle segments — they're malformed.
-            if v.iter().take(v.len() - 1).any(|s| s.is_empty()) {
-                return Err(format!(
-                    "ghost_key: malformed 'keys' value {:?} — empty segment after splitting on '+' (e.g. 'Ctrl+' is invalid; use 'Ctrl++' for Ctrl+Plus)",
-                    keys
-                ));
-            }
-        }
-        v
-    };
-    if parts.len() == 1 {
-        let args = json!({ "key": parts[0] });
+    let (modifiers, key) = parse_key_combo(keys)?;
+    if modifiers.is_empty() {
+        let args = json!({ "key": key });
         return handle_tool(session, "ghost_press", &args).await;
     }
-    let (modifiers, key) = parts.split_at(parts.len() - 1);
-    // Guard against any remaining empty modifier segments.
-    if modifiers.iter().any(|m| m.is_empty()) {
-        return Err(format!(
-            "ghost_key: malformed 'keys' value {:?} — modifier segment is empty",
-            keys
-        ));
-    }
-    let mods: Vec<Value> = modifiers.iter().map(|m| Value::String(m.to_string())).collect();
-    let args = json!({ "modifiers": mods, "key": key[0] });
+    let mods: Vec<Value> = modifiers.iter().map(|m| Value::String(m.clone())).collect();
+    let args = json!({ "modifiers": mods, "key": key });
     handle_tool(session, "ghost_hotkey", &args).await
+}
+
+/// Parse a "Mod+Mod+Key" combo into (modifiers, key). The key may itself be "+"
+/// (e.g. "Ctrl++" = Ctrl+Plus): a trailing '+' is taken as the literal key, and
+/// exactly one more '+' before it is the separator. Otherwise the last '+'
+/// segment is the key and the rest are modifiers. Pure + unit-tested.
+fn parse_key_combo(keys: &str) -> std::result::Result<(Vec<String>, String), String> {
+    // "+" as the literal key requires DOUBLING it: "Ctrl++" = Ctrl+Plus. A single
+    // trailing "+" (e.g. "Ctrl+") is a truncated combo with the key forgotten and
+    // must ERROR, not silently fire Ctrl+Plus.
+    let (modifiers, key): (Vec<&str>, &str) = if keys == "+" {
+        (Vec::new(), "+")
+    } else if let Some(rest) = keys.strip_suffix("++") {
+        let mods: Vec<&str> = if rest.is_empty() { Vec::new() } else { rest.split('+').collect() };
+        (mods, "+")
+    } else {
+        let mut parts: Vec<&str> = keys.split('+').collect();
+        let key = parts.pop().unwrap_or("");
+        (parts, key)
+    };
+    if key.is_empty() {
+        return Err(format!("ghost_key: malformed 'keys' value {keys:?} — missing key after modifiers"));
+    }
+    if modifiers.iter().any(|m| m.is_empty()) {
+        return Err(format!("ghost_key: malformed 'keys' value {keys:?} — empty modifier segment (e.g. 'Ctrl++Shift' is invalid)"));
+    }
+    Ok((modifiers.into_iter().map(String::from).collect(), key.to_string()))
 }
 
 /// `ghost_wait(for=idle|text|event|cond|ms, ...)` — unified wait dispatch.
@@ -1331,7 +1351,26 @@ async fn handle_ghost_assert(
                 Err(e) => Err(format!("assert failed: element not found — {e}")),
             }
         }
-        other => Err(format!("ghost_assert: unknown predicate '{other}'; use text-present|text-absent|element-exists")),
+        "value-equals" | "value-contains" => {
+            // Read the element's actual value (ValuePattern/get_text) and compare
+            // to `text`. Closes the fill-then-verify loop (Playwright's fill+assert).
+            let expected = p["text"].as_str()
+                .ok_or("ghost_assert: value-equals/value-contains requires 'text'")?;
+            let by = parse_by(&p)?;
+            let el = session.find(by).await.map_err(|e| format!("assert failed: element not found — {e}"))?;
+            let actual = el.get_text();
+            let passed = if predicate == "value-equals" {
+                actual == expected
+            } else {
+                actual.contains(expected)
+            };
+            if passed {
+                Ok(json!({ "ok": true, "predicate": predicate, "passed": true, "value": actual }))
+            } else {
+                Err(format!("assert failed: predicate={predicate}, expected={expected:?}, actual={actual:?}"))
+            }
+        }
+        other => Err(format!("ghost_assert: unknown predicate '{other}'; use text-present|text-absent|element-exists|value-equals|value-contains")),
     }
 }
 
@@ -1396,7 +1435,12 @@ async fn handle_ghost_run(
     let mut results: Vec<Value> = Vec::with_capacity(steps.len());
     let mut errors: Vec<Value> = Vec::new();
 
-    for (i, step) in steps.iter().enumerate() {
+    for (i, step_raw) in steps.iter().enumerate() {
+        // Step chaining: substitute ${steps.N.path.to.field} references with values
+        // from prior steps' results (the unwrapped tool output). Lets step N+1 use
+        // e.g. a center/name/text that step N found, without a second round-trip.
+        let step = substitute_step_refs(step_raw, &results);
+        let step = &step;
         let op = step["op"].as_str()
             .ok_or_else(|| format!("ghost_run: step {i} missing 'op'"))?;
 
@@ -1459,6 +1503,77 @@ async fn handle_ghost_run(
         "results": results,
         "errors": errors,
     }))
+}
+
+/// Look up a dotted path (e.g. "0.center.x") inside the `results` array, where the
+/// first segment is a step index. Returns the JSON value at that path, or None.
+/// Note: a numeric segment is tried as an array index (serde_json Index is
+/// array-only for integers), so an object key that is itself numeric isn't
+/// reachable — not an issue for the named-field UIA result shapes used here.
+fn lookup_step_path(results: &[Value], path: &str) -> Option<Value> {
+    let mut parts = path.split('.');
+    let idx: usize = parts.next()?.parse().ok()?;
+    let mut cur = results.get(idx)?;
+    for seg in parts {
+        cur = if let Ok(n) = seg.parse::<usize>() {
+            cur.get(n)?
+        } else {
+            cur.get(seg)?
+        };
+    }
+    Some(cur.clone())
+}
+
+/// Recursively replace `${steps.N.path}` references in a step's JSON with values
+/// from prior steps' results. A string that is EXACTLY one reference becomes the
+/// referenced value with its original type (number stays a number); a reference
+/// embedded in a larger string is stringified in place. Unresolved refs are left
+/// verbatim so the downstream handler surfaces a clear "missing param" error.
+fn substitute_step_refs(v: &Value, results: &[Value]) -> Value {
+    match v {
+        Value::String(s) => {
+            let trimmed = s.trim();
+            if let Some(inner) = trimmed.strip_prefix("${steps.").and_then(|r| r.strip_suffix('}')) {
+                if !inner.contains("${") {
+                    // Whole-string reference: preserve the referenced value's type.
+                    if let Some(val) = lookup_step_path(results, inner) {
+                        return val;
+                    }
+                    return v.clone();
+                }
+            }
+            // Embedded reference(s): replace each ${steps.X} occurrence with its
+            // stringified value. Simple non-nested scan.
+            if s.contains("${steps.") {
+                let mut out = String::new();
+                let mut rest = s.as_str();
+                while let Some(start) = rest.find("${steps.") {
+                    out.push_str(&rest[..start]);
+                    let after = &rest[start + 2..]; // skip "${"
+                    if let Some(end) = after.find('}') {
+                        let path = &after[6..end]; // skip "steps."
+                        match lookup_step_path(results, path) {
+                            Some(Value::String(sv)) => out.push_str(&sv),
+                            Some(other) => out.push_str(&other.to_string()),
+                            None => { out.push_str("${"); out.push_str(&after[..end + 1]); }
+                        }
+                        rest = &after[end + 1..];
+                    } else {
+                        out.push_str(&rest[start..]);
+                        rest = "";
+                    }
+                }
+                out.push_str(rest);
+                return Value::String(out);
+            }
+            v.clone()
+        }
+        Value::Array(a) => Value::Array(a.iter().map(|e| substitute_step_refs(e, results)).collect()),
+        Value::Object(o) => Value::Object(
+            o.iter().map(|(k, val)| (k.clone(), substitute_step_refs(val, results))).collect()
+        ),
+        _ => v.clone(),
+    }
 }
 
 /// `ghost_query(schema?, region?)` — T3.5 structured screen extraction.
@@ -1662,17 +1777,17 @@ fn lean_tools_schema() -> Value {
               "region": { "type": "array", "items": { "type": "integer" }, "minItems": 4, "maxItems": 4, "description": "Optional [left,top,right,bottom] region for VLM screenshot crop" }
           }}},
         { "name": "ghost_assert",
-          "description": "Assert a predicate about screen state. Fails (error) if the assertion is not satisfied. predicate: text-present|text-absent|element-exists.",
+          "description": "Assert a predicate about screen state. Fails (error) if not satisfied. text-present/text-absent: OCR text check. element-exists: element found. value-equals/value-contains: the element's actual value (ValuePattern) equals/contains 'text' — the fill-then-verify check.",
           "inputSchema": { "type": "object", "required": ["predicate"], "properties": {
-              "predicate": { "type": "string", "enum": ["text-present","text-absent","element-exists"] },
-              "text": { "type": "string", "description": "Text to check (text-present|text-absent)" },
-              "name": { "type": "string", "description": "Element name (element-exists)" },
-              "role": { "type": "string", "description": "Element role (element-exists)" },
+              "predicate": { "type": "string", "enum": ["text-present","text-absent","element-exists","value-equals","value-contains"] },
+              "text": { "type": "string", "description": "Text to check (text-present/absent) or expected value (value-equals/contains)" },
+              "name": { "type": "string", "description": "Element name (element-exists|value-*)" },
+              "role": { "type": "string", "description": "Element role (element-exists|value-*)" },
               "foreground": { "type": "boolean", "default": true }
           }}},
         // --- Flow ---
         { "name": "ghost_run",
-          "description": "Execute a declarative step-by-step flow. Each step: {op, ...params}. Op can be any lean verb or legacy tool name. Retries on failure (max_retries), wiring real failure reason into the reflection buffer for VLM hint.",
+          "description": "Execute a declarative step-by-step flow in one round-trip. Each step: {op, ...params}. Op is any lean verb or legacy tool name. Retries each step on failure (max_retries). CHAINING: a param value of \"${steps.N.path}\" is replaced with a field from step N's result before dispatch — e.g. {op:'find',name:'Save'} then {op:'ghost_click_at', x:'${steps.0.center.x}', y:'${steps.0.center.y}'}. A whole-string ref keeps its type (number stays number).",
           "inputSchema": { "type": "object", "properties": {
               "steps": { "type": "array", "items": { "type": "object" }, "description": "Array of {op, ...params} steps (direct)" },
               "json_flow": { "type": "string", "description": "JSON-encoded steps array string" },
@@ -1682,10 +1797,13 @@ fn lean_tools_schema() -> Value {
           }}},
         // --- Screenshot ---
         { "name": "ghost_screenshot",
-          "description": "Capture screenshot. Default: foreground window, max 768px, JPEG q=75 (~20-100KB). full=true: full screen at max 1280px JPEG (pass max_dim=0 for native-res lossless PNG — large). Always includes size_bytes.",
+          "description": "Capture screenshot. Default: foreground window, max 768px, JPEG q=75 (~20-100KB). Pass name/role to crop to ONE element, or rect=[l,t,r,b] for a region (great for VLM-in-the-loop checks). full=true: full screen at max 1280px JPEG (max_dim=0 = native-res lossless PNG). Always includes size_bytes.",
           "inputSchema": { "type": "object", "properties": {
               "full": { "type": "boolean", "description": "Full-screen capture (default false)" },
               "foreground": { "type": "boolean", "description": "Crop to foreground window (default true)" },
+              "name": { "type": "string", "description": "Crop to the element with this accessible name" },
+              "role": { "type": "string", "description": "Crop to the element with this role" },
+              "rect": { "type": "array", "items": { "type": "integer" }, "minItems": 4, "maxItems": 4, "description": "Crop to [left,top,right,bottom] region" },
               "max_dim": { "type": "integer", "description": "Longest-edge resize (default 768; 1280 with full=true; 0 = no resize, lossless PNG)" },
               "jpeg_quality": { "type": "integer", "minimum": 0, "maximum": 100 }
           }}},
@@ -2360,20 +2478,72 @@ mod tests {
 
     #[test]
     fn ghost_key_parses_combo_into_hotkey() {
-        // pure: "Ctrl+C" splits into modifiers=["Ctrl"], key="C"
-        let keys = "Ctrl+C";
-        let parts: Vec<&str> = keys.split('+').collect();
-        assert_eq!(parts.len(), 2);
-        let (mods, key_part) = parts.split_at(parts.len() - 1);
-        assert_eq!(mods, &["Ctrl"]);
-        assert_eq!(key_part, &["C"]);
+        assert_eq!(parse_key_combo("Ctrl+C").unwrap(), (vec!["Ctrl".to_string()], "C".to_string()));
+        assert_eq!(parse_key_combo("Ctrl+Shift+T").unwrap(),
+            (vec!["Ctrl".to_string(), "Shift".to_string()], "T".to_string()));
     }
 
     #[test]
     fn ghost_key_single_is_press() {
-        let keys = "Enter";
-        let parts: Vec<&str> = keys.split('+').collect();
-        assert_eq!(parts.len(), 1);
+        assert_eq!(parse_key_combo("Enter").unwrap(), (Vec::<String>::new(), "Enter".to_string()));
+    }
+
+    #[test]
+    fn ghost_key_plus_key_parsed_correctly() {
+        // The exact case the old parser rejected despite its own error message.
+        assert_eq!(parse_key_combo("Ctrl++").unwrap(), (vec!["Ctrl".to_string()], "+".to_string()));
+        assert_eq!(parse_key_combo("Ctrl+Shift++").unwrap(),
+            (vec!["Ctrl".to_string(), "Shift".to_string()], "+".to_string()));
+        // A bare "+" is a press of the plus key.
+        assert_eq!(parse_key_combo("+").unwrap(), (Vec::<String>::new(), "+".to_string()));
+        assert_eq!(parse_key_combo("++").unwrap(), (Vec::<String>::new(), "+".to_string()));
+    }
+
+    #[test]
+    fn ghost_key_rejects_empty_modifier() {
+        assert!(parse_key_combo("Ctrl++Shift").is_err()); // empty middle segment
+    }
+
+    #[test]
+    fn ghost_key_single_trailing_plus_is_error() {
+        // "Ctrl+" is a truncated combo (key forgotten) — must error, not become Ctrl+Plus.
+        assert!(parse_key_combo("Ctrl+").is_err());
+        assert!(parse_key_combo("Alt+").is_err());
+    }
+
+    #[test]
+    fn step_ref_whole_string_preserves_type() {
+        let results = vec![json!({"center": {"x": 967, "y": 612}, "name": "Save"})];
+        // Whole-string numeric ref becomes a number, not a string.
+        let step = json!({"op": "ghost_click_at", "x": "${steps.0.center.x}", "y": "${steps.0.center.y}"});
+        let out = substitute_step_refs(&step, &results);
+        assert_eq!(out["x"], json!(967));
+        assert_eq!(out["y"], json!(612));
+        assert_eq!(out["op"], json!("ghost_click_at"));
+    }
+
+    #[test]
+    fn step_ref_embedded_is_stringified() {
+        let results = vec![json!({"name": "Untitled"})];
+        let step = json!({"op": "ghost_find", "name": "prefix-${steps.0.name}-suffix"});
+        let out = substitute_step_refs(&step, &results);
+        assert_eq!(out["name"], json!("prefix-Untitled-suffix"));
+    }
+
+    #[test]
+    fn step_ref_unresolved_left_verbatim() {
+        let results: Vec<Value> = vec![];
+        let step = json!({"x": "${steps.5.center.x}"});
+        let out = substitute_step_refs(&step, &results);
+        assert_eq!(out["x"], json!("${steps.5.center.x}"));
+    }
+
+    #[test]
+    fn step_ref_lookup_path() {
+        let results = vec![json!({"a": {"b": [10, 20, 30]}})];
+        assert_eq!(lookup_step_path(&results, "0.a.b.1"), Some(json!(20)));
+        assert_eq!(lookup_step_path(&results, "0.a.missing"), None);
+        assert_eq!(lookup_step_path(&results, "9.a"), None);
     }
 
     #[test]
@@ -2441,7 +2611,7 @@ mod tests {
         let resp = json!({
             "protocolVersion": "2024-11-05",
             "capabilities": { "tools": {} },
-            "serverInfo": { "name": "ghost", "version": "0.7.3" }
+            "serverInfo": { "name": "ghost", "version": "0.7.4" }
         });
         assert_eq!(resp["protocolVersion"], "2024-11-05");
         assert!(resp["capabilities"]["tools"].is_object());

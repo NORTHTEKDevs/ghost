@@ -36,6 +36,10 @@ const SEARCH_NODE_BUDGET: usize = 3000;
 /// does no per-node pattern queries except on edit/document elements.
 const TEXT_NODE_BUDGET: usize = 8000;
 
+/// Max UIA nodes visited per describe_screen walk. Bounds a wide/shallow tree
+/// (big list, Chromium DOM) so one describe can't hang the serial server.
+const DESCRIBE_NODE_BUDGET: usize = 6000;
+
 /// Roles whose accessible NAME carries visible text content.
 const TEXT_NAME_ROLES: &[&str] = &[
     "text", "hyperlink", "listitem", "treeitem", "tabitem", "menuitem",
@@ -236,7 +240,8 @@ impl UiaTree {
             // Acquire walker once for the entire collect pass.
             let walker = self.get_walker()?;
             let mut results = Vec::new();
-            self.collect_interactive(&root, &mut results, 0, &walker)?;
+            let mut budget = DESCRIBE_NODE_BUDGET;
+            self.collect_interactive(&root, &mut results, 0, &walker, &mut budget)?;
             Ok(results)
         }
     }
@@ -291,7 +296,8 @@ impl UiaTree {
             let walker = self.get_walker()?;
             let root = self.resolve_scope_root(&walker, window_name)?;
             let mut results = Vec::new();
-            self.collect_interactive(&root, &mut results, 0, &walker)?;
+            let mut budget = DESCRIBE_NODE_BUDGET;
+            self.collect_interactive(&root, &mut results, 0, &walker, &mut budget)?;
             Ok(results)
         }
     }
@@ -440,10 +446,17 @@ impl UiaTree {
         results: &mut Vec<ElementDescriptor>,
         depth: usize,
         walker: &IUIAutomationTreeWalker,
+        budget: &mut usize,
     ) -> Result<(), CoreError> {
-        if results.len() >= 500 || depth > 50 {
+        // `budget` caps TOTAL nodes visited. The 500-result / depth-50 caps bound
+        // output and vertical depth but not breadth — a wide, shallow tree (a big
+        // list/grid, a Chromium/Electron DOM with thousands of non-interactive
+        // nodes) would otherwise be walked in full, hanging the single-threaded
+        // server on one describe call. Matches the other walkers' budget pattern.
+        if results.len() >= 500 || depth > 50 || *budget == 0 {
             return Ok(());
         }
+        *budget -= 1;
         let el = UiaElement(element.clone());
         let role = role_id_to_name(el.control_type());
         if INTERACTIVE_ROLES.contains(&role) {
@@ -463,7 +476,10 @@ impl UiaTree {
         }
         let mut child = walker.GetFirstChildElement(element).ok();
         while let Some(c) = child {
-            self.collect_interactive(&c, results, depth + 1, walker)?;
+            self.collect_interactive(&c, results, depth + 1, walker, budget)?;
+            if results.len() >= 500 || *budget == 0 {
+                return Ok(());
+            }
             child = walker.GetNextSiblingElement(&c).ok();
         }
         Ok(())

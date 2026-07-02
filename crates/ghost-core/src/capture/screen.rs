@@ -75,10 +75,15 @@ pub fn virtual_screen_bounds() -> (i32, i32, i32, i32) {
     }
 }
 
-/// True if `rect` lies entirely within `bounds` (both (l, t, r, b)).
-/// Pure helper so the off-primary routing decision is unit-testable.
+/// True if `rect` is a VALID (non-inverted) rect lying entirely within `bounds`
+/// (both (l, t, r, b)). The validity check (right>left, bottom>top) matters: an
+/// inverted rect like (50,0,-1,100) must NOT be judged "on primary" — otherwise
+/// the DXGI crop path clamps the negative edge to the screen edge and silently
+/// returns a huge region instead of erroring. Pure + unit-tested.
 pub fn rect_within(rect: (i32, i32, i32, i32), bounds: (i32, i32, i32, i32)) -> bool {
-    rect.0 >= bounds.0 && rect.1 >= bounds.1 && rect.2 <= bounds.2 && rect.3 <= bounds.3
+    let (l, t, r, b) = rect;
+    r > l && b > t
+        && l >= bounds.0 && t >= bounds.1 && r <= bounds.2 && b <= bounds.3
 }
 
 /// True if `rect` lies entirely on the primary monitor — the fast DXGI path
@@ -716,6 +721,15 @@ mod tests {
         assert!(!rect_within((-1, 0, 100, 100), bounds)); // left of bounds
         assert!(!rect_within((0, 0, 1921, 100), bounds)); // past right edge
         assert!(!rect_within((1900, 1000, 2100, 1200), bounds)); // second-monitor rect
+    }
+
+    #[test]
+    fn rect_within_rejects_inverted_rects() {
+        let bounds = (0, 0, 1920, 1080);
+        assert!(!rect_within((50, 0, -1, 100), bounds));  // negative right (the wrap-bug trigger)
+        assert!(!rect_within((50, 100, 60, 20), bounds)); // bottom < top
+        assert!(!rect_within((100, 0, 100, 50), bounds)); // zero width
+        assert!(!rect_within((0, 50, 50, 50), bounds));   // zero height
     }
 
     #[test]
