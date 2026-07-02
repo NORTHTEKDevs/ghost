@@ -1,5 +1,77 @@
 # Changelog
 
+## [0.7.0] - 2026-07-01 — Reliability & Latency Overhaul
+
+Root-caused and fixed the three classes of field failures: actions that need
+multiple calls to fire, silent wrong-window input, and perceived lag.
+
+### Fixed — actions that "don't fire"
+
+- **OS-foreground anchoring on every action path.** `ghost_act` now brings the
+  target element's own window to the foreground (AttachThreadInput + confirm)
+  before dispatching input. Previously only UIA `SetFocus()` was attempted —
+  it fails silently for a background console process, so SendInput fallbacks
+  (double_click, right_click, pattern-miss typing) landed in whichever window
+  had focus, usually the MCP client's own terminal.
+- **`ghost_key` gained a `window` param.** Keyboard SendInput routes to the OS
+  focus owner; with `window` set the target is focused + confirmed first and
+  the call FAILS LOUDLY if focus can't be confirmed, instead of typing into the
+  wrong app and returning ok:true.
+- **Honest verification.** `ghost_act` responses now carry `verified`
+  (screen-delta detected), `focus_confirmed`, and a `warning` when an action
+  dispatched but nothing visibly changed. Previously `ok:true` was hardcoded,
+  so silent no-ops looked like success and clients re-issued the action.
+- **Coordinate-tier actions (OCR/VLM) get the same verification** — that path
+  previously had none at all.
+- **Adaptive post-action verify window** (40→240ms early-exit polling) instead
+  of a single fixed 50ms capture that false-negatived async renders
+  (web/Electron).
+
+### Fixed — windows agents lose track of
+
+- `ghost_window op=list` now includes minimized windows (with a `state` field:
+  normal|minimized) — Win11 cloaks some minimized windows (e.g. Notepad) and
+  they vanished from the list entirely while still alive.
+- `ghost_window op=focus` auto-restores minimized windows before focusing.
+- `ghost_see mode=full window=X` with an unknown window is now an ERROR that
+  lists the open windows — previously it silently walked the ENTIRE desktop and
+  returned a huge dump including -32000 garbage coords from minimized windows.
+- Minimized-window scope requests return an actionable error ("restore it
+  first") instead of garbage coordinates.
+
+### Fixed — latency
+
+- **VLM timeout 30s → 8s** (configurable via `GHOST_VLM_TIMEOUT_MS`), with one
+  bounded retry on connect errors/5xx (never on timeout). A silent VLM
+  escalation could previously block the serial stdio loop — and every queued
+  request behind it — for 30 seconds.
+- `ghost_find`/`ghost_act` responses expose `escalated: true` when local tiers
+  missed and a network VLM call was paid, so hidden latency is visible.
+- **On-device OCR bounded at 3s** (WinRT spin-wait previously had no timeout).
+- **UIA desktop walks capped at 3000 visited nodes** — a DOM-heavy Chromium
+  window could previously turn one find into an unbounded COM-call storm.
+- **DXGI black-frame flag is no longer permanent**: re-probes every 100 GDI
+  captures so a transient event (sleep/resume, driver reset) doesn't downgrade
+  every future screenshot to the 30-100ms GDI path forever.
+- `ghost_screenshot full=true` returns a 1280px JPEG by default instead of a
+  native-resolution lossless PNG (multi-MB base64 over stdio); pass `max_dim=0`
+  for the old behavior.
+- `ghost_see`/describe responses filter zero-area and off-screen elements and
+  cap at 150 elements by default (`limit` param, 0 = unlimited) — element dumps
+  were the top source of client-side context bloat.
+- Every `tools/call` response envelope now includes `ms` (server-side latency).
+- Locator cache entries expire after 30s (TTL) — bounds the window where a
+  re-rendered UI could pass point-validation on a coincidentally-matching
+  element and cause a wrong-target click.
+- Tokio runtime pinned to `current_thread` flavor, making the COM-STA
+  single-thread invariant structural instead of accidental.
+
+### Tests
+
+- 330 passing (was 320), including new coverage for element filtering/limits,
+  act-result honesty (verified/warning), verification sensitivity (typed-text
+  detection, noise tolerance), and cache behavior.
+
 ## [0.5.0] - 2026-05-07 — Local OCR + Multi-Provider Vision
 
 ### Added

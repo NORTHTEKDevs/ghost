@@ -13,14 +13,25 @@ pub fn hash_frame(pixels: &[u8]) -> [u8; 32] {
 
 /// Downsample an RGBA buffer to a 4x4 average, returning 64 bytes (16 px * 4 channels).
 pub fn downsample_to_4x4(pixels: &[u8], width: usize, height: usize) -> [u8; 64] {
+    let v = downsample_grid(pixels, width, height, 4);
     let mut out = [0u8; 64];
+    out.copy_from_slice(&v);
+    out
+}
+
+/// Downsample an RGBA buffer to a `dim`x`dim` grid of per-cell channel averages.
+/// Returns `dim*dim*4` bytes. Generic version of `downsample_to_4x4` — used by
+/// act-verification, which needs enough resolution to see a typed word.
+pub fn downsample_grid(pixels: &[u8], width: usize, height: usize, dim: usize) -> Vec<u8> {
+    let dim = dim.max(1);
+    let mut out = vec![0u8; dim * dim * 4];
     if width == 0 || height == 0 || pixels.len() < width * height * 4 {
         return out;
     }
-    let cell_w = (width / 4).max(1);
-    let cell_h = (height / 4).max(1);
-    for by in 0..4 {
-        for bx in 0..4 {
+    let cell_w = (width / dim).max(1);
+    let cell_h = (height / dim).max(1);
+    for by in 0..dim {
+        for bx in 0..dim {
             let mut rgba = [0u64; 4];
             let mut n: u64 = 0;
             for y in (by * cell_h)..(((by + 1) * cell_h).min(height)) {
@@ -35,7 +46,7 @@ pub fn downsample_to_4x4(pixels: &[u8], width: usize, height: usize) -> [u8; 64]
                 }
             }
             if n > 0 {
-                let dst = (by * 4 + bx) * 4;
+                let dst = (by * dim + bx) * 4;
                 for c in 0..4 {
                     out[dst + c] = (rgba[c] / n) as u8;
                 }

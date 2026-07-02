@@ -201,7 +201,12 @@ struct McpResponse {
     error: Option<Value>,
 }
 
-#[tokio::main]
+// current_thread flavor: the whole codebase's COM-STA safety invariant is that
+// every session call runs on the one block_on thread (see GhostSession RefCell
+// docs). The default multi-thread runtime only upheld that by the accident of
+// nothing calling tokio::spawn; this makes it a structural guarantee.
+// spawn_blocking still uses the separate blocking pool and is unaffected.
+#[tokio::main(flavor = "current_thread")]
 async fn main() {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
@@ -356,7 +361,7 @@ async fn handle(
             Ok(json!({
                 "protocolVersion": "2024-11-05",
                 "capabilities": { "tools": {} },
-                "serverInfo": { "name": "ghost", "version": "0.6.0" }
+                "serverInfo": { "name": "ghost", "version": "0.7.0" }
             }))
         }
         "initialized" | "notifications/initialized" => Ok(json!({})),
@@ -381,9 +386,15 @@ async fn handle(
                     // at the dispatch layer using a noop when no live writer reference is
                     // available at this call site. See docs: streaming limitation.
                     let _ = token; // token captured for future streaming upgrade
+                    let started = std::time::Instant::now();
                     let out = dispatch_tool(session, &name, &args).await;
                     // T3.2: wrap in structured envelope, then in MCP content[].
-                    let envelope = wrap_envelope(out);
+                    let mut envelope = wrap_envelope(out);
+                    // Per-call latency so slow paths (VLM escalation, OCR, walks)
+                    // are visible to the caller instead of just "feeling laggy".
+                    if let Some(obj) = envelope.as_object_mut() {
+                        obj.insert("ms".into(), json!(started.elapsed().as_millis() as u64));
+                    }
                     // MEDIUM-5: if the envelope carries ok:false, surface isError:true in content[].
                     // Extract the error message from the envelope so the text field carries the
                     // structured error (callers can still parse the envelope JSON from it).
@@ -415,6 +426,7 @@ async fn handle_tool(
             let grounded = session.ground(target, mode).await.map_err(|e| e.to_string())?;
             // HIGH-2: include name field (Some for Cache/UIA tiers, null for OCR/VLM/YOLO).
             // LOW-9: has_rect indicates whether rect is meaningful (false for point-only tiers).
+            let escalated = mode_label == "instant" && grounded.source.to_string() == "vlm";
             Ok(json!({
                 "center": { "x": grounded.center.0, "y": grounded.center.1 },
                 "rect": {
@@ -426,6 +438,9 @@ async fn handle_tool(
                 "dispatch_mode": mode_label,
                 "name": grounded.name,
                 "has_rect": grounded.has_rect(),
+                // True when local tiers all missed and this call silently paid a
+                // network VLM round trip — the main hidden-latency source.
+                "escalated": escalated,
             }))
         }
         "ghost_click" => {
@@ -449,10 +464,19 @@ async fn handle_tool(
         }
         "ghost_screenshot" => {
             // Default: foreground window crop, max 768px, JPEG 75 quality.
-            // Pass "full": true for the full-screen lossless PNG.
+            // Pass "full": true for a full-screen capture (downscaled JPEG by
+            // default — a native-res lossless PNG of a 4K display was a multi-MB
+            // encode+base64+stdio payload; pass max_dim=0 to force lossless PNG).
             if p.get("full").and_then(|v| v.as_bool()).unwrap_or(false) {
-                let png = session.screenshot(ghost_session::session::Region::full()).await.map_err(|e| e.to_string())?;
-                Ok(json!({ "png_base64": base64_encode(&png), "size_bytes": png.len() }))
+                let want_lossless = p.get("max_dim").and_then(|v| v.as_u64()) == Some(0);
+                if want_lossless {
+                    let png = session.screenshot(ghost_session::session::Region::full()).await.map_err(|e| e.to_string())?;
+                    return Ok(json!({ "png_base64": base64_encode(&png), "size_bytes": png.len() }));
+                }
+                let max_dim = p.get("max_dim").and_then(|v| v.as_u64()).unwrap_or(1280) as u32;
+                let quality = p.get("jpeg_quality").and_then(|v| v.as_u64()).map(|q| q.min(100) as u8).unwrap_or(75);
+                let bytes = session.screenshot_region(None, Some(max_dim), Some(quality)).await.map_err(|e| e.to_string())?;
+                Ok(json!({ "jpeg_base64": base64_encode(&bytes), "size_bytes": bytes.len() }))
             } else {
                 let (rect_mode, max_dim, jpeg_quality) = screenshot_default_opts(&p);
                 let rect = if rect_mode { session.foreground_window_rect() } else { None };
@@ -577,6 +601,7 @@ async fn handle_tool(
                 "name": w.name,
                 "pid": w.pid,
                 "focused": w.focused,
+                "state": w.state,
             })).collect();
             Ok(json!({ "windows": list }))
         }
@@ -602,28 +627,26 @@ async fn handle_tool(
         }
         "ghost_describe_screen" => {
             let window = p["window"].as_str();
-            let elements = session.describe_screen(window).await.map_err(|e| e.to_string())?;
-            let list: Vec<serde_json::Value> = elements.iter().map(|e| json!({
-                "name": e.name,
-                "role": e.role,
-                "left": e.left,
-                "top": e.top,
-                "right": e.right,
-                "bottom": e.bottom,
-            })).collect();
-            Ok(json!({ "elements": list }))
+            let elements = match session.describe_screen(window).await {
+                Ok(els) => els,
+                Err(e) => {
+                    // Scope miss: return an actionable error with the live window list
+                    // instead of the old behavior (silent full-desktop dump).
+                    let msg = e.to_string();
+                    if msg.contains("not found") || msg.contains("minimized") {
+                        let titles: Vec<String> = session.list_windows().await
+                            .map(|ws| ws.iter().map(|w| format!("{} [{}]", w.name, w.state)).collect())
+                            .unwrap_or_default();
+                        return Err(format!("{msg}. Open windows: {}", titles.join(" | ")));
+                    }
+                    return Err(msg);
+                }
+            };
+            Ok(elements_response(&elements, p))
         }
         "ghost_describe_screen_fast" => {
             let elements = session.describe_screen_fast().await.map_err(|e| e.to_string())?;
-            let list: Vec<serde_json::Value> = elements.iter().map(|e| json!({
-                "name": e.name,
-                "role": e.role,
-                "left": e.left,
-                "top": e.top,
-                "right": e.right,
-                "bottom": e.bottom,
-            })).collect();
-            Ok(json!({ "elements": list }))
+            Ok(elements_response(&elements, p))
         }
         "ghost_batch_actions" => {
             let actions = p["actions"].as_array().ok_or("missing param: actions (array)")?;
@@ -859,6 +882,9 @@ async fn handle_tool(
                 obj.insert("confidence".into(), serde_json::json!(grounded.confidence));
                 obj.insert("dispatch_mode".into(), Value::String(mode_label.into()));
                 obj.insert("center".into(), json!({ "x": grounded.center.0, "y": grounded.center.1 }));
+                if mode_label == "instant" && grounded.source.to_string() == "vlm" {
+                    obj.insert("escalated".into(), json!(true));
+                }
             }
             Ok(result)
         }
@@ -899,11 +925,10 @@ pub fn parse_target(p: &Value) -> std::result::Result<Target, String> {
     Err("params must include 'name', 'role', 'description', or 'text'".into())
 }
 
-/// Coordinate-based action dispatch: ensure foreground under point, then click/type at (x, y).
-///
-/// HIGH-1: `focus_window_under_point` is called before any input to ensure SendInput
-/// keystrokes land in the correct window (the one containing the target coordinates),
-/// not in whichever window currently happens to have focus.
+/// Coordinate-based action dispatch. Delegates to `session.act_at`, which anchors
+/// the OS foreground to the window under the point BEFORE any input and runs the
+/// same screen-delta verification as the UIA path (previously this path had no
+/// verification at all — silent no-ops looked like success).
 async fn act_at_coords(
     session: &GhostSession,
     x: i32,
@@ -911,41 +936,45 @@ async fn act_at_coords(
     action: &str,
     text: Option<&str>,
 ) -> std::result::Result<Value, String> {
-    // Bring the window under the target point to the foreground BEFORE any input.
-    // Tolerant: if focus cannot be confirmed we warn and proceed rather than hard-failing.
-    match ghost_core::uia::tree::focus_window_under_point(x, y) {
-        Ok(true) => {} // foreground confirmed
-        Ok(false) => tracing::warn!(x, y, "focus_window_under_point: could not confirm foreground; proceeding"),
-        Err(e) => tracing::warn!(error=%e, x, y, "focus_window_under_point error; proceeding"),
-    }
+    session.act_at(x, y, action, text).await.map_err(|e| e.to_string())
+}
 
-    match action {
-        "click" => {
-            session.click_at(x, y).await.map_err(|e| e.to_string())?;
-            Ok(json!({ "ok": true }))
-        }
-        "type" => {
-            let t = text.ok_or("action=type requires text param")?;
-            session.click_at(x, y).await.map_err(|e| e.to_string())?;
-            ghost_core::input::keyboard::type_text(t)
-                .map_err(|e| e.to_string())?;
-            Ok(json!({ "ok": true }))
-        }
-        // HIGH-2: implement missing actions advertised by the schema.
-        "double_click" => {
-            session.double_click_at(x, y).await.map_err(|e| e.to_string())?;
-            Ok(json!({ "ok": true }))
-        }
-        "right_click" => {
-            session.right_click_at(x, y).await.map_err(|e| e.to_string())?;
-            Ok(json!({ "ok": true }))
-        }
-        "hover" => {
-            session.hover(x, y).await.map_err(|e| e.to_string())?;
-            Ok(json!({ "ok": true }))
-        }
-        other => Err(format!("ghost_act: unknown action '{other}'; use click|type|double_click|right_click|hover")),
+/// Default cap on elements returned by ghost_see/describe_screen. Huge element
+/// dumps were a top source of client-side lag (context bloat); callers can raise
+/// via `limit` (0 = unlimited).
+const DEFAULT_ELEMENT_LIMIT: usize = 150;
+
+/// Serialize an element list for describe_screen responses: drops degenerate
+/// rects (zero-area) and minimized-window garbage coords (-32000), applies the
+/// `limit` param, and reports how many elements were filtered/truncated.
+fn elements_response(elements: &[ghost_core::uia::ElementDescriptor], p: &Value) -> Value {
+    let limit = match p.get("limit").and_then(|v| v.as_u64()) {
+        Some(0) => usize::MAX,
+        Some(n) => n as usize,
+        None => DEFAULT_ELEMENT_LIMIT,
+    };
+    let usable: Vec<&ghost_core::uia::ElementDescriptor> = elements.iter()
+        .filter(|e| e.right > e.left && e.bottom > e.top && e.left > -30000 && e.top > -30000)
+        .collect();
+    let total = usable.len();
+    let list: Vec<Value> = usable.iter().take(limit).map(|e| json!({
+        "name": e.name,
+        "role": e.role,
+        "left": e.left,
+        "top": e.top,
+        "right": e.right,
+        "bottom": e.bottom,
+    })).collect();
+    let mut out = json!({ "elements": list });
+    let dropped = elements.len() - total;
+    if dropped > 0 {
+        out["filtered_offscreen"] = json!(dropped);
     }
+    if total > limit {
+        out["truncated"] = json!(true);
+        out["total"] = json!(total);
+    }
+    out
 }
 
 /// Returns (foreground_mode, max_dim, jpeg_quality) for ghost_screenshot default behaviour.
@@ -985,6 +1014,15 @@ async fn handle_ghost_key(
     p: &Value,
 ) -> std::result::Result<Value, String> {
     let keys = p["keys"].as_str().ok_or("ghost_key: missing 'keys' param")?;
+    // Keyboard SendInput routes to whichever window owns OS focus — which between
+    // MCP calls is usually the client's own terminal. With `window` given we focus
+    // + confirm the target first and FAIL LOUDLY if it can't be confirmed, instead
+    // of silently typing into the wrong app.
+    if let Some(window) = p.get("window").and_then(|v| v.as_str()) {
+        session.ensure_window_foreground(window).await.map_err(|e| {
+            format!("ghost_key: could not confirm '{window}' as foreground before sending keys: {e}")
+        })?;
+    }
     // Handle "down:KEY" / "up:KEY" special forms.
     if let Some(k) = keys.strip_prefix("down:") {
         let args = json!({ "key": k });
@@ -1279,7 +1317,11 @@ async fn handle_ghost_query(
     });
 
     // Phase 1: UIA fast-describe + name-substring matching.
-    let elements_result = handle_tool(session, "ghost_describe_screen_fast", p).await?;
+    // Internal scan must see EVERY element — the client-facing 150-element
+    // response cap would silently drop matchable fields on dense UIs.
+    let mut describe_params = p.clone();
+    describe_params["limit"] = json!(0);
+    let elements_result = handle_tool(session, "ghost_describe_screen_fast", &describe_params).await?;
     let elements = elements_result.get("elements")
         .and_then(|e| e.as_array())
         .cloned()
@@ -1356,14 +1398,15 @@ fn lean_tools_schema() -> Value {
     json!([
         // --- Perception ---
         { "name": "ghost_see",
-          "description": "Describe the active screen's UI elements. mode=fast (default, foreground only, 5-50x faster), mode=full (full walk, scope with window=), mode=delta (only changed elements since since_seq).",
+          "description": "Describe the active screen's UI elements. mode=fast (default, foreground only, 5-50x faster), mode=full (full walk, scope with window=; unknown window is an ERROR listing open windows, not a desktop dump), mode=delta (only changed elements since since_seq). Off-screen/zero-area elements are filtered; output capped at 150 elements (raise with limit).",
           "inputSchema": { "type": "object", "properties": {
               "mode": { "type": "string", "enum": ["fast", "full", "delta"], "description": "fast=foreground UIA walk (default), full=full tree, delta=changed only" },
               "window": { "type": "string", "description": "Partial title to scope full walk (mode=full only)" },
-              "since_seq": { "type": "integer", "description": "Prior snapshot seq for delta mode" }
+              "since_seq": { "type": "integer", "description": "Prior snapshot seq for delta mode" },
+              "limit": { "type": "integer", "description": "Max elements returned (default 150, 0 = unlimited)" }
           }}},
         { "name": "ghost_find",
-          "description": "Ground a target (name|role|description|text|coords) via the cascade: cache→UIA→OCR→VLM. Returns center (always), rect (has_rect=true for UIA/Cache), source, confidence, name.",
+          "description": "Ground a target (name|role|description|text|coords) via the cascade: cache→UIA→OCR→VLM. Returns center (always), rect (has_rect=true for UIA/Cache), source, confidence, name, escalated (true = local tiers missed and a network VLM call was paid).",
           "inputSchema": { "type": "object", "properties": {
               "name": { "type": "string", "description": "Accessible name (case-insensitive substring)" },
               "role": { "type": "string", "description": "Control type: button, edit, checkbox, list, menu, tab, toolbar" },
@@ -1373,7 +1416,7 @@ fn lean_tools_schema() -> Value {
           }}},
         // --- Action ---
         { "name": "ghost_act",
-          "description": "Atomic find→focus→action in one call (eliminates cross-call focus race). Returns {ok, source, confidence, center}. Supply name|role|description|text to identify target.",
+          "description": "Atomic find→focus→action in one call (eliminates cross-call focus race). Anchors OS foreground to the target's window before input and verifies via screen delta. Returns {ok, verified, focus_confirmed, source, confidence, center}; verified=false means the action dispatched but nothing visibly changed — check state with ghost_see before retrying. Supply name|role|description|text to identify target.",
           "inputSchema": { "type": "object", "required": ["action"], "properties": {
               "name": { "type": "string" }, "role": { "type": "string" },
               "description": { "type": "string" }, "text": { "type": "string" },
@@ -1383,9 +1426,10 @@ fn lean_tools_schema() -> Value {
               "mode": { "type": "string", "enum": ["instant", "deliberate", "instant_only"] }
           }}},
         { "name": "ghost_key",
-          "description": "Key input. Single key: keys='Enter'. Combo: keys='Ctrl+C'. Hold/release: keys='down:Shift' / keys='up:Shift'. Common combos: Ctrl+C, Ctrl+V, Ctrl+Z, Alt+F4, Win+D.",
+          "description": "Key input. Single key: keys='Enter'. Combo: keys='Ctrl+C'. Hold/release: keys='down:Shift' / keys='up:Shift'. STRONGLY RECOMMENDED: pass window=<title substring> — keys go to whichever window owns OS focus (often the MCP client's own terminal between calls); with window set, the target is focused+confirmed first and the call fails loudly instead of typing into the wrong app.",
           "inputSchema": { "type": "object", "required": ["keys"], "properties": {
-              "keys": { "type": "string", "description": "Key spec: 'Enter', 'Ctrl+C', 'Ctrl+Shift+T', 'down:Shift', 'up:Shift'" }
+              "keys": { "type": "string", "description": "Key spec: 'Enter', 'Ctrl+C', 'Ctrl+Shift+T', 'down:Shift', 'up:Shift'" },
+              "window": { "type": "string", "description": "Target window title substring. Focus is acquired+confirmed before sending; errors if it can't be." }
           }}},
         { "name": "ghost_scroll",
           "description": "Scroll at coordinates. direction: up/down/left/right. amount = notches (default 3).",
@@ -1445,16 +1489,16 @@ fn lean_tools_schema() -> Value {
           }}},
         // --- Screenshot ---
         { "name": "ghost_screenshot",
-          "description": "Capture screenshot. Default: foreground window, max 768px, JPEG q=75 (~20-100KB). full=true: full-screen lossless PNG. Always includes size_bytes.",
+          "description": "Capture screenshot. Default: foreground window, max 768px, JPEG q=75 (~20-100KB). full=true: full screen at max 1280px JPEG (pass max_dim=0 for native-res lossless PNG — large). Always includes size_bytes.",
           "inputSchema": { "type": "object", "properties": {
-              "full": { "type": "boolean", "description": "Full-screen lossless PNG (default false)" },
+              "full": { "type": "boolean", "description": "Full-screen capture (default false)" },
               "foreground": { "type": "boolean", "description": "Crop to foreground window (default true)" },
-              "max_dim": { "type": "integer", "description": "Longest-edge resize (default 768)" },
+              "max_dim": { "type": "integer", "description": "Longest-edge resize (default 768; 1280 with full=true; 0 = no resize, lossless PNG)" },
               "jpeg_quality": { "type": "integer", "minimum": 0, "maximum": 100 }
           }}},
         // --- Window management ---
         { "name": "ghost_window",
-          "description": "Window management. op=list: all windows. op=focus: bring to foreground (name required). op=state: maximize|minimize|restore|close (name+state). op=launch: start exe.",
+          "description": "Window management. op=list: all windows incl. minimized (each has name, pid, focused, state). op=focus: bring to foreground, auto-restoring if minimized (name required). op=state: maximize|minimize|restore|close (name+state). op=launch: start exe.",
           "inputSchema": { "type": "object", "properties": {
               "op": { "type": "string", "enum": ["list","focus","state","launch"], "description": "Operation (default list)" },
               "name": { "type": "string", "description": "Window title (op=focus|state). Also accepted as alias for 'exe' on op=launch." },
@@ -1857,6 +1901,50 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    fn desc(name: &str, l: i32, t: i32, r: i32, b: i32) -> ghost_core::uia::ElementDescriptor {
+        ghost_core::uia::ElementDescriptor {
+            name: name.into(), role: "button".into(), left: l, top: t, right: r, bottom: b,
+        }
+    }
+
+    #[test]
+    fn elements_response_filters_offscreen_and_degenerate() {
+        let els = vec![
+            desc("ok", 10, 10, 100, 40),
+            desc("minimized-garbage", -31994, -31925, -30100, -31162),
+            desc("zero-rect", 0, 0, 0, 0),
+        ];
+        let out = elements_response(&els, &json!({}));
+        assert_eq!(out["elements"].as_array().unwrap().len(), 1);
+        assert_eq!(out["elements"][0]["name"], "ok");
+        assert_eq!(out["filtered_offscreen"], json!(2));
+    }
+
+    #[test]
+    fn elements_response_applies_limit_and_reports_truncation() {
+        let els: Vec<_> = (0..10).map(|i| desc(&format!("e{i}"), 0, i * 10, 50, i * 10 + 5)).collect();
+        let out = elements_response(&els, &json!({ "limit": 3 }));
+        assert_eq!(out["elements"].as_array().unwrap().len(), 3);
+        assert_eq!(out["truncated"], json!(true));
+        assert_eq!(out["total"], json!(10));
+    }
+
+    #[test]
+    fn elements_response_limit_zero_is_unlimited() {
+        let els: Vec<_> = (0..200).map(|i| desc(&format!("e{i}"), 0, i, 50, i + 5)).collect();
+        let out = elements_response(&els, &json!({ "limit": 0 }));
+        assert_eq!(out["elements"].as_array().unwrap().len(), 200);
+        assert!(out.get("truncated").is_none());
+    }
+
+    #[test]
+    fn elements_response_default_caps_at_150() {
+        let els: Vec<_> = (0..300).map(|i| desc(&format!("e{i}"), 0, i, 50, i + 5)).collect();
+        let out = elements_response(&els, &json!({}));
+        assert_eq!(out["elements"].as_array().unwrap().len(), 150);
+        assert_eq!(out["truncated"], json!(true));
+    }
+
     // RFC 4648 base64 test vectors
     #[test]
     fn base64_empty() {
@@ -2127,7 +2215,7 @@ mod tests {
         let resp = json!({
             "protocolVersion": "2024-11-05",
             "capabilities": { "tools": {} },
-            "serverInfo": { "name": "ghost", "version": "0.6.0" }
+            "serverInfo": { "name": "ghost", "version": "0.7.0" }
         });
         assert_eq!(resp["protocolVersion"], "2024-11-05");
         assert!(resp["capabilities"]["tools"].is_object());

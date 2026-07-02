@@ -61,8 +61,14 @@ pub struct LocatorCacheStats {
     pub upserts: u64,
 }
 
+/// Entries older than this are treated as misses. Point-validation
+/// (ElementFromPoint name/role match) can pass on a coincidentally-matching
+/// element after a re-render; a TTL bounds how long that window stays open
+/// while still serving the hot within-flow case (repeat actions in seconds).
+const ENTRY_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+
 struct Inner {
-    map: HashMap<LocatorKey, (i32, i32, i32, i32)>,
+    map: HashMap<LocatorKey, ((i32, i32, i32, i32), std::time::Instant)>,
     stats: LocatorCacheStats,
 }
 
@@ -83,16 +89,21 @@ impl LocatorCache {
     /// Store (or update) a `(role, name) -> rect` mapping.
     pub fn upsert(&self, key: LocatorKey, rect: (i32, i32, i32, i32)) {
         let mut g = self.inner.lock().unwrap();
-        g.map.insert(key, rect);
+        g.map.insert(key, (rect, std::time::Instant::now()));
         g.stats.upserts += 1;
     }
 
-    /// Look up a cached rect. Returns `Some(LocatorHitResult)` on hit, `None` on miss.
-    /// Increments the appropriate stat counter.
+    /// Look up a cached rect. Returns `Some(LocatorHitResult)` on hit, `None` on
+    /// miss or expiry. Increments the appropriate stat counter.
     pub fn lookup(&self, key: &LocatorKey) -> Option<LocatorHitResult> {
         let mut g = self.inner.lock().unwrap();
         match g.map.get(key).copied() {
-            Some(rect) => {
+            Some((rect, stored_at)) => {
+                if stored_at.elapsed() > ENTRY_TTL {
+                    g.map.remove(key);
+                    g.stats.misses += 1;
+                    return None;
+                }
                 g.stats.hits += 1;
                 Some(LocatorHitResult::from_rect(rect))
             }

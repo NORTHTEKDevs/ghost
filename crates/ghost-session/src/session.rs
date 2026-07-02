@@ -45,6 +45,15 @@ impl Region {
     }
 }
 
+/// Upper bound on the on-device WinRT OCR call (typical cost is 50-200ms).
+const OCR_TIMEOUT_MS: u64 = 3000;
+
+/// Post-action verification polling schedule (ms between captures). Total worst
+/// case ~240ms for actions with no visible effect; fast path exits at first
+/// detected change (~40ms), so instant UI stays instant while async renders
+/// (web/Electron) get time to paint before we declare "nothing changed".
+const VERIFY_POLL_MS: [u64; 3] = [40, 80, 120];
+
 pub struct GhostSession {
     timeout_ms: u64,
     tree: UiaTree,
@@ -435,11 +444,16 @@ impl GhostSession {
     pub async fn find_text_local(&self, needle: &str, foreground: bool) -> Result<Option<(i32, i32)>> {
         let region = if foreground { self.foreground_window_rect() } else { None };
         let needle = needle.to_string();
-        tokio::task::spawn_blocking(move || {
+        let task = tokio::task::spawn_blocking(move || {
             ghost_core::ocr::find_text_local(&needle, region).map_err(GhostError::Core)
-        })
-        .await
-        .map_err(|e| GhostError::Core(ghost_core::error::CoreError::WorkerPanic(e.to_string())))?
+        });
+        // The WinRT OCR spin-wait has no internal timeout; bound it here so a hung
+        // engine can't occupy a blocking-pool thread (and this call) forever.
+        match timeout(Duration::from_millis(OCR_TIMEOUT_MS), task).await {
+            Ok(joined) => joined
+                .map_err(|e| GhostError::Core(ghost_core::error::CoreError::WorkerPanic(e.to_string())))?,
+            Err(_elapsed) => Err(GhostError::Core(ghost_core::error::CoreError::JobTimeout)),
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -740,6 +754,17 @@ impl GhostSession {
         core_set_clipboard(text).map_err(GhostError::Core)
     }
 
+    /// Bring the window whose title contains `name` to the foreground and confirm it,
+    /// restoring it first if minimized. Errors loudly on failure — callers use this
+    /// to guarantee keyboard input lands in the intended window.
+    pub async fn ensure_window_foreground(&self, name: &str) -> Result<()> {
+        let n = name.to_string();
+        tokio::task::spawn_blocking(move || core_focus_window(&n))
+            .await
+            .map_err(|e| GhostError::Core(ghost_core::error::CoreError::WorkerPanic(e.to_string())))?
+            .map_err(GhostError::Core)
+    }
+
     /// List all visible top-level windows.
     pub async fn list_windows(&self) -> Result<Vec<WindowInfo>> {
         core_list_windows().map_err(GhostError::Core)
@@ -913,10 +938,29 @@ impl GhostSession {
     pub async fn act(&self, by: By, action: &str, text: Option<&str>) -> Result<serde_json::Value> {
         // find() already upserts into the locator cache on success.
         let el = self.find(by).await?;
-        // Best-effort UIA focus (non-fatal: InvokePattern/ValuePattern work without it)
-        let _ = el.set_focus();
         let name = el.name();
         let rect = el.bounding_rect();
+
+        // Anchor the OS foreground to the window that owns the target element.
+        // UIA SetFocus alone fails silently for a background console process
+        // (foreground-lock timeout), and every SendInput fallback (double_click,
+        // right_click, pattern-miss type path) routes to whichever window holds
+        // OS focus — which between MCP calls is usually the client's terminal.
+        let focus_confirmed = match rect {
+            Some((l, t, r, b)) => {
+                let (cx, cy) = ((l + r) / 2, (t + b) / 2);
+                tokio::task::spawn_blocking(move || {
+                    ghost_core::uia::tree::focus_window_under_point(cx, cy)
+                })
+                .await
+                .ok()
+                .and_then(|r| r.ok())
+                .unwrap_or(false)
+            }
+            None => false,
+        };
+        // Best-effort UIA focus on top (non-fatal: InvokePattern/ValuePattern work without it)
+        let _ = el.set_focus();
 
         // MEDIUM-5: snapshot the foreground HWND before the action to detect focus changes.
         let fg_before = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
@@ -962,36 +1006,122 @@ impl GhostSession {
             }
         }
 
-        // Capture AFTER frame and compute screen-delta verification.
-        // Small delay to allow the action to render.
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        // LOW-9: re-query foreground rect for after-capture (element may have moved/closed).
-        let after_capture_rect = self.foreground_window_rect();
-        let after_capture = tokio::task::spawn_blocking(move || capture_region_raw(after_capture_rect))
+        // Adaptive post-action verification: fast UIs confirm on the first ~40ms
+        // capture; async renders (web/Electron) get up to ~240ms before we report
+        // no change. Honest signal either way — `verified` is never assumed.
+        let verification = self.verify_screen_change(before_capture, fg_before).await;
+
+        let rect_json = rect.map(|(l, t, r, b)| serde_json::json!({"left": l, "top": t, "right": r, "bottom": b}))
+            .unwrap_or(serde_json::Value::Null);
+        Ok(Self::act_result_json(name.into(), rect_json, verification, focus_confirmed))
+    }
+
+    /// Coordinate-based action with the same focus-anchoring and verification
+    /// guarantees as the UIA path. Used for OCR/VLM-grounded dispatch.
+    pub async fn act_at(&self, x: i32, y: i32, action: &str, text: Option<&str>) -> Result<serde_json::Value> {
+        // Bring the window under the target point to the foreground BEFORE any input,
+        // so clicks/keystrokes land in the window that owns the coordinates.
+        let focus_confirmed = tokio::task::spawn_blocking(move || {
+            ghost_core::uia::tree::focus_window_under_point(x, y)
+        })
+        .await
+        .ok()
+        .and_then(|r| r.ok())
+        .unwrap_or(false);
+
+        let fg_before = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
+        let capture_rect = self.foreground_window_rect();
+        let before_capture = tokio::task::spawn_blocking(move || capture_region_raw(capture_rect))
             .await
             .ok()
             .and_then(|r| r.ok());
 
-        let verification = match (before_capture, after_capture) {
-            (Some((before, bw, bh)), Some((after, aw, ah))) if bw == aw && bh == ah => {
-                // MEDIUM-5: fg_ok = same window stayed focused, not just any window.
-                let fg_after = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
-                let fg_ok = !fg_before.is_invalid() && fg_before == fg_after;
-                Some(compute_verification(&before, &after, bw, bh, fg_ok))
+        match action {
+            "click" => self.click_at(x, y).await?,
+            "type" => {
+                let t = text.ok_or_else(|| GhostError::Vision("act_at: action=type requires text param".into()))?;
+                self.click_at(x, y).await?;
+                ghost_core::input::keyboard::type_text(t).map_err(GhostError::Core)?;
             }
-            _ => None,
-        };
+            "double_click" => self.double_click_at(x, y).await?,
+            "right_click" => self.right_click_at(x, y).await?,
+            "hover" => self.hover(x, y).await?,
+            other => {
+                return Err(GhostError::Vision(format!(
+                    "act_at: unknown action '{other}'; use click|type|double_click|right_click|hover"
+                )));
+            }
+        }
 
-        let rect_json = rect.map(|(l, t, r, b)| serde_json::json!({"left": l, "top": t, "right": r, "bottom": b}))
+        let verification = self.verify_screen_change(before_capture, fg_before).await;
+        Ok(Self::act_result_json(serde_json::Value::Null, serde_json::Value::Null, verification, focus_confirmed))
+    }
+
+    /// Poll for a post-action screen delta on the VERIFY_POLL_MS schedule,
+    /// early-exiting as soon as a change is detected.
+    async fn verify_screen_change(
+        &self,
+        before_capture: Option<(Vec<u8>, usize, usize)>,
+        fg_before: windows::Win32::Foundation::HWND,
+    ) -> Option<ghost_core::capture::Verification> {
+        let before = before_capture?;
+        let mut last = None;
+        for delay in VERIFY_POLL_MS {
+            tokio::time::sleep(Duration::from_millis(delay)).await;
+            // LOW-9: re-query foreground rect each poll (element may have moved/closed).
+            let after_rect = self.foreground_window_rect();
+            let after_capture = tokio::task::spawn_blocking(move || capture_region_raw(after_rect))
+                .await
+                .ok()
+                .and_then(|r| r.ok());
+            if let Some((after, aw, ah)) = after_capture {
+                let (ref b, bw, bh) = before;
+                if bw == aw && bh == ah {
+                    // MEDIUM-5: fg_ok = same window stayed focused, not just any window.
+                    let fg_after = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
+                    let fg_ok = !fg_before.is_invalid() && fg_before == fg_after;
+                    let v = compute_verification(b, &after, bw, bh, fg_ok);
+                    let changed = v.changed;
+                    last = Some(v);
+                    if changed {
+                        break;
+                    }
+                }
+            }
+        }
+        last
+    }
+
+    /// Shared result shape for act()/act_at(): honest `verified` signal plus a
+    /// warning string the calling agent can surface instead of blindly retrying.
+    fn act_result_json(
+        name: serde_json::Value,
+        rect_json: serde_json::Value,
+        verification: Option<ghost_core::capture::Verification>,
+        focus_confirmed: bool,
+    ) -> serde_json::Value {
+        let verified = verification.as_ref().map(|v| v.changed);
+        let verification_json = verification
+            .map(|v| serde_json::to_value(v).unwrap_or(serde_json::Value::Null))
             .unwrap_or(serde_json::Value::Null);
-        let verification_json = verification.map(|v| serde_json::to_value(v).unwrap_or(serde_json::Value::Null))
-            .unwrap_or(serde_json::Value::Null);
-        Ok(serde_json::json!({
+        let mut out = serde_json::json!({
             "ok": true,
             "name": name,
             "rect": rect_json,
+            "verified": verified,
+            "focus_confirmed": focus_confirmed,
             "verification": verification_json,
-        }))
+        });
+        if verified == Some(false) {
+            out["warning"] = serde_json::Value::String(
+                "action dispatched but no screen change detected within 240ms; verify with ghost_see before retrying".into(),
+            );
+        } else if !focus_confirmed {
+            out["warning"] = serde_json::Value::String(
+                "target window foreground could not be confirmed; input may have landed elsewhere".into(),
+            );
+        }
+        out
     }
 
     /// Compile a JSON intent and run it through the FsmExecutor, dispatching ops against
@@ -1085,5 +1215,47 @@ impl<'a> OpsDispatcher for SessionOpsDispatcher<'a> {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod act_result_tests {
+    use super::GhostSession;
+    use ghost_core::capture::Verification;
+    use serde_json::json;
+
+    fn v(changed: bool, fg: bool) -> Verification {
+        Verification { changed, delta_score: if changed { 1.0 } else { 0.0 }, foreground_ok: fg }
+    }
+
+    #[test]
+    fn verified_action_has_no_warning() {
+        let out = GhostSession::act_result_json(json!("OK"), json!(null), Some(v(true, true)), true);
+        assert_eq!(out["ok"], json!(true));
+        assert_eq!(out["verified"], json!(true));
+        assert_eq!(out["focus_confirmed"], json!(true));
+        assert!(out.get("warning").is_none());
+    }
+
+    #[test]
+    fn unverified_action_carries_warning_not_silent_success() {
+        let out = GhostSession::act_result_json(json!("OK"), json!(null), Some(v(false, true)), true);
+        assert_eq!(out["verified"], json!(false));
+        let w = out["warning"].as_str().unwrap();
+        assert!(w.contains("no screen change"), "warning: {w}");
+    }
+
+    #[test]
+    fn unconfirmed_focus_carries_warning() {
+        let out = GhostSession::act_result_json(json!("OK"), json!(null), Some(v(true, true)), false);
+        assert_eq!(out["verified"], json!(true));
+        let w = out["warning"].as_str().unwrap();
+        assert!(w.contains("foreground"), "warning: {w}");
+    }
+
+    #[test]
+    fn missing_verification_reports_null_not_true() {
+        let out = GhostSession::act_result_json(json!("OK"), json!(null), None, true);
+        assert!(out["verified"].is_null());
     }
 }

@@ -1,4 +1,4 @@
-use std::sync::{Mutex, atomic::{AtomicBool, Ordering}};
+use std::sync::{Mutex, atomic::{AtomicBool, AtomicUsize, Ordering}};
 use crate::error::CoreError;
 
 // ---------------------------------------------------------------------------
@@ -193,10 +193,13 @@ unsafe impl Sync for CaptureContext {}
 
 static CAPTURE_STATE: Mutex<Option<CaptureContext>> = Mutex::new(None);
 
-/// Sticky flag: once DXGI is observed returning all-black frames, skip DXGI entirely
-/// and go straight to GDI on every subsequent call. One-way; never reset during the
-/// process lifetime. Safe on machines where DXGI works: flag is never set.
+/// Sticky flag: once DXGI is observed returning all-black frames, skip DXGI and go
+/// straight to GDI. Re-probed every `DXGI_REPROBE_INTERVAL` captures so a transient
+/// black-frame event (resume from sleep, driver reset) doesn't permanently downgrade
+/// every future capture to the 30-100ms GDI path.
 static DXGI_ALWAYS_BLACK: AtomicBool = AtomicBool::new(false);
+static GDI_CAPTURES_SINCE_BLACK: AtomicUsize = AtomicUsize::new(0);
+const DXGI_REPROBE_INTERVAL: usize = 100;
 
 // DXGI_ERROR_ACCESS_LOST / DXGI_ERROR_ACCESS_DENIED are used via
 // windows::Win32::Graphics::Dxgi directly in capture_rgba_inner.
@@ -422,9 +425,15 @@ unsafe fn acquire_duplication(ctx: &mut CaptureContext) -> Result<(), CoreError>
 /// Sticky optimisation: once is_frame_black() fires, DXGI_ALWAYS_BLACK is set and
 /// all subsequent calls skip DXGI entirely (avoiding ~50ms of wasted work per frame).
 fn capture_rgba(ctx: &mut CaptureContext) -> Result<(Vec<u8>, usize, usize), CoreError> {
-    // Fast path: DXGI already known-broken on this system — skip it entirely.
+    // Fast path: DXGI known-broken — skip it, but re-probe periodically in case the
+    // black frames were transient (sleep/resume, driver reset).
     if DXGI_ALWAYS_BLACK.load(Ordering::Relaxed) {
-        return capture_screen_gdi();
+        let n = GDI_CAPTURES_SINCE_BLACK.fetch_add(1, Ordering::Relaxed) + 1;
+        if n % DXGI_REPROBE_INTERVAL != 0 {
+            return capture_screen_gdi();
+        }
+        tracing::debug!(gdi_captures = n, "re-probing DXGI after sticky black-frame flag");
+        DXGI_ALWAYS_BLACK.store(false, Ordering::Relaxed);
     }
     let result = unsafe { capture_rgba_inner(ctx, true) }?;
     // If the captured frame is entirely black, DXGI is not working correctly on this

@@ -3,7 +3,7 @@ use windows::Win32::System::Com::CoCreateInstance;
 use windows::Win32::System::Com::CLSCTX_INPROC_SERVER;
 use windows::Win32::Foundation::{BOOL, HWND, LPARAM, WPARAM, TRUE, FALSE};
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetForegroundWindow, GetWindowTextW, IsWindowVisible,
+    EnumWindows, GetForegroundWindow, GetWindowTextW, IsWindowVisible, IsIconic,
     PostMessageW, SetForegroundWindow, ShowWindow, GetWindowThreadProcessId,
     BringWindowToTop, GetAncestor,
     SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, WM_CLOSE,
@@ -25,6 +25,11 @@ pub(crate) fn role_alias_matches(searched: &str, el_role: &str) -> bool {
         _ => false,
     }
 }
+
+/// Max UIA nodes visited per subtree search. Bounds worst-case latency on
+/// DOM-heavy apps (a Chromium tab can expose 10k+ nodes); typical windows
+/// resolve in well under 1k visits.
+const SEARCH_NODE_BUDGET: usize = 3000;
 
 pub struct UiaTree {
     automation: IUIAutomation,
@@ -52,7 +57,8 @@ impl UiaTree {
                 .map_err(|e| CoreError::ComInit(e.to_string()))?;
             // Acquire the walker once for the whole search (was N+1 COM proxies).
             let walker = self.get_walker()?;
-            self.search_subtree_by_name(&root, &name_lower, &walker, 0)
+            let mut budget = SEARCH_NODE_BUDGET;
+            self.search_subtree_by_name(&root, &name_lower, &walker, 0, &mut budget)
         }
     }
 
@@ -63,7 +69,8 @@ impl UiaTree {
             let root = self.automation.GetRootElement()
                 .map_err(|e| CoreError::ComInit(e.to_string()))?;
             let walker = self.get_walker()?;
-            self.search_subtree_by_role(&root, role, &walker, 0)
+            let mut budget = SEARCH_NODE_BUDGET;
+            self.search_subtree_by_role(&root, role, &walker, 0, &mut budget)
         }
     }
 
@@ -74,7 +81,8 @@ impl UiaTree {
             let root = self.automation.ElementFromHandle(hwnd)
                 .map_err(|e| CoreError::ComInit(e.to_string()))?;
             let walker = self.get_walker()?;
-            self.search_subtree_by_name(&root, &name_lower, &walker, 0)
+            let mut budget = SEARCH_NODE_BUDGET;
+            self.search_subtree_by_name(&root, &name_lower, &walker, 0, &mut budget)
         }
     }
 
@@ -84,7 +92,8 @@ impl UiaTree {
             let root = self.automation.ElementFromHandle(hwnd)
                 .map_err(|e| CoreError::ComInit(e.to_string()))?;
             let walker = self.get_walker()?;
-            self.search_subtree_by_role(&root, role, &walker, 0)
+            let mut budget = SEARCH_NODE_BUDGET;
+            self.search_subtree_by_role(&root, role, &walker, 0, &mut budget)
         }
     }
 
@@ -122,24 +131,31 @@ impl UiaTree {
 
     /// Recursive name search. `walker` is acquired once by the caller (see `find_by_name`).
     /// MEDIUM-8: `depth` param guards against stack overflow on pathological UIA trees.
+    /// `budget` caps total visited nodes so a DOM-heavy app (Chrome/Electron) can't
+    /// turn one find into an unbounded COM-call storm.
     unsafe fn search_subtree_by_name(
         &self,
         element: &IUIAutomationElement,
         name: &str,
         walker: &IUIAutomationTreeWalker,
         depth: usize,
+        budget: &mut usize,
     ) -> Result<Option<UiaElement>, CoreError> {
-        if depth > 50 {
+        if depth > 50 || *budget == 0 {
             return Ok(None);
         }
+        *budget -= 1;
         let el = UiaElement(element.clone());
         if el.name().to_lowercase().contains(name) {
             return Ok(Some(el));
         }
         let mut child = walker.GetFirstChildElement(element).ok();
         while let Some(c) = child {
-            if let Some(found) = self.search_subtree_by_name(&c, name, walker, depth + 1)? {
+            if let Some(found) = self.search_subtree_by_name(&c, name, walker, depth + 1, budget)? {
                 return Ok(Some(found));
+            }
+            if *budget == 0 {
+                return Ok(None);
             }
             child = walker.GetNextSiblingElement(&c).ok();
         }
@@ -148,16 +164,19 @@ impl UiaTree {
 
     /// Recursive role search. `walker` is acquired once by the caller (see `find_by_role`).
     /// MEDIUM-8: `depth` param guards against stack overflow on pathological UIA trees.
+    /// `budget` caps total visited nodes (see `search_subtree_by_name`).
     unsafe fn search_subtree_by_role(
         &self,
         element: &IUIAutomationElement,
         role: &str,
         walker: &IUIAutomationTreeWalker,
         depth: usize,
+        budget: &mut usize,
     ) -> Result<Option<UiaElement>, CoreError> {
-        if depth > 50 {
+        if depth > 50 || *budget == 0 {
             return Ok(None);
         }
+        *budget -= 1;
         let el = UiaElement(element.clone());
         let el_role = role_id_to_name(el.control_type());
         if el_role == role || role_alias_matches(role, el_role) {
@@ -165,8 +184,11 @@ impl UiaTree {
         }
         let mut child = walker.GetFirstChildElement(element).ok();
         while let Some(c) = child {
-            if let Some(found) = self.search_subtree_by_role(&c, role, walker, depth + 1)? {
+            if let Some(found) = self.search_subtree_by_role(&c, role, walker, depth + 1, budget)? {
                 return Ok(Some(found));
+            }
+            if *budget == 0 {
+                return Ok(None);
             }
             child = walker.GetNextSiblingElement(&c).ok();
         }
@@ -192,6 +214,10 @@ impl UiaTree {
     }
 
     /// Return structured list of interactive elements. Optionally scoped to a window by partial name.
+    ///
+    /// A window scope that matches nothing is an ERROR (`ProcessNotFound`), not a
+    /// silent full-desktop walk: dumping every window's elements (including
+    /// minimized ones at -32000 coords) produced huge, misleading responses.
     pub fn describe_screen(&self, window_name: Option<&str>) -> Result<Vec<ElementDescriptor>, CoreError> {
         unsafe {
             // Acquire walker once — used for both the window-title scan and the collect pass.
@@ -210,7 +236,24 @@ impl UiaTree {
                     }
                     child = walker.GetNextSiblingElement(&c).ok();
                 }
-                found.unwrap_or_else(|| self.automation.GetRootElement().unwrap())
+                match found {
+                    Some(el) => el,
+                    None => {
+                        // Not a direct UIA child of the desktop (minimized/cloaked windows
+                        // often aren't). Fall back to an HWND title match so agents can
+                        // still scope to windows they just interacted with.
+                        let win = list_windows()?
+                            .into_iter()
+                            .find(|w| w.name.to_lowercase().contains(&wname_lower))
+                            .ok_or_else(|| CoreError::ProcessNotFound { name: wname.to_string() })?;
+                        if win.state == "minimized" {
+                            // Element coords of a minimized window are garbage (-32000).
+                            return Err(CoreError::WindowMinimized { name: win.name });
+                        }
+                        self.automation.ElementFromHandle(HWND(win.hwnd))
+                            .map_err(|e| CoreError::ComInit(e.to_string()))?
+                    }
+                }
             } else {
                 self.automation.GetRootElement()
                     .map_err(|e| CoreError::ComInit(e.to_string()))?
@@ -278,6 +321,9 @@ pub struct WindowInfo {
     pub pid: u32,
     pub focused: bool,
     pub hwnd: *mut core::ffi::c_void,
+    /// "normal" | "minimized". Minimized (and Win11-cloaked-minimized) windows are
+    /// included so agents don't lose track of windows they just interacted with.
+    pub state: &'static str,
 }
 
 pub enum WindowState {
@@ -300,7 +346,12 @@ impl WindowState {
 }
 
 unsafe extern "system" fn enum_windows_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
-    if !IsWindowVisible(hwnd).as_bool() {
+    let visible = IsWindowVisible(hwnd).as_bool();
+    let iconic = IsIconic(hwnd).as_bool();
+    // Keep visible windows AND minimized ones (Win11 cloaks some minimized app
+    // windows so IsWindowVisible is false — e.g. Notepad — but they're alive and
+    // restorable; dropping them made agents lose track of open windows).
+    if !visible && !iconic {
         return TRUE;
     }
     let mut title = [0u16; 512];
@@ -312,8 +363,9 @@ unsafe extern "system" fn enum_windows_proc(hwnd: HWND, lparam: LPARAM) -> BOOL 
     let focused = GetForegroundWindow() == hwnd;
     let mut pid = 0u32;
     GetWindowThreadProcessId(hwnd, Some(&mut pid));
+    let state = if iconic { "minimized" } else { "normal" };
     let list = &mut *(lparam.0 as *mut Vec<WindowInfo>);
-    list.push(WindowInfo { name, pid, focused, hwnd: hwnd.0 });
+    list.push(WindowInfo { name, pid, focused, hwnd: hwnd.0, state });
     TRUE
 }
 
@@ -357,6 +409,10 @@ pub fn ensure_foreground(hwnd: HWND, timeout_ms: u64) -> Result<bool, CoreError>
             let _ = AttachThreadInput(cur_tid, tgt_tid, TRUE);
         }
 
+        // A minimized window can't receive foreground — restore it first.
+        if IsIconic(hwnd).as_bool() {
+            let _ = ShowWindow(hwnd, SW_RESTORE);
+        }
         let _ = ShowWindow(hwnd, SW_SHOW);
         let _ = BringWindowToTop(hwnd);
         let _ = SetForegroundWindow(hwnd);
