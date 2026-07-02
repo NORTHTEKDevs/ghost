@@ -288,6 +288,10 @@ async fn main() {
                 // every (possibly huge) line just to detect stop requests.
                 if line.contains("ghost_stop") && is_stop_request(line) {
                     ghost_core::input::hotkey::trigger_stop();
+                    // Release any held modifiers IMMEDIATELY (not when the queued
+                    // stop later dispatches) so a stuck Ctrl/Shift/Alt from an
+                    // in-flight or held key_down can't corrupt further input.
+                    ghost_core::input::hotkey::release_all_modifiers();
                 }
                 // Bounded channel + blocking_send: a client that pipelines
                 // requests without reading responses blocks here (and then on
@@ -430,7 +434,7 @@ async fn handle(
             Ok(json!({
                 "protocolVersion": "2024-11-05",
                 "capabilities": { "tools": {} },
-                "serverInfo": { "name": "ghost", "version": "0.7.5" }
+                "serverInfo": { "name": "ghost", "version": "0.7.6" }
             }))
         }
         "initialized" | "notifications/initialized" => Ok(json!({})),
@@ -2611,7 +2615,7 @@ mod tests {
         let resp = json!({
             "protocolVersion": "2024-11-05",
             "capabilities": { "tools": {} },
-            "serverInfo": { "name": "ghost", "version": "0.7.5" }
+            "serverInfo": { "name": "ghost", "version": "0.7.6" }
         });
         assert_eq!(resp["protocolVersion"], "2024-11-05");
         assert!(resp["capabilities"]["tools"].is_object());
