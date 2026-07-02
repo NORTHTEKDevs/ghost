@@ -102,14 +102,44 @@ fn foreground_info() -> Value {
     }
 }
 
+/// Classify an error message into (code, suggested_action) so the calling agent
+/// gets a machine-usable code and a concrete next step instead of an opaque
+/// string. Errors are matched on the stable phrasing the session layer emits
+/// (GhostError Display + the handlers above); unmatched errors stay generic.
+fn classify_error(msg: &str) -> (i64, Option<&'static str>) {
+    let m = msg.to_lowercase();
+    if m.contains("not found") || m.contains("elementnotfound") || m.contains("no element") {
+        (-32001, Some("element not found — call ghost_see to confirm the window is focused and the name/role are right, or retry ghost_find with mode=deliberate to escalate to the VLM"))
+    } else if m.contains("disabled") || m.contains("occluded") || m.contains("not interactable") {
+        (-32002, Some("element exists but isn't actionable (disabled or covered) — call ghost_see and check is_enabled/rect, or dismiss the covering element first"))
+    } else if m.contains("interrupted by emergency stop") || m.contains("stopped") {
+        (-32004, Some("automation was stopped — call ghost_reset before issuing more actions"))
+    } else if m.contains("timeout") || m.contains("timed out") {
+        (-32003, Some("operation timed out — increase timeout_ms, or check for a blocking modal/dialog with ghost_see"))
+    } else if m.contains("minimized") {
+        (-32005, Some("target window is minimized — call ghost_window op=focus name=<title> to restore it first"))
+    } else if m.contains("could not focus") || m.contains("focus") && m.contains("window") {
+        (-32006, Some("could not bring the target window to the foreground — confirm the title with ghost_window op=list"))
+    } else {
+        (-32000, None)
+    }
+}
+
 /// Wrap a raw tool result into the T3.2 structured envelope:
-/// `{ ok, data, foreground: {hwnd, title}, error_code? }`
+/// `{ ok, data, foreground: {hwnd, title}, error_code?, suggested_action? }`
 /// `data` contains the original fields; `ok` is true on success.
 fn wrap_envelope(r: Result<Value, String>) -> Value {
     let fg = foreground_info();
     match r {
         Ok(v) => json!({ "ok": true, "data": v, "foreground": fg }),
-        Err(e) => json!({ "ok": false, "data": null, "foreground": fg, "error_code": -32000i64, "error": e }),
+        Err(e) => {
+            let (code, suggestion) = classify_error(&e);
+            let mut env = json!({ "ok": false, "data": null, "foreground": fg, "error_code": code, "error": e });
+            if let Some(s) = suggestion {
+                env["suggested_action"] = Value::String(s.into());
+            }
+            env
+        }
     }
 }
 
@@ -400,7 +430,7 @@ async fn handle(
             Ok(json!({
                 "protocolVersion": "2024-11-05",
                 "capabilities": { "tools": {} },
-                "serverInfo": { "name": "ghost", "version": "0.7.2" }
+                "serverInfo": { "name": "ghost", "version": "0.7.3" }
             }))
         }
         "initialized" | "notifications/initialized" => Ok(json!({})),
@@ -902,6 +932,13 @@ async fn handle_tool(
             session.click_text_local(needle, timeout_ms).await.map_err(|e| e.to_string())?;
             Ok(json!({ "ok": true }))
         }
+        "ghost_wait_for_element" => {
+            let appears = p["appears"].as_bool().unwrap_or(true);
+            let timeout_ms = p["timeout_ms"].as_u64().unwrap_or(5000);
+            let by = parse_by(&p)?;
+            session.wait_for_element(by, appears, timeout_ms).await.map_err(|e| e.to_string())?;
+            Ok(json!({ "ok": true, "appeared": appears }))
+        }
         "ghost_wait_for_event" => {
             let since_seq = p["since_seq"].as_u64().unwrap_or(0);
             let timeout_ms = p["timeout_ms"].as_u64().unwrap_or(5000);
@@ -1219,6 +1256,7 @@ async fn handle_ghost_wait(
     match for_what {
         "idle" => handle_tool(session, "ghost_wait_for_idle", p).await,
         "text" => handle_tool(session, "ghost_click_and_wait_for_text", p).await,
+        "element" => handle_tool(session, "ghost_wait_for_element", p).await,
         "event" => handle_tool(session, "ghost_wait_for_event", p).await,
         "cond" => handle_tool(session, "ghost_wait_until", p).await,
         "navigate" => handle_tool(session, "ghost_navigate_and_wait", p).await,
@@ -1456,34 +1494,41 @@ async fn handle_ghost_query(
         ))
     });
 
-    // Phase 1: UIA fast-describe + name-substring matching.
-    // Internal scan must see EVERY element — the client-facing 150-element
-    // response cap would silently drop matchable fields on dense UIs.
-    let mut describe_params = p.clone();
-    describe_params["limit"] = json!(0);
-    let elements_result = handle_tool(session, "ghost_describe_screen_fast", &describe_params).await?;
-    let elements = elements_result.get("elements")
-        .and_then(|e| e.as_array())
-        .cloned()
-        .unwrap_or_default();
-
+    // Phase 1: UIA — for each field, find live elements whose accessible name
+    // contains the field, then read the element's VALUE via get_text()
+    // (ValuePattern), NOT its name. Names are field labels ("Email:"); values are
+    // the content of edit/document controls. Reading get_text() returns the real
+    // value for editable controls and falls back to the name for static labels,
+    // so it's strictly more correct than the old name-echo.
     let mut extracted: serde_json::Map<String, Value> = serde_json::Map::new();
+    let mut sources: serde_json::Map<String, Value> = serde_json::Map::new();
     let mut unmatched_fields: Vec<String> = Vec::new();
+    let mut element_count = 0usize;
 
     for field in &field_names {
-        let matched = elements.iter().find(|el| {
-            el["name"].as_str()
-                .map(|n| n.to_lowercase().contains(&field.to_lowercase()))
-                .unwrap_or(false)
-        });
-        let value = matched
-            .and_then(|el| el["name"].as_str())
-            .map(|s| Value::String(s.to_string()))
-            .unwrap_or(Value::Null);
-        if value.is_null() {
-            unmatched_fields.push(field.clone());
+        let matches = session.find_all_foreground(Some(field), None, 8).await
+            .unwrap_or_default();
+        element_count += matches.len();
+        // Prefer a match whose value differs from its name (a real editable
+        // value); otherwise fall back to the first match (a label).
+        let chosen = matches.iter()
+            .find(|el| {
+                let t = el.get_text();
+                !t.is_empty() && t.to_lowercase() != el.name().to_lowercase()
+            })
+            .or_else(|| matches.first());
+        match chosen {
+            Some(el) => {
+                let v = el.get_text();
+                let v = if v.is_empty() { el.name() } else { v };
+                extracted.insert(field.clone(), Value::String(v));
+                sources.insert(field.clone(), Value::String("uia".into()));
+            }
+            None => {
+                extracted.insert(field.clone(), Value::Null);
+                unmatched_fields.push(field.clone());
+            }
         }
-        extracted.insert(field.clone(), value);
     }
 
     // Phase 2: VLM fallback for fields still unmatched after UIA.
@@ -1498,6 +1543,7 @@ async fn handle_ghost_query(
                     if let Some(v) = vlm_map.get(field) {
                         if !v.is_null() {
                             extracted.insert(field.clone(), v.clone());
+                            sources.insert(field.clone(), Value::String("vlm".into()));
                         }
                     }
                 }
@@ -1517,8 +1563,9 @@ async fn handle_ghost_query(
 
     let mut result = json!({
         "extracted": extracted,
+        "sources": sources,
         "unmatched": unmatched,
-        "element_count": elements.len(),
+        "element_count": element_count,
         "vlm_attempted": vlm_attempted,
     });
     if let Some(e) = vlm_error {
@@ -1590,16 +1637,18 @@ fn lean_tools_schema() -> Value {
           }}},
         // --- Waiting ---
         { "name": "ghost_wait",
-          "description": "Unified wait. for=ms (default): sleep N ms. for=idle: wait for screen stable. for=text: wait for text appear/disappear. for=event: next foreground change. for=cond: JSONLogic poll. for=navigate: focus window + navigate URL + page idle.",
+          "description": "Unified wait. for=ms (default): sleep N ms. for=idle: wait for screen stable. for=element: wait for an element (name/role) to appear/disappear WITHOUT clicking — the 'wait until Save exists' primitive. for=text: click a target then wait for text. for=event: next foreground change. for=cond: JSONLogic poll. for=navigate: focus window + navigate URL + page idle.",
           "inputSchema": { "type": "object", "properties": {
-              "for": { "type": "string", "enum": ["ms","idle","text","event","cond","navigate"],
+              "for": { "type": "string", "enum": ["ms","idle","element","text","event","cond","navigate"],
                        "description": "What to wait for (default ms)" },
               "ms": { "type": "integer", "description": "Milliseconds (for=ms)" },
               "window": { "type": "string", "description": "Window scope (for=idle|navigate)" },
               "stable_frames": { "type": "integer", "default": 3, "description": "for=idle" },
               "timeout_ms": { "type": "integer", "default": 5000 },
+              "name": { "type": "string", "description": "Element name to wait for (for=element)" },
+              "role": { "type": "string", "description": "Element role to wait for (for=element)" },
               "text": { "type": "string", "description": "Text to wait for (for=text)" },
-              "appears": { "type": "boolean", "default": true, "description": "for=text" },
+              "appears": { "type": "boolean", "default": true, "description": "for=element|text: true=wait to appear, false=wait to disappear" },
               "since_seq": { "type": "integer", "description": "for=event" },
               "condition": { "type": "object", "description": "JSONLogic expression (for=cond)" },
               "url": { "type": "string", "description": "URL to navigate to (for=navigate)" }
@@ -2090,6 +2139,20 @@ mod tests {
     }
 
     #[test]
+    fn classify_error_maps_known_categories() {
+        assert_eq!(classify_error("element not found: Save").0, -32001);
+        assert!(classify_error("element not found: Save").1.unwrap().contains("ghost_see"));
+        assert_eq!(classify_error("element is disabled").0, -32002);
+        assert_eq!(classify_error("ghost_wait: interrupted by emergency stop").0, -32004);
+        assert_eq!(classify_error("STA job exceeded timeout").0, -32003);
+        assert_eq!(classify_error("Window 'Foo' is minimized; restore it first").0, -32005);
+        // Unknown errors stay generic with no suggestion.
+        let (code, sugg) = classify_error("some unexpected internal thing");
+        assert_eq!(code, -32000);
+        assert!(sugg.is_none());
+    }
+
+    #[test]
     fn stop_request_detected_in_tools_call_form() {
         let line = r#"{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"ghost_stop","arguments":{}}}"#;
         assert!(is_stop_request(line));
@@ -2378,7 +2441,7 @@ mod tests {
         let resp = json!({
             "protocolVersion": "2024-11-05",
             "capabilities": { "tools": {} },
-            "serverInfo": { "name": "ghost", "version": "0.7.2" }
+            "serverInfo": { "name": "ghost", "version": "0.7.3" }
         });
         assert_eq!(resp["protocolVersion"], "2024-11-05");
         assert!(resp["capabilities"]["tools"].is_object());

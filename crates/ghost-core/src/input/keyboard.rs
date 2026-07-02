@@ -63,6 +63,35 @@ pub fn type_text(text: &str) -> Result<(), CoreError> {
     Ok(())
 }
 
+/// Select-all (Ctrl+A) then Delete, to clear the focused field before typing —
+/// so `type` replaces existing content instead of appending to it (matching
+/// UIA ValuePattern.SetValue and Playwright's fill() semantics).
+pub fn clear_focused_field() -> Result<(), CoreError> {
+    if is_stopped() {
+        return Err(CoreError::Win32 { code: 0, context: "stopped" });
+    }
+    unsafe {
+        // Ctrl down, A down/up, Ctrl up — select all.
+        let select_all = [
+            key_event(VK_CONTROL, false),
+            key_event(VK_A, false),
+            key_event(VK_A, true),
+            key_event(VK_CONTROL, true),
+        ];
+        let sent = SendInput(&select_all, std::mem::size_of::<INPUT>() as i32);
+        if sent != select_all.len() as u32 {
+            return Err(CoreError::Win32 { code: 0, context: "SendInput: select-all failed" });
+        }
+        // Delete the selection.
+        let del = [key_event(VK_DELETE, false), key_event(VK_DELETE, true)];
+        let sent = SendInput(&del, std::mem::size_of::<INPUT>() as i32);
+        if sent != del.len() as u32 {
+            return Err(CoreError::Win32 { code: 0, context: "SendInput: delete failed" });
+        }
+    }
+    Ok(())
+}
+
 /// Press and release a virtual key (non-Unicode, for special keys like Enter, Tab, etc.)
 pub fn press_key(vk: VIRTUAL_KEY) -> Result<(), CoreError> {
     if is_stopped() {

@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.7.3] - 2026-07-02 — Actionability, Waits, Structured Errors
+
+### Added
+
+- **`ghost_wait for=element`**: wait for an element (by name/role) to appear or
+  disappear WITHOUT clicking anything first — the "wait until Save exists"
+  primitive agents constantly need. Event-bus-driven backoff.
+- **Structured errors**: every failing tool call now carries an `error_code`
+  and a `suggested_action` (e.g. element-not-found → "call ghost_see to confirm
+  focus, or retry with mode=deliberate"), classified from the error. Was a bare
+  opaque string with a single generic -32000 code.
+- **`ghost_query` provenance + correctness**: now reads each field's VALUE
+  (ValuePattern/get_text) instead of echoing the element's NAME (which returned
+  labels like "Email:" instead of the actual value), and reports a per-field
+  `sources` map (uia|vlm).
+- **Clear-before-type**: `type` now replaces existing field content instead of
+  appending, on the keyboard-fallback and coordinate paths too (UIA
+  ValuePattern already replaced). Gated behind an editable-role check so a
+  mis-grounded type can never fire Ctrl+A+Delete on a file list / non-text focus.
+- **Retry-until-verified for `type`**: an unverified `type` re-dispatches once
+  (safe — SetValue/clear-then-type are idempotent). Click/double/right-click are
+  deliberately NOT auto-retried: a slow-but-successful click must never be
+  double-fired (double-submit/charge/delete). Results carry an `attempts` count.
+- **Occlusion diagnostic**: coordinate-dispatch actions report `hit_element`
+  (what actually sits at the click point) so a mis-hit is diagnosable.
+
+### Tests
+
+- 338 passing (was 337). New coverage for error classification.
+
 ## [0.7.2] - 2026-07-01 — Multi-Monitor & Interaction Robustness
 
 ### Added / Fixed
