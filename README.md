@@ -218,22 +218,29 @@ Supporting crates: `ghost-cache` (UIA snapshot + delta), `ghost-intent` (FSM + J
 ## Benchmark — task success, not "did the call return ok"
 
 `bench/` holds a reproducible end-to-end benchmark: it drives the real
-`ghost-mcp` binary through 12 Windows desktop tasks and scores each by
+`ghost-mcp` binary through 14 Windows desktop tasks and scores each by
 **re-observing the actual result** (does the Calculator display really read 42?
 is the typed value really present?), never by trusting a tool call's return.
 
 Latest run (see [`bench/results/latest.md`](bench/results/latest.md)):
 
-> **12/12 tasks passed (100%)**, median 2.5 s per task (full wall-clock incl.
+> **14/14 tasks passed (100%)**, median ~2.7 s per task (full wall-clock incl.
 > app launch) — perception, click/keyboard action+verify, waits, window
-> management, text extraction, disambiguation, flow chaining, structured errors,
-> element screenshots, and value assertions.
+> management (list/minimize/restore), text extraction, disambiguation, flow
+> chaining, clipboard round-trip, structured errors, element screenshots, and
+> value assertions.
+
+And it proves it can *fail*: `--self-test` runs deliberately-wrong negative
+controls (assert the display reads 99 when it reads 42, etc.) and passes only if
+the harness scores every one as FAIL — so the green run above is a real signal,
+not a rubber stamp.
 
 Reproduce on any Windows 10/11 machine:
 
 ```bash
 cargo build --release -p ghost-mcp
-python bench/run_bench.py       # exit 0 iff every task passed
+python bench/run_bench.py             # exit 0 iff every task passed
+python bench/run_bench.py --self-test # exit 0 iff the harness caught every planted failure
 ```
 
 We deliberately publish only Ghost's own measured numbers — never invented

@@ -34,19 +34,32 @@ ship with Windows (Calculator, Notepad), so results are portable and comparable.
 | `index_disambiguation` | Selects the nth of several same-role elements, with a count |
 | `run_chaining` | A flow step's output feeds the next step (`${steps.N.path}`) |
 | `structured_error` | A missing element yields a typed code + suggested action |
-| `screenshot_element` | Screenshot cropped to a single element |
+| `window_minimize_restore` | Minimize then restore a window; verify state changes |
+| `clipboard_roundtrip` | Clipboard set then get round-trips |
+| `screenshot_element` | Screenshot cropped to a single element (real image bytes) |
 | `value_equals_assert` | Asserts an element's real value after typing (fresh tab) |
 
 ## Run it
 
 ```bash
 cargo build --release -p ghost-mcp
-python bench/run_bench.py
+python bench/run_bench.py              # the 14-task suite
+python bench/run_bench.py --self-test  # the negative controls (see below)
 ```
 
 Output: a live PASS/FAIL log, plus `bench/results/latest.json` (machine-readable)
 and `bench/results/latest.md` (a table). Exit code is `0` only if every task
-passed, so it can gate CI.
+passed, so it can gate CI. The harness saves the user's clipboard before the run
+and restores it after.
+
+## Proving the benchmark can fail
+
+A benchmark that only ever goes green proves nothing. `--self-test` runs a set of
+**negative controls** — tasks whose real-world outcome is deliberately wrong
+(assert the Calculator display reads 99 when it really reads 42; treat a missing
+element as "found"; validate junk bytes as an image). It passes only if the
+harness scores *every* one of them as FAIL. So a green suite run means the
+scoring genuinely distinguishes working from broken, not that it always says yes.
 
 The run takes over the mouse/keyboard for ~1-2 minutes (it is real OS-level
 automation). Don't type during the run. Latencies include full app launch, so

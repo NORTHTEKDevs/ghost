@@ -347,39 +347,114 @@ def task_value_equals_assert(g):
         _sleep(300)
 
 
+def task_clipboard_roundtrip(g):
+    """Clipboard: write a sentinel, read it back, assert it round-trips. The
+    harness saves and restores the user's real clipboard around the whole run
+    (see run_suite), so this is safe."""
+    sentinel = "ghost-bench-clip-7f3a"
+    g.call("ghost_clipboard", {"op": "set", "text": sentinel})
+    _sleep(150)
+    env, err, _ = g.call("ghost_clipboard", {"op": "get"})
+    d = env.get("data")
+    got = d.get("text", "") if isinstance(d, dict) else (d or "")
+    ok = (not err) and got == sentinel
+    return ok, f"got={got!r}", None
+
+
+def task_window_minimize_restore(g):
+    """Window state: minimize Calculator (verify it reports minimized in the
+    list), then focus it (verify it returns to normal)."""
+    _launch_calc(g)
+    try:
+        g.call("ghost_window", {"op": "state", "name": "Calculator", "state": "minimize"})
+        _sleep(400)
+        env, _, _ = g.call("ghost_window", {"op": "list"})
+        wins = (env.get("data") or {}).get("windows", [])
+        m1 = next((w for w in wins if "calculator" in w.get("name", "").lower()), None)
+        minimized = bool(m1) and m1.get("state") == "minimized"
+        # Restore via focus (auto-restores minimized windows).
+        g.call("ghost_window", {"op": "focus", "name": "Calculator"})
+        _sleep(400)
+        env, _, _ = g.call("ghost_window", {"op": "list"})
+        wins = (env.get("data") or {}).get("windows", [])
+        m2 = next((w for w in wins if "calculator" in w.get("name", "").lower()), None)
+        restored = bool(m2) and m2.get("state") == "normal"
+        ok = minimized and restored
+        return ok, f"minimized={minimized} restored={restored}", None
+    finally:
+        _close_calc(g)
+
+
 TASKS = [
     ("find_button", "Locate a named button and return real coordinates", task_find_button),
     ("click_compute", "Click 6 x 7 = and verify display reads 42", task_click_compute),
     ("keyboard_compute", "Type 9*9= and verify display reads 81", task_keyboard_compute),
     ("act_verified", "Action reports honest verified/focus_confirmed", task_act_verified_flag),
-    ("wait_for_element", "Wait for a button to appear after launch", task_wait_for_element),
-    ("window_list_state", "Window appears in list with a state field", task_window_list_state),
-    ("read_text", "Read UI element labels from the a11y tree", task_read_text),
+    ("wait_for_element", "Wait for a button to appear, then confirm it exists", task_wait_for_element),
+    ("window_list_state", "Window appears in list as normal after focus", task_window_list_state),
+    ("window_minimize_restore", "Minimize then restore a window, verify state", task_window_minimize_restore),
+    ("read_text", "Type a value and read it back from the a11y tree", task_read_text),
     ("index_disambiguation", "Select nth match with a matches count", task_index_disambiguation),
-    ("run_chaining", "ghost_run step output feeds the next step", task_run_chaining),
+    ("run_chaining", "Chained ghost_run computes 8+5 via ${steps.N} coords", task_run_chaining),
+    ("clipboard_roundtrip", "Clipboard set then get round-trips", task_clipboard_roundtrip),
     ("structured_error", "Missing element yields code + suggested_action", task_structured_error),
-    ("screenshot_element", "Crop a screenshot to one element", task_screenshot_element),
+    ("screenshot_element", "Crop a screenshot to one element (real image bytes)", task_screenshot_element),
     ("value_equals_assert", "Assert an element's real value after typing", task_value_equals_assert),
 ]
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--exe", default=DEFAULT_EXE)
-    ap.add_argument("--json", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "results", "latest.json"))
-    ap.add_argument("--md", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "results", "latest.md"))
-    ap.add_argument("--stamp", default="", help="ISO timestamp to record (host passes real clock)")
-    args = ap.parse_args()
+# --------------------------------------------------------------------------- #
+# Negative controls (self-test). Each is a task whose real-world outcome is    #
+# DELIBERATELY WRONG; the harness MUST score it FAIL. This proves the          #
+# benchmark actually detects failure and isn't a rubber stamp that always      #
+# passes. Run with --self-test: it exits 0 only if EVERY control was caught    #
+# (i.e. reported passed=False).                                                #
+# --------------------------------------------------------------------------- #
 
-    exe = os.path.abspath(args.exe)
-    if not os.path.exists(exe):
-        print(f"ERROR: ghost-mcp binary not found at {exe}\nBuild it: cargo build --release -p ghost-mcp", file=sys.stderr)
-        return 2
+def ntask_wrong_display(g):
+    """Compute 6x7=42 but assert the display reads 99 -- must be caught as FAIL."""
+    _launch_calc(g)
+    try:
+        for b in ["Six", "Multiply by", "Seven", "Equals"]:
+            g.call("ghost_act", {"action": "click", "name": b, "role": "button", "window": "Calculator"})
+            _sleep(150)
+        val, line = _calc_display_value(g)
+        ok = val == "99"   # wrong on purpose; real display is 42
+        return ok, f"display={line!r} (expected wrong '99')", None
+    finally:
+        _close_calc(g)
 
-    g = GhostClient(exe)
+
+def ntask_missing_element_found(g):
+    """Claim a nonexistent button was found -- must be caught as FAIL."""
+    _launch_calc(g)
+    try:
+        env, err, _ = g.call("ghost_find", {"name": "NoSuchButtonQZX", "role": "button",
+                                            "window": "Calculator", "mode": "instant_only"})
+        # A robust tool returns an error; treating that as "found" is the wrong
+        # expectation the control checks the harness rejects.
+        ok = (not err) and (env.get("data") or {}).get("has_rect") is True
+        return ok, f"err={err}", None
+    finally:
+        _close_calc(g)
+
+
+def ntask_bad_image(g):
+    """Treat a non-image string as a valid screenshot -- must be caught as FAIL."""
+    ok = _looks_like_image(base64.b64encode(b"not an image at all").decode())
+    return ok, "validated junk as image (should be False)", None
+
+
+SELF_TESTS = [
+    ("neg_wrong_display", "Wrong display value must be scored FAIL", ntask_wrong_display),
+    ("neg_missing_found", "A missing element must not score as found", ntask_missing_element_found),
+    ("neg_bad_image", "Non-image bytes must not validate as a screenshot", ntask_bad_image),
+]
+
+
+def _run_tasks(g, tasks):
     results = []
-    print(f"Running {len(TASKS)} tasks against {exe}\n")
-    for tid, desc, fn in TASKS:
+    for tid, desc, fn in tasks:
         t0 = time.perf_counter()
         try:
             passed, detail, source = fn(g)
@@ -391,7 +466,49 @@ def main():
             "detail": detail, "grounding_source": source, "latency_ms": round(dt, 1),
         })
         mark = "PASS" if passed else "FAIL"
-        print(f"  [{mark}] {tid:22} {dt:8.0f} ms  {detail}")
+        print(f"  [{mark}] {tid:24} {dt:8.0f} ms  {detail}")
+    return results
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--exe", default=DEFAULT_EXE)
+    ap.add_argument("--json", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "results", "latest.json"))
+    ap.add_argument("--md", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "results", "latest.md"))
+    ap.add_argument("--stamp", default="", help="ISO timestamp to record (host passes real clock)")
+    ap.add_argument("--self-test", action="store_true",
+                    help="Run negative controls: proves the harness scores broken outcomes as FAIL. "
+                         "Exits 0 only if EVERY control was correctly caught.")
+    args = ap.parse_args()
+
+    exe = os.path.abspath(args.exe)
+    if not os.path.exists(exe):
+        print(f"ERROR: ghost-mcp binary not found at {exe}\nBuild it: cargo build --release -p ghost-mcp", file=sys.stderr)
+        return 2
+
+    g = GhostClient(exe)
+
+    # --- Self-test mode: the negative controls MUST all be scored FAIL. --------
+    if args.self_test:
+        print(f"Self-test: {len(SELF_TESTS)} negative controls (each must be scored FAIL)\n")
+        results = _run_tasks(g, SELF_TESTS)
+        g.close()
+        caught = sum(1 for r in results if not r["passed"])
+        all_caught = caught == len(results)
+        print(f"\n{caught}/{len(results)} negative controls correctly caught "
+              f"(harness {'DETECTS failures — trustworthy' if all_caught else 'MISSED a failure — NOT trustworthy'})")
+        return 0 if all_caught else 1
+
+    # --- Normal mode: save/restore the user's clipboard around the whole run. --
+    saved_clip, _, _ = g.data("ghost_clipboard", {"op": "get"})
+    saved_clip = saved_clip.get("text", "") if isinstance(saved_clip, dict) else (saved_clip or "")
+
+    print(f"Running {len(TASKS)} tasks against {exe}\n")
+    results = _run_tasks(g, TASKS)
+
+    # Restore whatever clipboard the user had before we started.
+    if saved_clip:
+        g.call("ghost_clipboard", {"op": "set", "text": saved_clip})
     g.close()
 
     passed_n = sum(1 for r in results if r["passed"])

@@ -1,5 +1,20 @@
 # Changelog
 
+## [bench] - 2026-07-03 — Benchmark self-test + broader coverage
+
+(No binary change — `ghost-mcp` stays 0.7.7; this expands the `bench/` suite.)
+
+- **Negative-control self-test** (`python bench/run_bench.py --self-test`): runs
+  deliberately-wrong scenarios (assert the display reads 99 when it reads 42, a
+  missing element scored as found, junk bytes scored as an image) and passes only
+  if the harness scores every one as FAIL. Proves the benchmark actually detects
+  failure — the 14/14 green run is a real signal, not a rubber stamp.
+- **+2 tasks (12 → 14)**: window minimize/restore (verify the state really
+  changes), and a clipboard set/get round-trip.
+- **Clipboard safety**: the harness now saves the user's clipboard before the run
+  and restores it after, so running the benchmark never clobbers what you'd
+  copied.
+
 ## [0.7.7] - 2026-07-02 — Reproducible Benchmark + Symbol Keys
 
 ### Added
