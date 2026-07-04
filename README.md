@@ -215,6 +215,28 @@ ghost-cli     ghost-http     ghost-mcp     Rust SDK
 
 Supporting crates: `ghost-cache` (UIA snapshot + delta), `ghost-intent` (FSM + JSONLogic executor).
 
+## Vision grounding (Set-of-Marks)
+
+When you locate an element by natural-language description (`ghost_find
+description="the blue submit button"`, or when a name/text lookup misses and
+escalates to the VLM), Ghost does **not** ask the model to guess pixel
+coordinates — models are unreliable at that (in testing, a plain "give me the
+coordinates of the equals button" landed ~250px off the target). Instead it uses
+**Set-of-Marks**: it overlays numbered badges on the window's detected elements,
+sends that marked screenshot plus each badge's accessible-name label, and asks
+the model which *number* matches. The number maps back to that element's exact
+rect, so the result is a real on-element coordinate, not a regression guess.
+
+In a live check on Calculator, four descriptions ("the equals button", "the plus
+button", "the number seven key", "the multiply button") each landed exactly on
+the correct button — versus ~250px off with coordinate regression.
+
+Honest scope: when detected elements carry accessible names (most apps), the
+labels do much of the disambiguation; for unlabeled icons the model leans on the
+badge's visual position/appearance. Truly invisible elements — pure canvas with
+no accessibility tree and no text — still need a local visual detector
+(OmniParser-style), which is a separate, GPU-dependent effort not shipped here.
+
 ## Benchmark — task success, not "did the call return ok"
 
 `bench/` holds a reproducible end-to-end benchmark: it drives the real

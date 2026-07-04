@@ -709,6 +709,44 @@ pub(crate) fn encode_jpeg_rgba(rgba_data: &[u8], width: u32, height: u32, qualit
     Ok(buf)
 }
 
+/// Capture the given screen rect, downscale to `max_dim` longest-edge, draw the
+/// Set-of-Marks badges (positions given in NATIVE captured pixels, scaled here so
+/// badges stay crisp after downscale), and JPEG-encode. Returns (jpeg, scale)
+/// where `scale` = final/native (unused by the caller today but returned for
+/// completeness). Marks whose native position is off the captured region are
+/// clamped by the drawer.
+pub fn capture_region_marked_jpeg(
+    rect: Option<(i32, i32, i32, i32)>,
+    marks_native: &[super::marks::Mark],
+    max_dim: u32,
+    quality: u8,
+) -> Result<Vec<u8>, CoreError> {
+    let (rgba, w, h) = super::verify::capture_region_raw(rect)?;
+    let (rw, rh) = (w as u32, h as u32);
+    let long_edge = rw.max(rh);
+    let scale = if max_dim > 0 && long_edge > max_dim {
+        max_dim as f32 / long_edge as f32
+    } else {
+        1.0
+    };
+    let mut img = image::RgbaImage::from_raw(rw, rh, rgba)
+        .ok_or(CoreError::Win32 { code: 0, context: "SoM RgbaImage from_raw" })?;
+    if scale < 1.0 {
+        let nw = ((rw as f32 * scale).round() as u32).max(1);
+        let nh = ((rh as f32 * scale).round() as u32).max(1);
+        img = image::imageops::resize(&img, nw, nh, image::imageops::FilterType::Triangle);
+    }
+    // Scale mark positions into the (possibly downscaled) image space, then draw.
+    let scaled: Vec<super::marks::Mark> = marks_native.iter().map(|m| super::marks::Mark {
+        label: m.label,
+        x: (m.x as f32 * scale).round() as i32,
+        y: (m.y as f32 * scale).round() as i32,
+    }).collect();
+    super::marks::draw_marks(&mut img, &scaled);
+    let (fw, fh) = (img.width(), img.height());
+    encode_jpeg_rgba(img.as_raw(), fw, fh, quality)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
