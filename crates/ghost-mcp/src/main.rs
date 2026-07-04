@@ -434,7 +434,7 @@ async fn handle(
             Ok(json!({
                 "protocolVersion": "2024-11-05",
                 "capabilities": { "tools": {} },
-                "serverInfo": { "name": "ghost", "version": "0.8.0" }
+                "serverInfo": { "name": "ghost", "version": "0.9.0" }
             }))
         }
         "initialized" | "notifications/initialized" => Ok(json!({})),
@@ -529,13 +529,13 @@ async fn handle_tool(
             }))
         }
         "ghost_click" => {
-            let by = parse_by(&p)?;
+            let by = parse_by(p)?;
             let el = session.find(by).await.map_err(|e| e.to_string())?;
             el.click().map_err(|e| e.to_string())?;
             Ok(json!({ "ok": true }))
         }
         "ghost_type" => {
-            let by = parse_by(&p)?;
+            let by = parse_by(p)?;
             let text = p["text"].as_str().ok_or("missing param: text")?;
             let el = session.find(by).await.map_err(|e| e.to_string())?;
             el.type_text(text).map_err(|e| e.to_string())?;
@@ -563,12 +563,12 @@ async fn handle_tool(
                 let bytes = session.screenshot_region(None, Some(max_dim), Some(quality)).await.map_err(|e| e.to_string())?;
                 Ok(json!({ "jpeg_base64": base64_encode(&bytes), "size_bytes": bytes.len() }))
             } else {
-                let (rect_mode, max_dim, jpeg_quality) = screenshot_default_opts(&p);
+                let (rect_mode, max_dim, jpeg_quality) = screenshot_default_opts(p);
                 // Element/region scope: if name/role given, crop to that element's
                 // rect; if an explicit rect [l,t,r,b] is given, use it. Lets an
                 // agent screenshot a single component for VLM-in-the-loop checks.
                 let rect = if p.get("name").is_some() || p.get("role").is_some() {
-                    let by = parse_by(&p)?;
+                    let by = parse_by(p)?;
                     let el = session.find(by).await.map_err(|e| e.to_string())?;
                     Some(el.bounding_rect().ok_or("ghost_screenshot: element has no bounding rect")?)
                 } else if let Some(arr) = p.get("rect").and_then(|r| r.as_array()) {
@@ -675,12 +675,26 @@ async fn handle_tool(
             Ok(json!({ "ok": true }))
         }
         "ghost_drag" => {
-            let from_x = p["from_x"].as_i64().ok_or("missing param: from_x")? as i32;
-            let from_y = p["from_y"].as_i64().ok_or("missing param: from_y")? as i32;
-            let to_x = p["to_x"].as_i64().ok_or("missing param: to_x")? as i32;
-            let to_y = p["to_y"].as_i64().ok_or("missing param: to_y")? as i32;
+            // Endpoints may be given as raw coords OR by element (from_name/from_role,
+            // to_name/to_role), resolved to the element's center like ghost_click.
+            async fn endpoint(session: &GhostSession, p: &Value, name_k: &str, role_k: &str, x_k: &str, y_k: &str)
+                -> std::result::Result<(i32, i32), String> {
+                if p.get(name_k).is_some() || p.get(role_k).is_some() {
+                    let by = if let Some(n) = p[name_k].as_str() { ghost_session::By::name(n) }
+                             else { ghost_session::By::role(p[role_k].as_str().unwrap_or("")) };
+                    let el = session.find(by).await.map_err(|e| e.to_string())?;
+                    let (l, t, r, b) = el.bounding_rect().ok_or("drag endpoint element has no rect")?;
+                    Ok(((l + r) / 2, (t + b) / 2))
+                } else {
+                    let x = p[x_k].as_i64().ok_or_else(|| format!("missing param: {x_k} (or {name_k}/{role_k})"))? as i32;
+                    let y = p[y_k].as_i64().ok_or_else(|| format!("missing param: {y_k}"))? as i32;
+                    Ok((x, y))
+                }
+            }
+            let (from_x, from_y) = endpoint(session, p, "from_name", "from_role", "from_x", "from_y").await?;
+            let (to_x, to_y) = endpoint(session, p, "to_name", "to_role", "to_x", "to_y").await?;
             session.drag(from_x, from_y, to_x, to_y).await.map_err(|e| e.to_string())?;
-            Ok(json!({ "ok": true }))
+            Ok(json!({ "ok": true, "from": {"x": from_x, "y": from_y}, "to": {"x": to_x, "y": to_y} }))
         }
         "ghost_scroll" => {
             let x = p["x"].as_i64().ok_or("missing param: x")? as i32;
@@ -804,7 +818,7 @@ async fn handle_tool(
             }))
         }
         "ghost_get_text" => {
-            let by = parse_by(&p)?;
+            let by = parse_by(p)?;
             let text = session.get_text(by).await.map_err(|e| e.to_string())?;
             Ok(json!({ "text": text }))
         }
@@ -869,7 +883,7 @@ async fn handle_tool(
             Ok(json!({ "ok": true }))
         }
         "ghost_click_and_wait_for_text" => {
-            let by = parse_by(&p)?;
+            let by = parse_by(p)?;
             let text = p["text"].as_str().ok_or("missing param: text")?;
             let appears = p["appears"].as_bool().unwrap_or(true);
             let timeout_ms = p["timeout_ms"].as_u64().unwrap_or(5000);
@@ -907,7 +921,7 @@ async fn handle_tool(
             session.click_background(window, x, y).await.map_err(|e| e.to_string())?;
             Ok(json!({ "ok": true }))
         }
-        "ghost_cache_stats" => {
+        "ghost_cache_stats" | "ghost_stats" => {
             let uia_stats = session.cache_stats();
             let loc_stats = session.locator_cache_stats();
             let grounding = session.grounding_stats();
@@ -915,6 +929,14 @@ async fn handle_tool(
                 "uia_mirror": serde_json::to_value(uia_stats).map_err(|e| e.to_string())?,
                 "locator": serde_json::to_value(loc_stats).map_err(|e| e.to_string())?,
                 "grounding": serde_json::to_value(grounding).map_err(|e| e.to_string())?,
+            }))
+        }
+        "ghost_render_marks" => {
+            let (jpeg, marks) = session.render_marks().await.map_err(|e| e.to_string())?;
+            Ok(json!({
+                "marked_jpeg_base64": jpeg.map(|j| base64_encode(&j)),
+                "count": marks.len(),
+                "marks": marks,
             }))
         }
         "ghost_cache_invalidate" => {
@@ -958,9 +980,17 @@ async fn handle_tool(
         "ghost_wait_for_element" => {
             let appears = p["appears"].as_bool().unwrap_or(true);
             let timeout_ms = p["timeout_ms"].as_u64().unwrap_or(5000);
-            let by = parse_by(&p)?;
+            let by = parse_by(p)?;
             session.wait_for_element(by, appears, timeout_ms).await.map_err(|e| e.to_string())?;
             Ok(json!({ "ok": true, "appeared": appears }))
+        }
+        "ghost_wait_for_value" => {
+            let pred = p["predicate"].as_str().unwrap_or("equals");
+            let expected = p["text"].as_str().unwrap_or("");
+            let timeout_ms = p["timeout_ms"].as_u64().unwrap_or(5000);
+            let by = parse_by(p)?;
+            let value = session.wait_for_value(by, pred, expected, timeout_ms).await.map_err(|e| e.to_string())?;
+            Ok(json!({ "ok": true, "value": value }))
         }
         "ghost_wait_for_event" => {
             let since_seq = p["since_seq"].as_u64().unwrap_or(0);
@@ -1202,6 +1232,7 @@ async fn handle_ghost_see(
         "full" => handle_tool(session, "ghost_describe_screen", p).await,
         "delta" => handle_tool(session, "ghost_describe_screen_delta", p).await,
         "text" => handle_tool(session, "ghost_read_text", p).await,
+        "marks" => handle_tool(session, "ghost_render_marks", p).await,
         _ => handle_tool(session, "ghost_describe_screen_fast", p).await,
     }
 }
@@ -1281,6 +1312,7 @@ async fn handle_ghost_wait(
         "idle" => handle_tool(session, "ghost_wait_for_idle", p).await,
         "text" => handle_tool(session, "ghost_click_and_wait_for_text", p).await,
         "element" => handle_tool(session, "ghost_wait_for_element", p).await,
+        "value" => handle_tool(session, "ghost_wait_for_value", p).await,
         "event" => handle_tool(session, "ghost_wait_for_event", p).await,
         "cond" => handle_tool(session, "ghost_wait_until", p).await,
         "navigate" => handle_tool(session, "ghost_navigate_and_wait", p).await,
@@ -1360,7 +1392,7 @@ async fn handle_ghost_assert(
             // to `text`. Closes the fill-then-verify loop (Playwright's fill+assert).
             let expected = p["text"].as_str()
                 .ok_or("ghost_assert: value-equals/value-contains requires 'text'")?;
-            let by = parse_by(&p)?;
+            let by = parse_by(p)?;
             let el = session.find(by).await.map_err(|e| format!("assert failed: element not found — {e}"))?;
             let actual = el.get_text();
             let passed = if predicate == "value-equals" {
@@ -1704,9 +1736,9 @@ fn lean_tools_schema() -> Value {
     json!([
         // --- Perception ---
         { "name": "ghost_see",
-          "description": "Describe the active screen. mode=fast (default, foreground elements, 5-50x faster), mode=full (full walk, scope with window=; unknown window is an ERROR listing open windows), mode=delta (changed elements since since_seq), mode=text (READ the visible text of a window/page — cheapest way to read content, no screenshot needed). Elements: off-screen/zero-area filtered, capped at 150 (limit). Text: capped at 20000 chars (limit).",
+          "description": "Describe the active screen. mode=fast (default, foreground elements, 5-50x faster), mode=full (full walk, scope with window=; unknown window is an ERROR listing open windows), mode=delta (changed elements since since_seq), mode=text (READ the visible text of a window/page — cheapest way to read content, no screenshot needed), mode=marks (DEBUG: returns the Set-of-Marks annotated screenshot the VLM sees when grounding by description — use to diagnose a wrong pick). Elements: off-screen/zero-area filtered, capped at 150 (limit). Text: capped at 20000 chars (limit).",
           "inputSchema": { "type": "object", "properties": {
-              "mode": { "type": "string", "enum": ["fast", "full", "delta", "text"], "description": "fast=foreground elements (default), full=full tree, delta=changed only, text=readable text content" },
+              "mode": { "type": "string", "enum": ["fast", "full", "delta", "text", "marks"], "description": "fast=foreground elements (default), full=full tree, delta=changed only, text=readable text content, marks=annotated SoM debug image" },
               "window": { "type": "string", "description": "Partial title to scope the walk (mode=full|text)" },
               "since_seq": { "type": "integer", "description": "Prior snapshot seq for delta mode" },
               "limit": { "type": "integer", "description": "Max elements (default 150) or chars for mode=text (default 20000); 0 = unlimited elements" }
@@ -1749,24 +1781,29 @@ fn lean_tools_schema() -> Value {
               "amount": { "type": "integer", "default": 3 }
           }}},
         { "name": "ghost_drag",
-          "description": "Click-hold at (from_x,from_y), move to (to_x,to_y), release.",
-          "inputSchema": { "type": "object", "required": ["from_x","from_y","to_x","to_y"], "properties": {
+          "description": "Click-hold at a start point, move to an end point, release. Each endpoint may be raw coords (from_x/from_y, to_x/to_y) OR an element (from_name/from_role, to_name/to_role) resolved to its center — e.g. drag a list row onto another, or a slider handle.",
+          "inputSchema": { "type": "object", "properties": {
               "from_x": { "type": "integer" }, "from_y": { "type": "integer" },
-              "to_x": { "type": "integer" }, "to_y": { "type": "integer" }
+              "to_x": { "type": "integer" }, "to_y": { "type": "integer" },
+              "from_name": { "type": "string", "description": "Start element name (instead of from_x/y)" },
+              "from_role": { "type": "string", "description": "Start element role" },
+              "to_name": { "type": "string", "description": "End element name (instead of to_x/y)" },
+              "to_role": { "type": "string", "description": "End element role" }
           }}},
         // --- Waiting ---
         { "name": "ghost_wait",
-          "description": "Unified wait. for=ms (default): sleep N ms. for=idle: wait for screen stable. for=element: wait for an element (name/role) to appear/disappear WITHOUT clicking — the 'wait until Save exists' primitive. for=text: click a target then wait for text. for=event: next foreground change. for=cond: JSONLogic poll. for=navigate: focus window + navigate URL + page idle.",
+          "description": "Unified wait. for=ms (default): sleep N ms. for=idle: wait for screen stable. for=element: wait for an element (name/role) to appear/disappear WITHOUT clicking. for=value: wait until an element's VALUE equals/contains/changes (forms, async fields, 'wait until the total updates'). for=text: click a target then wait for text. for=event: next foreground change. for=cond: JSONLogic poll. for=navigate: focus window + navigate URL + page idle.",
           "inputSchema": { "type": "object", "properties": {
-              "for": { "type": "string", "enum": ["ms","idle","element","text","event","cond","navigate"],
+              "for": { "type": "string", "enum": ["ms","idle","element","value","text","event","cond","navigate"],
                        "description": "What to wait for (default ms)" },
               "ms": { "type": "integer", "description": "Milliseconds (for=ms)" },
               "window": { "type": "string", "description": "Window scope (for=idle|navigate)" },
               "stable_frames": { "type": "integer", "default": 3, "description": "for=idle" },
               "timeout_ms": { "type": "integer", "default": 5000 },
-              "name": { "type": "string", "description": "Element name to wait for (for=element)" },
-              "role": { "type": "string", "description": "Element role to wait for (for=element)" },
-              "text": { "type": "string", "description": "Text to wait for (for=text)" },
+              "name": { "type": "string", "description": "Element name (for=element|value)" },
+              "role": { "type": "string", "description": "Element role (for=element|value)" },
+              "predicate": { "type": "string", "enum": ["equals","contains","changes"], "description": "for=value: how to compare the element's value to text (default equals)" },
+              "text": { "type": "string", "description": "Text to wait for (for=text) or expected value (for=value)" },
               "appears": { "type": "boolean", "default": true, "description": "for=element|text: true=wait to appear, false=wait to disappear" },
               "since_seq": { "type": "integer", "description": "for=event" },
               "condition": { "type": "object", "description": "JSONLogic expression (for=cond)" },
@@ -1828,6 +1865,9 @@ fn lean_tools_schema() -> Value {
               "text": { "type": "string", "description": "Text to write (op=set)" }
           }}},
         // --- Utility ---
+        { "name": "ghost_stats",
+          "description": "Grounding + cache telemetry for debugging flow speed/reliability: which tier is winning (cache/UIA/OCR/VLM), VLM escalation rate, cache hit/miss counts, UIA-mirror stats. Call when a flow is slow or a find is unreliable.",
+          "inputSchema": { "type": "object", "properties": {} }},
         { "name": "ghost_reset",
           "description": "Resume automation after ghost_stop. Clears the stop flag.",
           "inputSchema": { "type": "object", "properties": {} }},
@@ -2198,7 +2238,7 @@ fn parse_by(p: &Value) -> std::result::Result<ghost_session::By, String> {
 
 fn base64_encode(data: &[u8]) -> String {
     const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
         let b0 = chunk[0] as usize;
         let b1 = if chunk.len() > 1 { chunk[1] as usize } else { 0 };
@@ -2374,9 +2414,9 @@ mod tests {
     fn tools_schema_has_lean_count() {
         let tools = tools_schema();
         let list = tools.as_array().unwrap();
-        // 16 lean verbs: see, find, act, key, scroll, drag, wait, query, assert,
-        //                run, screenshot, window, clipboard, reset, stop, http_get, http_post
-        assert_eq!(list.len(), 17, "expected 17 lean verbs (see+find+act+key+scroll+drag+wait+query+assert+run+screenshot+window+clipboard+reset+stop+http_get+http_post)");
+        // 18 lean verbs: see, find, act, key, scroll, drag, wait, query, assert,
+        //   run, screenshot, window, clipboard, stats, reset, stop, http_get, http_post
+        assert_eq!(list.len(), 18, "expected 18 lean verbs (see+find+act+key+scroll+drag+wait+query+assert+run+screenshot+window+clipboard+stats+reset+stop+http_get+http_post)");
     }
 
     #[test]
@@ -2615,7 +2655,7 @@ mod tests {
         let resp = json!({
             "protocolVersion": "2024-11-05",
             "capabilities": { "tools": {} },
-            "serverInfo": { "name": "ghost", "version": "0.8.0" }
+            "serverInfo": { "name": "ghost", "version": "0.9.0" }
         });
         assert_eq!(resp["protocolVersion"], "2024-11-05");
         assert!(resp["capabilities"]["tools"].is_object());

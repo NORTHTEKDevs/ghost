@@ -265,7 +265,7 @@ fn try_parse_json(text: &str) -> Option<ParsedVlmResponse> {
     // We treat them as Norm if both fit in [0, 1000].
     match (raw.x, raw.y) {
         (Some(x), Some(y)) => {
-            let space = if x >= 0 && x <= 1000 && y >= 0 && y <= 1000 {
+            let space = if (0..=1000).contains(&x) && (0..=1000).contains(&y) {
                 CoordSpace::Norm
             } else {
                 CoordSpace::Pixels

@@ -305,14 +305,11 @@ impl GhostSession {
                               else if elapsed_ms < 3000 { 75 }
                               else { 150 };
                 attempt += 1;
-                match bus.wait_for_change(last_seq, backoff).await {
-                    Ok(s) => {
-                        last_seq = s;
-                        // Debounce: content-change hooks (VALUECHANGE/REORDER/SHOW)
-                        // can burst; coalesce before paying for another UIA walk.
-                        tokio::time::sleep(Duration::from_millis(10)).await;
-                    }
-                    Err(_) => {}
+                if let Ok(s) = bus.wait_for_change(last_seq, backoff).await {
+                    last_seq = s;
+                    // Debounce: content-change hooks (VALUECHANGE/REORDER/SHOW)
+                    // can burst; coalesce before paying for another UIA walk.
+                    tokio::time::sleep(Duration::from_millis(10)).await;
                 }
             }
         })
@@ -346,15 +343,18 @@ impl GhostSession {
     /// element's exact rect center. Far more reliable than asking the model to
     /// regress raw pixel coordinates. Returns None when there are no candidate
     /// elements to mark (caller then falls back to coordinate regression).
-    async fn locate_by_description_som(&self, description: &str) -> Result<Option<(i32, i32)>> {
+    /// Collect Set-of-Marks candidates for the foreground window: the marked JPEG,
+    /// the candidate absolute rects, and their labels. Shared by SoM grounding and
+    /// the debug tool. Returns None when there are no markable elements.
+    async fn build_marks(&self)
+        -> Result<Option<(Vec<u8>, Vec<(i32, i32, i32, i32)>, Vec<String>)>> {
         let rect = self.foreground_window_rect()
             .ok_or_else(|| GhostError::Vision("no foreground window for vision crop".into()))?;
-        // Candidate elements (absolute rects) from the foreground UIA subtree.
         let els = self.tree.describe_screen_fast().map_err(GhostError::Core)?;
         // Keep on-window, non-degenerate elements; cap so badges stay legible and
         // the prompt stays small.
         const MAX_MARKS: usize = 50;
-        let mut candidates: Vec<(i32, i32, i32, i32)> = Vec::new(); // absolute l,t,r,b
+        let mut candidates: Vec<(i32, i32, i32, i32)> = Vec::new();
         let mut labels: Vec<String> = Vec::new();
         for e in &els {
             if e.right <= e.left || e.bottom <= e.top { continue; }
@@ -366,7 +366,6 @@ impl GhostSession {
         if candidates.is_empty() {
             return Ok(None);
         }
-        // Marks in native captured pixels (relative to the window origin).
         let marks: Vec<ghost_core::capture::Mark> = candidates.iter().enumerate().map(|(i, c)| {
             ghost_core::capture::Mark { label: (i + 1) as u32, x: c.0 - rect.0, y: c.1 - rect.1 }
         }).collect();
@@ -376,7 +375,31 @@ impl GhostSession {
         .await
         .map_err(|e| GhostError::Core(ghost_core::error::CoreError::WorkerPanic(e.to_string())))?
         .map_err(GhostError::Core)?;
+        Ok(Some((jpeg, candidates, labels)))
+    }
 
+    /// Debug: the Set-of-Marks annotated screenshot (raw JPEG bytes) plus the
+    /// numbered label list — exactly what the VLM sees when grounding by
+    /// description. The fastest way to diagnose "why did grounding pick wrong".
+    /// Returns (Some(jpeg) or None if nothing to mark, marks_json).
+    pub async fn render_marks(&self) -> Result<(Option<Vec<u8>>, Vec<serde_json::Value>)> {
+        match self.build_marks().await? {
+            Some((jpeg, candidates, labels)) => {
+                let marks: Vec<serde_json::Value> = labels.iter().zip(candidates.iter()).enumerate()
+                    .map(|(i, (name, c))| serde_json::json!({
+                        "number": i + 1, "name": name,
+                        "center": {"x": (c.0 + c.2) / 2, "y": (c.1 + c.3) / 2}
+                    })).collect();
+                Ok((Some(jpeg), marks))
+            }
+            None => Ok((None, Vec::new())),
+        }
+    }
+
+    async fn locate_by_description_som(&self, description: &str) -> Result<Option<(i32, i32)>> {
+        let Some((jpeg, candidates, labels)) = self.build_marks().await? else {
+            return Ok(None);
+        };
         match crate::vision::vision_pick_mark(description, &jpeg, &labels).await? {
             Some(idx) => {
                 let (l, t, r, b) = candidates[idx - 1];
@@ -642,10 +665,7 @@ impl GhostSession {
             let backoff = if elapsed_ms < 1000 { 100 }
                           else if elapsed_ms < 3000 { 200 }
                           else { 400 };
-            match bus.wait_for_change(last_seq, backoff).await {
-                Ok(s) => { last_seq = s; }
-                Err(_) => {}
-            }
+            if let Ok(s) = bus.wait_for_change(last_seq, backoff).await { last_seq = s; }
         }
     }
 
@@ -746,12 +766,12 @@ impl GhostSession {
         if is_stopped() { return Err(GhostError::Stopped); }
         let mut mod_vks = Vec::new();
         for m in modifiers {
-            let vk = name_to_vk(m).ok_or_else(|| GhostError::Core(
+            let vk = name_to_vk(m).ok_or(GhostError::Core(
                 ghost_core::error::CoreError::Win32 { code: 0, context: "unknown modifier name" }
             ))?;
             mod_vks.push(vk);
         }
-        let key_vk = name_to_vk(key).ok_or_else(|| GhostError::Core(
+        let key_vk = name_to_vk(key).ok_or(GhostError::Core(
             ghost_core::error::CoreError::Win32 { code: 0, context: "unknown key name" }
         ))?;
         // Release held modifiers on EVERY exit path so a SendInput failure can
@@ -783,7 +803,7 @@ impl GhostSession {
     /// Hold a key down without releasing.
     pub async fn key_down(&self, key: &str) -> Result<()> {
         if is_stopped() { return Err(GhostError::Stopped); }
-        let vk = name_to_vk(key).ok_or_else(|| GhostError::Core(
+        let vk = name_to_vk(key).ok_or(GhostError::Core(
             ghost_core::error::CoreError::Win32 { code: 0, context: "unknown key name" }
         ))?;
         core_key_down(vk).map_err(GhostError::Core)
@@ -792,7 +812,7 @@ impl GhostSession {
     /// Release a key held by key_down.
     pub async fn key_up(&self, key: &str) -> Result<()> {
         if is_stopped() { return Err(GhostError::Stopped); }
-        let vk = name_to_vk(key).ok_or_else(|| GhostError::Core(
+        let vk = name_to_vk(key).ok_or(GhostError::Core(
             ghost_core::error::CoreError::Win32 { code: 0, context: "unknown key name" }
         ))?;
         core_key_up(vk).map_err(GhostError::Core)
@@ -882,7 +902,7 @@ impl GhostSession {
 
     /// Change window state: "maximize", "minimize", "restore", or "close".
     pub async fn window_state(&self, name: &str, state: &str) -> Result<()> {
-        let ws = WindowState::from_str(state).ok_or_else(|| GhostError::Core(
+        let ws = WindowState::from_str(state).ok_or(GhostError::Core(
             ghost_core::error::CoreError::Win32 { code: 0, context: "invalid window state" }
         ))?;
         set_window_state(name, ws).map_err(GhostError::Core)
@@ -1001,10 +1021,7 @@ impl GhostSession {
             let backoff = if elapsed_ms < 500 { 25 }
                           else if elapsed_ms < 2000 { 75 }
                           else { 150 };
-            match bus.wait_for_change(last_seq, backoff).await {
-                Ok(s) => { last_seq = s; }
-                Err(_) => {}
-            }
+            if let Ok(s) = bus.wait_for_change(last_seq, backoff).await { last_seq = s; }
         }
     }
 
@@ -1032,6 +1049,48 @@ impl GhostSession {
             if start.elapsed() >= deadline {
                 return Err(GhostError::Timeout {
                     action: format!("wait_for_element:{by:?}:appears={appears}"),
+                    ms: timeout_ms,
+                });
+            }
+            let elapsed_ms = start.elapsed().as_millis() as u64;
+            let backoff = if elapsed_ms < 500 { 25 } else if elapsed_ms < 2000 { 75 } else { 150 };
+            if let Ok(s) = bus.wait_for_change(last_seq, backoff).await {
+                last_seq = s;
+            }
+        }
+    }
+
+    /// Wait until an element's VALUE (ValuePattern/get_text) satisfies a predicate.
+    /// `pred`: "equals" | "contains" | "changes" (changes = differs from the initial
+    /// value observed at call start). Returns the final value on success. Polls with
+    /// the same event-bus backoff as wait_for_element. The "wait until this field
+    /// fills / the total updates / autofill lands" primitive.
+    pub async fn wait_for_value(&self, by: By, pred: &str, expected: &str, timeout_ms: u64) -> Result<String> {
+        let start = std::time::Instant::now();
+        let deadline = Duration::from_millis(timeout_ms);
+        let bus = EventBus::global();
+        let mut last_seq = bus.seq();
+        // Baseline for "changes".
+        let initial = self.find(by.clone()).await.ok().map(|e| e.get_text()).unwrap_or_default();
+        loop {
+            if is_stopped() { return Err(GhostError::Stopped); }
+            let current = match self.find(by.clone()).await {
+                Ok(el) => el.get_text(),
+                Err(_) => String::new(),
+            };
+            let satisfied = match pred {
+                "equals" => current == expected,
+                "contains" => current.contains(expected),
+                "changes" => current != initial,
+                other => return Err(GhostError::Vision(format!(
+                    "wait_for_value: unknown predicate '{other}'; use equals|contains|changes"))),
+            };
+            if satisfied {
+                return Ok(current);
+            }
+            if start.elapsed() >= deadline {
+                return Err(GhostError::Timeout {
+                    action: format!("wait_for_value:{by:?}:{pred}={expected:?}"),
                     ms: timeout_ms,
                 });
             }
@@ -1464,10 +1523,7 @@ impl<'a> OpsDispatcher for SessionOpsDispatcher<'a> {
                     let backoff = if elapsed_ms < 500 { 25 }
                                   else if elapsed_ms < 2000 { 75 }
                                   else { 150 };
-                    match bus.wait_for_change(last_seq, backoff).await {
-                        Ok(s) => { last_seq = s; }
-                        Err(_) => {}
-                    }
+                    if let Ok(s) = bus.wait_for_change(last_seq, backoff).await { last_seq = s; }
                 }
             }
             Op::WaitUntil { condition, timeout_ms } => {

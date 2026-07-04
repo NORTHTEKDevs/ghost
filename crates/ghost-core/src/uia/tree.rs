@@ -345,8 +345,8 @@ impl UiaTree {
         }
         *budget -= 1;
         let el = UiaElement(element.clone());
-        let name_ok = name.map_or(true, |n| el.name().to_lowercase().contains(n));
-        let role_ok = role.map_or(true, |r| {
+        let name_ok = name.is_none_or(|n| el.name().to_lowercase().contains(n));
+        let role_ok = role.is_none_or(|r| {
             let er = role_id_to_name(el.control_type());
             er == r || role_alias_matches(r, er)
         });

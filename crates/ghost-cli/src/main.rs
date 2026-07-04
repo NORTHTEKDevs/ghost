@@ -493,10 +493,8 @@ fn which_ghost_mcp() -> Result<PathBuf, String> {
         .split(if cfg!(target_os = "windows") { ';' } else { ':' })
         .map(|dir| PathBuf::from(dir).join(name))
         .find(|p| p.exists())
-        .ok_or_else(|| format!(
-            "ghost-mcp not found adjacent to this binary or in PATH. \
-             Build it with: cargo build -p ghost-mcp --release"
-        ))
+        .ok_or_else(|| "ghost-mcp not found adjacent to this binary or in PATH. \
+             Build it with: cargo build -p ghost-mcp --release".to_string())
 }
 
 fn parse_by(name: Option<String>, role: Option<String>) -> Result<By, String> {
@@ -530,7 +528,7 @@ fn parse_locate_mode(mode: &str) -> LocateMode {
 
 fn base64_encode(data: &[u8]) -> String {
     const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
         let b0 = chunk[0] as usize;
         let b1 = if chunk.len() > 1 { chunk[1] as usize } else { 0 };
