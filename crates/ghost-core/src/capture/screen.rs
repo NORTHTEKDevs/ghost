@@ -525,7 +525,7 @@ fn capture_rgba(ctx: &mut CaptureContext) -> Result<(Vec<u8>, usize, usize), Cor
     // black frames were transient (sleep/resume, driver reset).
     if DXGI_ALWAYS_BLACK.load(Ordering::Relaxed) {
         let n = GDI_CAPTURES_SINCE_BLACK.fetch_add(1, Ordering::Relaxed) + 1;
-        if n % DXGI_REPROBE_INTERVAL != 0 {
+        if !n.is_multiple_of(DXGI_REPROBE_INTERVAL) {
             return capture_screen_gdi();
         }
         tracing::debug!(gdi_captures = n, "re-probing DXGI after sticky black-frame flag");

@@ -5,9 +5,9 @@
 //! rect via `IUIAutomation::ElementFromPoint(center)` and only uses the
 //! hit if the element's name/role still match.
 //!
-//! This is intentionally kept simple (HashMap, no SQLite) to keep the
-//! hot-path latency well below 1ms. The SQLite LocatorStore is for
-//! cross-session persistence; this cache is per-session ephemeral.
+//! This is intentionally kept simple (HashMap) to keep the hot-path latency
+//! well below 1ms. It is per-session ephemeral and bounded (TTL + a hard entry
+//! cap) so a long session can't leak memory.
 //!
 //! Thread-safety: wrapped in a Mutex inside GhostSession; all accesses
 //! happen on the COM STA thread (the MCP tokio main thread).
@@ -57,7 +57,13 @@ impl LocatorHitResult {
 pub struct LocatorCacheStats {
     pub hits: u64,
     pub misses: u64,
+    /// Stale-hit invalidations (ElementFromPoint name/role mismatch). Distinct
+    /// from `evictions` so a validation-flakiness signal isn't confused with
+    /// cache-pressure eviction.
     pub invalidations: u64,
+    /// Entries dropped because the cache hit its size cap (memory-pressure, not
+    /// a correctness signal).
+    pub evictions: u64,
     pub upserts: u64,
 }
 
@@ -66,6 +72,13 @@ pub struct LocatorCacheStats {
 /// element after a re-render; a TTL bounds how long that window stays open
 /// while still serving the hot within-flow case (repeat actions in seconds).
 const ENTRY_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Hard cap on live entries. The TTL only evicts an entry when it is looked up
+/// again; an entry never re-queried would otherwise live forever, so a long
+/// session against a dynamic UI (an infinite-scroll list, a SPA that renders
+/// thousands of distinct elements) would grow the map without bound. On reaching
+/// the cap we sweep expired entries first, then evict the oldest if still full.
+const MAX_ENTRIES: usize = 4096;
 
 struct Inner {
     map: HashMap<LocatorKey, ((i32, i32, i32, i32), std::time::Instant)>,
@@ -86,9 +99,21 @@ impl LocatorCache {
         }
     }
 
-    /// Store (or update) a `(role, name) -> rect` mapping.
+    /// Store (or update) a `(role, name) -> rect` mapping. Bounds the map at
+    /// MAX_ENTRIES so a long-running session can't leak memory (see MAX_ENTRIES).
     pub fn upsert(&self, key: LocatorKey, rect: (i32, i32, i32, i32)) {
         let mut g = self.inner.lock().unwrap();
+        if g.map.len() >= MAX_ENTRIES && !g.map.contains_key(&key) {
+            // Sweep expired entries first (cheap, keeps the hot set).
+            g.map.retain(|_, (_, at)| at.elapsed() <= ENTRY_TTL);
+            // If still at/over cap, evict the single oldest entry.
+            if g.map.len() >= MAX_ENTRIES {
+                if let Some(oldest) = g.map.iter().min_by_key(|(_, (_, at))| *at).map(|(k, _)| k.clone()) {
+                    g.map.remove(&oldest);
+                    g.stats.evictions += 1;
+                }
+            }
+        }
         g.map.insert(key, (rect, std::time::Instant::now()));
         g.stats.upserts += 1;
     }
@@ -145,6 +170,17 @@ mod tests {
 
     fn key() -> LocatorKey {
         LocatorKey::new("button", "OK")
+    }
+
+    #[test]
+    fn upsert_is_bounded_at_max_entries() {
+        let c = LocatorCache::new();
+        // Insert well past the cap with distinct keys.
+        for i in 0..(MAX_ENTRIES + 500) {
+            c.upsert(LocatorKey::new("button", format!("b{i}")), (0, 0, 10, 10));
+        }
+        let len = c.inner.lock().unwrap().map.len();
+        assert!(len <= MAX_ENTRIES, "map must stay bounded, got {len}");
     }
 
     #[test]

@@ -77,6 +77,32 @@ pub struct OcrWord {
 ///
 /// `region` = (left, top, right, bottom) in pixels; `None` = full screen.
 pub fn capture_and_ocr(region: Option<(i32, i32, i32, i32)>) -> Result<Vec<OcrWord>, CoreError> {
+    use crate::capture::screen::{rect_on_primary, virtual_screen_bounds, capture_virtual_rect_gdi};
+
+    // Off-primary region: capture it directly from the virtual desktop (handles
+    // negative-origin secondary monitors) instead of failing. Reuses the same
+    // GDI path ghost_screenshot already uses for multi-monitor.
+    if let Some(rect) = region {
+        if !rect_on_primary(rect) {
+            let (rgba, w, h) = capture_virtual_rect_gdi(rect.0, rect.1, rect.2, rect.3)?;
+            let (vl, vt, _, _) = virtual_screen_bounds();
+            let origin = (rect.0.max(vl), rect.1.max(vt)); // clamped top-left = word offset
+            let mut bgra = rgba;
+            rgba_to_bgra_in_place(&mut bgra);
+            let bitmap = create_bitmap_from_bgra(&bgra, w as u32, h as u32)?;
+            let words = run_ocr(&bitmap)?;
+            return Ok(words.into_iter().map(|word| OcrWord {
+                text: word.text,
+                rect: BoundingRect {
+                    left: word.rect.left + origin.0,
+                    top: word.rect.top + origin.1,
+                    right: word.rect.right + origin.0,
+                    bottom: word.rect.bottom + origin.1,
+                },
+            }).collect());
+        }
+    }
+
     let (rgba, full_w, full_h) = capture_screen_full_rgba()?;
     let (origin, w, h, mut bgra) = match region {
         Some((l, t, r, b)) => {
@@ -85,10 +111,7 @@ pub fn capture_and_ocr(region: Option<(i32, i32, i32, i32)>) -> Result<Vec<OcrWo
             let r = (r as usize).min(full_w);
             let b = (b as usize).min(full_h);
             if r <= l || b <= t {
-                // MEDIUM-8: descriptive error — window is likely on a secondary monitor
-                // with negative left/top coordinates which clamp to 0, producing r==l.
-                // Full virtual-desktop support (SM_XVIRTUALSCREEN) is tracked as debt.
-                return Err(CoreError::Win32 { code: 0, context: "invalid region rect: window may be on a non-primary monitor with negative coordinates (virtual-desktop capture not yet supported)" });
+                return Err(CoreError::Win32 { code: 0, context: "invalid region rect after clamping to primary monitor" });
             }
             let cw = r - l;
             let ch = b - t;

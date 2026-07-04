@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.9.0] - 2026-07-04 — Optimization + Capability Batch
+
+Found via a three-pass codebase audit (performance, capability, robustness).
+
+### Fixed
+
+- **Memory leak in the locator cache.** The in-memory `LocatorCache` had no size
+  cap and its `clear()` was never called, so a long session against a dynamic UI
+  (infinite-scroll list, SPA) grew the map without bound. Now capped at 4096
+  entries (sweep expired, then evict oldest). Bounded-growth test added.
+- **OCR now works on secondary monitors.** `ghost_find text=`/OCR previously
+  hard-errored "virtual-desktop capture not yet supported" for any window on a
+  non-primary monitor; it now routes through the same multi-monitor GDI capture
+  `ghost_screenshot` already used.
+
+### Added
+
+- **`ghost_stats`** — grounding + cache telemetry (which tier wins, VLM
+  escalation rate, cache hit/miss) is now a discoverable lean tool, not just a
+  hidden alias. Call it to debug why a flow is slow or a find is flaky.
+- **`ghost_wait for=value`** — wait until an element's value equals/contains/
+  changes (forms, async fields, "wait until the total updates") — a common
+  flow-blocker with no primitive before.
+- **`ghost_drag` by element** — endpoints can be `from_name`/`to_name` (etc.),
+  resolved to element centers like click, not just raw coords.
+- **`ghost_see mode=marks`** — returns the Set-of-Marks annotated screenshot the
+  VLM sees when grounding by description, plus the numbered label list. The
+  fastest way to diagnose "why did vision grounding pick the wrong element".
+
+### Removed / cleaned
+
+- Deleted the unused SQLite `LocatorStore` (279 LOC, zero call sites across 3
+  versions) and dropped its `rusqlite` + `tempfile` dependencies — smaller,
+  faster builds. Applied `cargo clippy --fix` (mechanical warnings).
+
 ## [0.8.0] - 2026-07-03 — Set-of-Marks Vision Grounding
 
 ### Added

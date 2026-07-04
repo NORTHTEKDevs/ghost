@@ -45,7 +45,6 @@ windows = { version = "0.58", features = [
     "Media_Ocr",
     "Storage_Streams",
 ] }
-rusqlite = { version = "0.32", features = ["bundled"] }
 sonic-rs = "0.3"
 crossbeam-channel = "0.5"
 blake3 = "1.5"
