@@ -340,8 +340,66 @@ impl GhostSession {
     /// If the reflection buffer contains previous failures, a negative hint is
     /// prepended to the description before sending to the VLM so the model
     /// avoids repeating the same mistake.
+    /// Set-of-Marks grounding: overlay numbered badges on the foreground window's
+    /// detected (UIA) elements, send the marked screenshot to the VLM, and have it
+    /// pick the badge NUMBER matching the description. Maps the number back to the
+    /// element's exact rect center. Far more reliable than asking the model to
+    /// regress raw pixel coordinates. Returns None when there are no candidate
+    /// elements to mark (caller then falls back to coordinate regression).
+    async fn locate_by_description_som(&self, description: &str) -> Result<Option<(i32, i32)>> {
+        let rect = self.foreground_window_rect()
+            .ok_or_else(|| GhostError::Vision("no foreground window for vision crop".into()))?;
+        // Candidate elements (absolute rects) from the foreground UIA subtree.
+        let els = self.tree.describe_screen_fast().map_err(GhostError::Core)?;
+        // Keep on-window, non-degenerate elements; cap so badges stay legible and
+        // the prompt stays small.
+        const MAX_MARKS: usize = 50;
+        let mut candidates: Vec<(i32, i32, i32, i32)> = Vec::new(); // absolute l,t,r,b
+        let mut labels: Vec<String> = Vec::new();
+        for e in &els {
+            if e.right <= e.left || e.bottom <= e.top { continue; }
+            if e.left < rect.0 - 2 || e.top < rect.1 - 2 || e.right > rect.2 + 2 || e.bottom > rect.3 + 2 { continue; }
+            candidates.push((e.left, e.top, e.right, e.bottom));
+            labels.push(e.name.clone());
+            if candidates.len() >= MAX_MARKS { break; }
+        }
+        if candidates.is_empty() {
+            return Ok(None);
+        }
+        // Marks in native captured pixels (relative to the window origin).
+        let marks: Vec<ghost_core::capture::Mark> = candidates.iter().enumerate().map(|(i, c)| {
+            ghost_core::capture::Mark { label: (i + 1) as u32, x: c.0 - rect.0, y: c.1 - rect.1 }
+        }).collect();
+        let jpeg = tokio::task::spawn_blocking(move || {
+            ghost_core::capture::capture_region_marked_jpeg(Some(rect), &marks, 1400, 82)
+        })
+        .await
+        .map_err(|e| GhostError::Core(ghost_core::error::CoreError::WorkerPanic(e.to_string())))?
+        .map_err(GhostError::Core)?;
+
+        match crate::vision::vision_pick_mark(description, &jpeg, &labels).await? {
+            Some(idx) => {
+                let (l, t, r, b) = candidates[idx - 1];
+                Ok(Some(((l + r) / 2, (t + b) / 2)))
+            }
+            None => Ok(None),
+        }
+    }
+
     #[tracing::instrument(skip(self), fields(desc = %description))]
     pub async fn locate_by_description(&self, description: &str) -> Result<(i32, i32)> {
+        // Prefer Set-of-Marks: pick a real detected element by number (exact rect)
+        // rather than trusting the model to regress pixel coordinates.
+        match self.locate_by_description_som(description).await {
+            Ok(Some((sx, sy))) => {
+                let obs = crate::reflection::hash_obs(description);
+                self.reflection.borrow_mut().record_success(obs, format!("som '{description}' -> ({sx},{sy})"));
+                return Ok((sx, sy));
+            }
+            Ok(None) => { /* no marks or model picked none — fall back to coord regression */ }
+            Err(e) => { tracing::warn!(error=%e, "set-of-marks grounding failed; falling back to coordinate regression"); }
+        }
+
         let rect = self.foreground_window_rect()
             .ok_or_else(|| GhostError::Vision("no foreground window for vision crop".into()))?;
         let original = (

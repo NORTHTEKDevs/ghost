@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.8.0] - 2026-07-03 — Set-of-Marks Vision Grounding
+
+### Added
+
+- **Set-of-Marks visual grounding** for description-based `ghost_find` and VLM
+  escalation. Instead of asking the model to regress raw pixel coordinates
+  (unreliable — a plain "coordinates of the equals button" landed ~250px off in
+  testing), Ghost overlays numbered badges on the window's detected elements,
+  sends the marked screenshot plus each badge's accessible-name label, and asks
+  the model which *number* matches. The number maps back to that element's exact
+  rect. Live-verified on Calculator: four natural-language descriptions each
+  landed exactly on the correct button (vs ~250px off before).
+  - New `ghost-core` mark renderer (`capture/marks.rs`) — numbered badges drawn
+    with a hardcoded bitmap font, zero new dependencies.
+  - Falls back to the previous coordinate-regression path when a window has no
+    detectable elements to mark, so nothing regresses.
+
+Honest scope: labels carry most of the disambiguation on well-named apps; the
+visual badges carry unlabeled icons. Truly a11y-invisible elements (pure canvas)
+still need a local visual detector, which is GPU-dependent and not shipped here.
+
 ## [bench] - 2026-07-03 — Benchmark self-test + broader coverage
 
 (No binary change — `ghost-mcp` stays 0.7.7; this expands the `bench/` suite.)

@@ -156,6 +156,64 @@ pub async fn vision_extract(
     parse_extract_response(&text, fields)
 }
 
+/// Set-of-Marks grounding: the screenshot has numbered red badges on candidate
+/// UI elements. Ask the model to return the NUMBER of the element matching the
+/// description (or 0 if none). Returns the 1-based mark index, or None. This is
+/// far more reliable than asking a model to regress raw pixel coordinates.
+pub async fn vision_pick_mark(
+    description: &str,
+    marked_jpeg: &[u8],
+    labels: &[String],
+) -> Result<Option<usize>> {
+    let n_marks = labels.len();
+    if n_marks == 0 {
+        return Ok(None);
+    }
+    let provider = pick_provider()?;
+    let prompt = build_som_prompt(description, labels);
+    let text = match provider {
+        Provider::Nvidia => extract_via_openai_compat(&prompt, marked_jpeg).await?,
+        Provider::Anthropic => extract_via_anthropic(&prompt, marked_jpeg).await?,
+    };
+    Ok(parse_mark_response(&text, n_marks))
+}
+
+/// Prompt combines the visual badges with each element's accessible name (when
+/// known) as a hint. The model uses both: the label disambiguates when present,
+/// the badge position/appearance carries unnamed elements (icons). Empty labels
+/// are shown as "(no label)" so the model relies on the image for those.
+fn build_som_prompt(description: &str, labels: &[String]) -> String {
+    let n = labels.len();
+    let mut list = String::new();
+    for (i, name) in labels.iter().enumerate() {
+        let shown = if name.trim().is_empty() { "(no label)".to_string() } else { format!("\"{}\"", name.trim()) };
+        list.push_str(&format!("{}={}, ", i + 1, shown));
+    }
+    let list = list.trim_end_matches(", ");
+    format!(
+        "This screenshot has numbered red badges (1..{n}) on clickable UI elements. \
+         The elements and any known labels: [{list}]. \
+         Which single badge number best matches: \"{description}\"? \
+         Use the labels AND what the element looks like at its badge. \
+         Reply with ONLY the number, or 0 if none match. No other text."
+    )
+}
+
+/// Parse the model's reply into a 1..=n_marks index, or None (0 / out of range /
+/// unparseable). Tolerates prose by taking the first integer in the reply.
+fn parse_mark_response(text: &str, n_marks: usize) -> Option<usize> {
+    let mut digits = String::new();
+    for ch in text.chars() {
+        if ch.is_ascii_digit() {
+            digits.push(ch);
+        } else if !digits.is_empty() {
+            break; // first integer run only
+        }
+    }
+    let n: usize = digits.parse().ok()?;
+    if n >= 1 && n <= n_marks { Some(n) } else { None }
+}
+
 fn build_extract_prompt(fields: &[String]) -> String {
     let field_list = fields.iter().map(|f| format!("\"{f}\"")).collect::<Vec<_>>().join(", ");
     format!(
@@ -627,6 +685,17 @@ fn base64_encode(data: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_mark_response_variants() {
+        assert_eq!(parse_mark_response("7", 26), Some(7));
+        assert_eq!(parse_mark_response("  26 ", 26), Some(26));
+        assert_eq!(parse_mark_response("The answer is 3.", 26), Some(3));
+        assert_eq!(parse_mark_response("0", 26), None);          // 0 = none
+        assert_eq!(parse_mark_response("99", 26), None);          // out of range
+        assert_eq!(parse_mark_response("none", 26), None);        // no digits
+        assert_eq!(parse_mark_response("badge 12 matches", 26), Some(12));
+    }
 
     #[test]
     fn crop_to_screen_no_downscale() {
