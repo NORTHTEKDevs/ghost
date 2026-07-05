@@ -1,19 +1,18 @@
-//! Vision fallback for `By::Description` locators.
+//! Vision fallback for `By::Description` locators — MODEL-AGNOSTIC.
 //!
-//! Two providers are supported:
-//!  - **NVIDIA Build** (default): OpenAI-compatible endpoint at
-//!    integrate.api.nvidia.com. Free with NVIDIA Developer signup.
-//!    Default model: meta/llama-3.2-90b-vision-instruct.
-//!    Set NVIDIA_API_KEY.
-//!  - **Anthropic** (fallback): claude-haiku-4-5 by default.
-//!    Set ANTHROPIC_API_KEY.
+//! Works with any tool-capable vision model behind two wire formats:
+//!  - **OpenAI-compatible** (default): NVIDIA Build, OpenAI, Gemini
+//!    (openai-compat), Groq, or a local vLLM / Ollama / LM Studio server — they
+//!    all speak the same `/v1/chat/completions` format. Point
+//!    `GHOST_VISION_BASE_URL` + `GHOST_VISION_MODEL` at your endpoint and set the
+//!    key via `GHOST_VISION_API_KEY` (or `OPENAI_API_KEY` / `NVIDIA_API_KEY`).
+//!    A local keyless server needs only `GHOST_VISION_BASE_URL`.
+//!  - **Anthropic**: claude-haiku-4-5 by default. Set `ANTHROPIC_API_KEY`.
 //!
-//! Selection: GHOST_VISION_PROVIDER=nvidia|anthropic. If unset, picks the
-//! first provider whose API key is present (NVIDIA preferred).
-//! Override model via GHOST_VISION_MODEL.
-//! Override NVIDIA endpoint via GHOST_VISION_BASE_URL (useful for self-hosted
-//! Ollama/vLLM/llama.cpp servers that speak OpenAI-compat — point it at e.g.
-//! http://localhost:11434/v1).
+//! Selection: `GHOST_VISION_PROVIDER=openai|nvidia|gemini|groq|ollama|vllm|anthropic`.
+//! If unset, auto-detects: any OpenAI-compatible key (or a custom base URL) ->
+//! OpenAI-compat path; else `ANTHROPIC_API_KEY` -> Anthropic.
+//! Default OpenAI-compat endpoint/model is NVIDIA's free Llama-3.2-90B-Vision.
 //!
 //! Strategy: capture a tight ROI screenshot of the foreground window,
 //! downscale + JPEG-encode for a small payload, then ask the chosen model
@@ -248,11 +247,7 @@ fn parse_extract_response(
 }
 
 async fn extract_via_openai_compat(prompt: &str, image_jpeg: &[u8]) -> Result<String> {
-    let api_key = std::env::var("NVIDIA_API_KEY")
-        .map_err(|_| GhostError::Config("NVIDIA_API_KEY not set".into()))?;
-    if api_key.trim().is_empty() {
-        return Err(GhostError::Vision("NVIDIA_API_KEY is empty/unset — set a valid key before using vision".into()));
-    }
+    let api_key = openai_compat_api_key()?;
     let model = std::env::var("GHOST_VISION_MODEL")
         .unwrap_or_else(|_| NVIDIA_DEFAULT_MODEL.into());
     let url = std::env::var("GHOST_VISION_BASE_URL")
@@ -272,15 +267,14 @@ async fn extract_via_openai_compat(prompt: &str, image_jpeg: &[u8]) -> Result<St
         max_tokens: 512,
         temperature: 0.0,
     };
-    let resp = send_with_retry(
-        http_client()
-            .post(&url)
-            .header("authorization", format!("Bearer {api_key}"))
-            .header("content-type", "application/json")
-            .header("accept", "application/json")
-            .json(&req),
-        "openai-compat extract",
-    ).await?;
+    let mut rb = http_client()
+        .post(&url)
+        .header("content-type", "application/json")
+        .header("accept", "application/json");
+    if !api_key.is_empty() {
+        rb = rb.header("authorization", format!("Bearer {api_key}"));
+    }
+    let resp = send_with_retry(rb.json(&req), "openai-compat extract").await?;
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
@@ -343,21 +337,50 @@ async fn extract_via_anthropic(prompt: &str, image_jpeg: &[u8]) -> Result<String
 fn pick_provider() -> Result<Provider> {
     if let Ok(p) = std::env::var("GHOST_VISION_PROVIDER") {
         return match p.to_lowercase().as_str() {
-            "nvidia" | "openai" | "ollama" | "vllm" | "openai_compat" => Ok(Provider::Nvidia),
+            // Any OpenAI-compatible endpoint (NVIDIA, OpenAI, Gemini-openai-compat,
+            // Groq, local vLLM / Ollama / LM Studio) uses the same wire format.
+            "nvidia" | "openai" | "gemini" | "groq" | "ollama" | "vllm" | "lmstudio" | "openai_compat"
+                => Ok(Provider::Nvidia),
             "anthropic" | "claude" => Ok(Provider::Anthropic),
             other => Err(GhostError::Config(format!(
-                "GHOST_VISION_PROVIDER={other} not recognized; use nvidia or anthropic"
+                "GHOST_VISION_PROVIDER={other} not recognized; use openai|nvidia|gemini|groq|ollama|vllm|anthropic"
             ))),
         };
     }
-    if env_key_is_set("NVIDIA_API_KEY") {
+    // Auto-detect: any OpenAI-compatible key, or a custom base URL (keyless local
+    // server), or Anthropic.
+    if env_key_is_set("GHOST_VISION_API_KEY") || env_key_is_set("OPENAI_API_KEY")
+        || env_key_is_set("NVIDIA_API_KEY") || std::env::var("GHOST_VISION_BASE_URL").is_ok() {
         return Ok(Provider::Nvidia);
     }
     if env_key_is_set("ANTHROPIC_API_KEY") {
         return Ok(Provider::Anthropic);
     }
     Err(GhostError::Config(
-        "no vision provider configured. Set NVIDIA_API_KEY (free at build.nvidia.com) or ANTHROPIC_API_KEY".into()
+        "no vision provider configured. Set GHOST_VISION_API_KEY (any OpenAI-compatible endpoint) \
+         + GHOST_VISION_BASE_URL + GHOST_VISION_MODEL, or NVIDIA_API_KEY (free at build.nvidia.com), \
+         or ANTHROPIC_API_KEY".into()
+    ))
+}
+
+/// Resolve the bearer key for the OpenAI-compatible path, provider-agnostic:
+/// GHOST_VISION_API_KEY > OPENAI_API_KEY > NVIDIA_API_KEY. Returns an empty string
+/// (keyless) when a custom GHOST_VISION_BASE_URL is set with no key — local
+/// servers (vLLM/Ollama/LM Studio) typically need none.
+fn openai_compat_api_key() -> Result<String> {
+    for var in ["GHOST_VISION_API_KEY", "OPENAI_API_KEY", "NVIDIA_API_KEY"] {
+        if let Ok(k) = std::env::var(var) {
+            if !k.trim().is_empty() {
+                return Ok(k);
+            }
+        }
+    }
+    if std::env::var("GHOST_VISION_BASE_URL").is_ok() {
+        return Ok(String::new());
+    }
+    Err(GhostError::Config(
+        "no vision API key set. Use GHOST_VISION_API_KEY (any OpenAI-compatible endpoint), \
+         OPENAI_API_KEY, or NVIDIA_API_KEY; or set GHOST_VISION_BASE_URL for a keyless local server".into()
     ))
 }
 
@@ -489,11 +512,7 @@ async fn locate_via_openai_compat(
     image_jpeg: &[u8],
     final_size: (u32, u32),
 ) -> Result<Option<(i32, i32)>> {
-    let api_key = std::env::var("NVIDIA_API_KEY")
-        .map_err(|_| GhostError::Config("NVIDIA_API_KEY not set; sign up free at build.nvidia.com".into()))?;
-    if api_key.trim().is_empty() {
-        return Err(GhostError::Vision("NVIDIA_API_KEY is empty/unset — set a valid key before using vision".into()));
-    }
+    let api_key = openai_compat_api_key()?;
     let model = std::env::var("GHOST_VISION_MODEL")
         .unwrap_or_else(|_| NVIDIA_DEFAULT_MODEL.into());
     let url = std::env::var("GHOST_VISION_BASE_URL")
@@ -517,15 +536,14 @@ async fn locate_via_openai_compat(
         temperature: 0.0,
     };
 
-    let resp = send_with_retry(
-        http_client()
-            .post(&url)
-            .header("authorization", format!("Bearer {api_key}"))
-            .header("content-type", "application/json")
-            .header("accept", "application/json")
-            .json(&req),
-        "openai-compat locate",
-    ).await?;
+    let mut rb = http_client()
+        .post(&url)
+        .header("content-type", "application/json")
+        .header("accept", "application/json");
+    if !api_key.is_empty() {
+        rb = rb.header("authorization", format!("Bearer {api_key}"));
+    }
+    let resp = send_with_retry(rb.json(&req), "openai-compat locate").await?;
 
     if !resp.status().is_success() {
         let status = resp.status();
