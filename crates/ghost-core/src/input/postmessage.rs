@@ -11,10 +11,21 @@ use windows::Win32::UI::WindowsAndMessaging::{
 // Message constants not re-exported by the enabled `windows` features.
 const BM_CLICK: u32 = 0x00F5;
 const WM_SETTEXT: u32 = 0x000C;
+const WM_MOUSEMOVE: u32 = 0x0200;
+const WM_LBUTTONDBLCLK: u32 = 0x0203;
+const WM_RBUTTONDOWN: u32 = 0x0204;
+const WM_RBUTTONUP: u32 = 0x0205;
+const MK_LBUTTON: usize = 0x0001;
+const MK_RBUTTON: usize = 0x0002;
 const SMTO_ABORTIFHUNG: u32 = 0x0002;
 
 fn hwnd_of(raw: isize) -> HWND {
     HWND(raw as *mut core::ffi::c_void)
+}
+
+/// Pack a client-relative (x, y) into an LPARAM as Windows mouse messages expect.
+fn mouse_lparam(x: i32, y: i32) -> LPARAM {
+    LPARAM(((y & 0xFFFF) << 16 | (x & 0xFFFF)) as isize)
 }
 
 pub struct BackgroundClicker;
@@ -53,6 +64,64 @@ impl BackgroundClicker {
             let _ = ScreenToClient(hwnd, &mut pt);
             Self::click(hwnd, (pt.x, pt.y))
         }
+    }
+
+    /// Screen point -> client coords for `hwnd` (returns WindowGone if invalid).
+    fn client_pt(hwnd: HWND, screen_x: i32, screen_y: i32) -> Result<POINT, CoreError> {
+        unsafe {
+            if !IsWindow(hwnd).as_bool() {
+                return Err(CoreError::WindowGone);
+            }
+            let mut pt = POINT { x: screen_x, y: screen_y };
+            let _ = ScreenToClient(hwnd, &mut pt);
+            Ok(pt)
+        }
+    }
+
+    /// Post a double-click (down, up, dblclk, up) at a SCREEN point — no cursor,
+    /// no foreground. `hwnd_raw` is the control/container window handle.
+    pub fn double_click_screen(hwnd_raw: isize, screen_x: i32, screen_y: i32) -> Result<(), CoreError> {
+        let hwnd = hwnd_of(hwnd_raw);
+        let pt = Self::client_pt(hwnd, screen_x, screen_y)?;
+        let lp = mouse_lparam(pt.x, pt.y);
+        unsafe {
+            let post = |msg: u32, wp: usize| PostMessageW(hwnd, msg, WPARAM(wp), lp)
+                .map_err(|e| CoreError::ComInit(format!("PostMessage {msg:#x}: {e}")));
+            post(WM_LBUTTONDOWN, MK_LBUTTON)?;
+            post(WM_LBUTTONUP, 0)?;
+            post(WM_LBUTTONDBLCLK, MK_LBUTTON)?;
+            post(WM_LBUTTONUP, 0)?;
+        }
+        Ok(())
+    }
+
+    /// Post a right-click (rbutton down, up) at a SCREEN point — no cursor,
+    /// no foreground.
+    pub fn right_click_screen(hwnd_raw: isize, screen_x: i32, screen_y: i32) -> Result<(), CoreError> {
+        let hwnd = hwnd_of(hwnd_raw);
+        let pt = Self::client_pt(hwnd, screen_x, screen_y)?;
+        let lp = mouse_lparam(pt.x, pt.y);
+        unsafe {
+            PostMessageW(hwnd, WM_RBUTTONDOWN, WPARAM(MK_RBUTTON), lp)
+                .map_err(|e| CoreError::ComInit(format!("PostMessage RBUTTONDOWN: {e}")))?;
+            PostMessageW(hwnd, WM_RBUTTONUP, WPARAM(0), lp)
+                .map_err(|e| CoreError::ComInit(format!("PostMessage RBUTTONUP: {e}")))?;
+        }
+        Ok(())
+    }
+
+    /// Post a mouse-move (hover) at a SCREEN point — no cursor, no foreground.
+    /// Note: many controls only reveal hover state under a real cursor; a posted
+    /// WM_MOUSEMOVE reaches the control's message queue but won't move the OS
+    /// cursor, so visual hover effects may not appear.
+    pub fn hover_screen(hwnd_raw: isize, screen_x: i32, screen_y: i32) -> Result<(), CoreError> {
+        let hwnd = hwnd_of(hwnd_raw);
+        let pt = Self::client_pt(hwnd, screen_x, screen_y)?;
+        unsafe {
+            PostMessageW(hwnd, WM_MOUSEMOVE, WPARAM(0), mouse_lparam(pt.x, pt.y))
+                .map_err(|e| CoreError::ComInit(format!("PostMessage MOUSEMOVE: {e}")))?;
+        }
+        Ok(())
     }
 
     /// Click a standard button-class control via BM_CLICK — the cleanest

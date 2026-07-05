@@ -1426,10 +1426,9 @@ impl GhostSession {
         use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
 
         if is_stopped() { return Err(GhostError::Stopped); }
-        if !matches!(action, "click" | "type") {
+        if !matches!(action, "click" | "type" | "double_click" | "right_click" | "hover") {
             return Err(GhostError::Vision(format!(
-                "ghost_act background mode supports only click|type (got '{action}'); \
-                 double_click/right_click/hover are coordinate-only and need foreground"
+                "ghost_act background: unknown action '{action}' (use click|type|double_click|right_click|hover)"
             )));
         }
 
@@ -1481,6 +1480,49 @@ impl GhostSession {
             } else { None }
         };
 
+        // Verify a pixel effect by an occlusion-proof PrintWindow before/after
+        // delta, SCOPED to the element's own rect so an unrelated redraw elsewhere
+        // (caret blink, clock) can't false-positive. Captures the 'after' itself.
+        // Returns None when it can't verify (no capture / all-black surface).
+        let verify_pixels = |before: Option<(Vec<u8>, usize, usize)>| -> Option<bool> {
+            let after = ghost_core::capture::capture_window_printwindow(hwnd_raw).ok();
+            let (b, bw, bh) = before?;
+            let (a, aw, ah) = after?;
+            if bw != aw || bh != ah || b.is_empty() { return None; }
+            if a.iter().all(|&p| p == 0) || b.iter().all(|&p| p == 0) { return None; }
+            let roi = match (win_origin, rect) {
+                (Some((wl, wt)), Some((l, t, r, bo))) => {
+                    let rl = (l - wl).max(0) as usize;
+                    let rt = (t - wt).max(0) as usize;
+                    let rr = ((r - wl).max(0) as usize).min(bw);
+                    let rb = ((bo - wt).max(0) as usize).min(bh);
+                    if rr > rl && rb > rt { Some((rl, rt, rr, rb)) } else { None }
+                }
+                _ => None,
+            };
+            match roi {
+                Some((rl, rt, rr, rb)) => {
+                    let (cw, ch) = (rr - rl, rb - rt);
+                    let bc = ghost_core::capture::screen::crop_rgba(&b, bw, rl, rt, cw, ch);
+                    let ac = ghost_core::capture::screen::crop_rgba(&a, bw, rl, rt, cw, ch);
+                    Some(compute_verification(&bc, &ac, cw, ch, true).changed)
+                }
+                None => Some(compute_verification(&b, &a, bw, bh, true).changed),
+            }
+        };
+        // Element screen centre (for message-posted mouse actions).
+        let screen_center = rect.map(|(l, t, r, b)| ((l + r) / 2, (t + b) / 2)).unwrap_or((0, 0));
+        // Guard: mouse actions other than click need a windowed control (no
+        // non-activating UIA equivalent for double/right/hover).
+        let needs_hwnd = |act: &str| -> Result<()> {
+            if ctrl_hwnd == 0 {
+                return Err(GhostError::Vision(format!(
+                    "ghost_act background: {act} needs a windowed control, but this one is windowless (UWP/WinUI/Chromium) — use foreground"
+                )));
+            }
+            Ok(())
+        };
+
         let (verified, note): (Option<bool>, Option<&str>) = match action {
             "type" => {
                 let t = text.ok_or_else(|| GhostError::Vision("ghost_act: action=type requires text param".into()))?;
@@ -1501,62 +1543,21 @@ impl GhostSession {
                 })
             }
             "click" => {
-                // PrintWindow before/after delta — works even while occluded.
                 let before = ghost_core::capture::capture_window_printwindow(hwnd_raw).ok();
                 let mut fallback_uia = false;
                 if ctrl_hwnd != 0 {
                     if el.control_type() == UIA_BUTTON {
                         ghost_core::input::BackgroundClicker::button_click(ctrl_hwnd).map_err(GhostError::Core)?;
                     } else {
-                        // Post at the element's SCREEN centre, converted to the
-                        // handle's client space (ScreenToClient) — correct even when
-                        // the handle is an ancestor/container, not a per-control HWND.
-                        let (sx, sy) = rect.map(|(l, t, r, b)| ((l + r) / 2, (t + b) / 2)).unwrap_or((0, 0));
-                        ghost_core::input::BackgroundClicker::click_screen(ctrl_hwnd, sx, sy)
-                            .map_err(GhostError::Core)?;
+                        let (sx, sy) = screen_center;
+                        ghost_core::input::BackgroundClicker::click_screen(ctrl_hwnd, sx, sy).map_err(GhostError::Core)?;
                     }
                 } else {
-                    // Windowless — UIA Invoke (activates the window). Honest fallback.
                     fallback_uia = true;
                     el.click_background()?;
                 }
-                // Small settle so the control repaints before the 'after' shot.
                 tokio::time::sleep(Duration::from_millis(80)).await;
-                let after = ghost_core::capture::capture_window_printwindow(hwnd_raw).ok();
-                let changed = match (before, after) {
-                    (Some((b, bw, bh)), Some((a, aw, ah))) if bw == aw && bh == ah && !b.is_empty() => {
-                        let black = a.iter().all(|&p| p == 0) || b.iter().all(|&p| p == 0);
-                        if black {
-                            None
-                        } else {
-                            // Scope the diff to the element's own rect (window-relative)
-                            // so an unrelated redraw elsewhere (caret blink, clock) can't
-                            // false-positive. Fall back to the whole window if the ROI is
-                            // unusable.
-                            let roi = match (win_origin, rect) {
-                                (Some((wl, wt)), Some((l, t, r, bo))) => {
-                                    let rl = (l - wl).max(0) as usize;
-                                    let rt = (t - wt).max(0) as usize;
-                                    let rr = ((r - wl).max(0) as usize).min(bw);
-                                    let rb = ((bo - wt).max(0) as usize).min(bh);
-                                    if rr > rl && rb > rt { Some((rl, rt, rr, rb)) } else { None }
-                                }
-                                _ => None,
-                            };
-                            match roi {
-                                Some((rl, rt, rr, rb)) => {
-                                    let cw = rr - rl;
-                                    let ch = rb - rt;
-                                    let bc = ghost_core::capture::screen::crop_rgba(&b, bw, rl, rt, cw, ch);
-                                    let ac = ghost_core::capture::screen::crop_rgba(&a, bw, rl, rt, cw, ch);
-                                    Some(compute_verification(&bc, &ac, cw, ch, true).changed)
-                                }
-                                None => Some(compute_verification(&b, &a, bw, bh, true).changed),
-                            }
-                        }
-                    }
-                    _ => None,
-                };
+                let changed = verify_pixels(before);
                 let note = if fallback_uia {
                     Some("clicked via UIA Invoke (windowless control) — the window may have activated; check focus_preserved")
                 } else if changed.is_none() {
@@ -1565,6 +1566,32 @@ impl GhostSession {
                     Some("background click posted (focus preserved); the control's own rect didn't change — a click's effect is often elsewhere, so read state to confirm")
                 } else { None };
                 (changed, note)
+            }
+            "double_click" => {
+                needs_hwnd("double_click")?;
+                let before = ghost_core::capture::capture_window_printwindow(hwnd_raw).ok();
+                let (sx, sy) = screen_center;
+                ghost_core::input::BackgroundClicker::double_click_screen(ctrl_hwnd, sx, sy).map_err(GhostError::Core)?;
+                tokio::time::sleep(Duration::from_millis(80)).await;
+                let changed = verify_pixels(before);
+                let note = if changed == Some(false) || changed.is_none() {
+                    Some("background double_click posted (focus preserved); effect may be outside the element rect — read state to confirm")
+                } else { None };
+                (changed, note)
+            }
+            "right_click" => {
+                needs_hwnd("right_click")?;
+                let (sx, sy) = screen_center;
+                ghost_core::input::BackgroundClicker::right_click_screen(ctrl_hwnd, sx, sy).map_err(GhostError::Core)?;
+                // A context menu opens as a separate popup window outside this
+                // window's pixels — not verifiable via PrintWindow here.
+                (None, Some("background right_click posted (focus preserved); the context menu is a separate popup — screenshot/read to confirm"))
+            }
+            "hover" => {
+                needs_hwnd("hover")?;
+                let (sx, sy) = screen_center;
+                ghost_core::input::BackgroundClicker::hover_screen(ctrl_hwnd, sx, sy).map_err(GhostError::Core)?;
+                (None, Some("background hover posted (focus preserved); WM_MOUSEMOVE reaches the control but no OS cursor moves, so hover visuals may not render"))
             }
             _ => unreachable!(),
         };
