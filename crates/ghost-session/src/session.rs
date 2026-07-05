@@ -363,6 +363,35 @@ impl GhostSession {
             labels.push(e.name.clone());
             if candidates.len() >= MAX_MARKS { break; }
         }
+        // Canvas / sparse-UIA fallback: when the accessibility tree yields few or no
+        // markable elements (custom-drawn UIs, remote-desktop surfaces, game canvases),
+        // add CPU-detected visual regions so Set-of-Marks still has candidates. The
+        // extra capture+detect runs ONLY on these sparse windows, never on normal
+        // apps that already expose dozens of UIA elements. Visual-only regions have
+        // no accessible name (empty label); the SoM prompt leans on their position.
+        const CV_AUGMENT_THRESHOLD: usize = 4;
+        if candidates.len() < CV_AUGMENT_THRESHOLD {
+            let cv_rect = rect;
+            let extra = tokio::task::spawn_blocking(move || -> Vec<(i32, i32, i32, i32)> {
+                match ghost_core::capture::capture_region_raw(Some(cv_rect)) {
+                    Ok((rgba, w, h)) => {
+                        let regions = ghost_ground::cv_detect::detect_regions(
+                            &rgba, w, h, &ghost_ground::cv_detect::Opts::default(),
+                        );
+                        regions.into_iter().map(|r| (
+                            cv_rect.0 + r.rect.0, cv_rect.1 + r.rect.1,
+                            cv_rect.0 + r.rect.2, cv_rect.1 + r.rect.3,
+                        )).collect()
+                    }
+                    Err(_) => Vec::new(),
+                }
+            }).await.unwrap_or_default();
+            for abs in extra {
+                if candidates.len() >= MAX_MARKS { break; }
+                candidates.push(abs);
+                labels.push(String::new());
+            }
+        }
         if candidates.is_empty() {
             return Ok(None);
         }
