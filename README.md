@@ -172,7 +172,7 @@ Add to Claude Desktop config (`%APPDATA%\Claude\claude_desktop_config.json`):
 }
 ```
 
-Works with any MCP client (Claude, Cursor, etc.) — 17 lean verbs advertised (legacy names stay dispatchable) covering see/find/act/keys/scroll/drag/clipboard/screenshot/windows/waits/query/run.
+Works with any MCP client (Claude, Cursor, etc.) — 19 lean verbs advertised (legacy names stay dispatchable) covering see/snapshot/find/act/keys/scroll/drag/clipboard/screenshot/windows/waits/query/run.
 
 ## Reliability Model (v0.7.x)
 

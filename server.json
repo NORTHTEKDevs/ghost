@@ -6,13 +6,13 @@
     "url": "https://github.com/NORTHTEKDevs/ghost",
     "source": "github"
   },
-  "version": "0.14.0",
+  "version": "0.15.0",
   "websiteUrl": "https://github.com/NORTHTEKDevs/ghost",
   "packages": [
     {
       "registryType": "github",
       "identifier": "NORTHTEKDevs/ghost",
-      "version": "0.14.0",
+      "version": "0.15.0",
       "transport": { "type": "stdio" },
       "runtimeHint": "Prebuilt ghost-mcp.exe (Windows 10/11), or `cargo build --release -p ghost-mcp`.",
       "environmentVariables": [

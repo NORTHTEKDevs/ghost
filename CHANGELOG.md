@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.15.0] - 2026-07-05 — Structured agent-planning snapshot
+
+### Added
+
+- **`ghost_snapshot`** — a structured, agent-planning view of a window's UI. Each
+  element comes back with a stable `id`, `name`, `role`, `rect`, `center`, an
+  `actionable` flag, and the `actions` it accepts (`click` / `type`), plus
+  `actionable_count`. `actionable_only=true` filters to just the interactable
+  elements. This lets an agent plan over structure — far cheaper in tokens than a
+  screenshot — then `ghost_act` by name/role. Read-only; no foreground change.
+  - Live-verified: a Calculator snapshot returned 36 actionable elements with
+    correct centers and click actions.
+
 ## [0.14.0] - 2026-07-05 — Background clipboard/edit shortcuts
 
 Closes the most-used part of the "no modifier combos in background" limit.

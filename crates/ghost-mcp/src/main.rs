@@ -408,6 +408,7 @@ fn dispatch_tool_inner<'a>(
         // Route lean verbs first, fall through to legacy handle_tool for all others.
         match name {
             "ghost_see" => handle_ghost_see(session, args).await,
+            "ghost_snapshot" => handle_ghost_snapshot(session, args).await,
             "ghost_key" => handle_ghost_key(session, args).await,
             "ghost_wait" => handle_ghost_wait(session, args).await,
             "ghost_window" => handle_ghost_window(session, args).await,
@@ -434,7 +435,7 @@ async fn handle(
             Ok(json!({
                 "protocolVersion": "2024-11-05",
                 "capabilities": { "tools": {} },
-                "serverInfo": { "name": "ghost", "version": "0.14.0" }
+                "serverInfo": { "name": "ghost", "version": "0.15.0" }
             }))
         }
         "initialized" | "notifications/initialized" => Ok(json!({})),
@@ -1239,6 +1240,72 @@ fn elements_response(elements: &[ghost_core::uia::ElementDescriptor], p: &Value)
     out
 }
 
+/// Which actions apply to an element, derived from its UIA role. Lets an agent
+/// plan ("id 7 is a button I can click") over structure instead of a screenshot.
+fn actions_for_role(role: &str) -> Vec<&'static str> {
+    let mut a = Vec::new();
+    match role.to_lowercase().as_str() {
+        "button" | "hyperlink" | "link" | "menuitem" | "listitem" | "tabitem"
+        | "checkbox" | "radiobutton" | "splitbutton" | "treeitem" => a.push("click"),
+        "edit" | "document" => a.push("type"),
+        "combobox" => { a.push("click"); a.push("type"); }
+        _ => {}
+    }
+    a
+}
+
+/// Enriched, agent-planning snapshot of a window's elements: stable `id`, `center`,
+/// `actionable`, and the `actions` each element accepts. `actionable_only` (param)
+/// filters to just the interactable elements to cut noise.
+fn snapshot_response(elements: &[ghost_core::uia::ElementDescriptor], p: &Value) -> Value {
+    let limit = match p.get("limit").and_then(|v| v.as_u64()) {
+        Some(0) => usize::MAX,
+        Some(n) => n as usize,
+        None => DEFAULT_ELEMENT_LIMIT,
+    };
+    let actionable_only = p.get("actionable_only").and_then(|v| v.as_bool()).unwrap_or(false);
+    let usable: Vec<&ghost_core::uia::ElementDescriptor> = elements.iter()
+        .filter(|e| e.right > e.left && e.bottom > e.top && e.left > -30000 && e.top > -30000)
+        .collect();
+    let mut list: Vec<Value> = Vec::new();
+    let mut id = 0usize;
+    for e in &usable {
+        let actions = actions_for_role(&e.role);
+        let actionable = !actions.is_empty();
+        if actionable_only && !actionable { continue; }
+        list.push(json!({
+            "id": id,
+            "name": e.name,
+            "role": e.role,
+            "rect": { "left": e.left, "top": e.top, "right": e.right, "bottom": e.bottom },
+            "center": { "x": (e.left + e.right) / 2, "y": (e.top + e.bottom) / 2 },
+            "actionable": actionable,
+            "actions": actions,
+        }));
+        id += 1;
+        if list.len() >= limit { break; }
+    }
+    let actionable_count = usable.iter().filter(|e| !actions_for_role(&e.role).is_empty()).count();
+    json!({
+        "elements": list,
+        "count": list.len(),
+        "actionable_count": actionable_count,
+    })
+}
+
+/// `ghost_snapshot(window?, actionable_only?)` — structured, agent-planning view of
+/// a window's UI: each element with an id, role, rect, center, and the actions it
+/// accepts. Far cheaper than a screenshot for an agent to reason over.
+async fn handle_ghost_snapshot(session: &GhostSession, args: &Value) -> std::result::Result<Value, String> {
+    let p = args;
+    let window = p.get("window").and_then(|v| v.as_str());
+    let elements = match window {
+        Some(w) => session.describe_screen(Some(w)).await.map_err(|e| e.to_string())?,
+        None => session.describe_screen_fast().await.map_err(|e| e.to_string())?,
+    };
+    Ok(snapshot_response(&elements, p))
+}
+
 /// Returns (foreground_mode, max_dim, jpeg_quality) for ghost_screenshot default behaviour.
 /// Exposed as a pure function so it can be unit-tested without a live session.
 fn screenshot_default_opts(p: &Value) -> (bool, u32, u8) {
@@ -1846,6 +1913,13 @@ fn lean_tools_schema() -> Value {
               "window": { "type": "string", "description": "Target window title substring. Focus is acquired+confirmed before sending; errors if it can't be. REQUIRED when background=true." },
               "background": { "type": "boolean", "description": "Post keys to `window`'s focused control WITHOUT taking foreground or moving the cursor. Single keys (Enter/Tab/F5/arrows/char) plus the common editing shortcuts Ctrl+C/X/V/A/Z (dispatched as semantic WM_COPY/CUT/PASTE/UNDO/EM_SETSEL messages — reliable in background). Other modifier combos are rejected (posting can't set the modifier state apps read). Returns {focus_preserved, cursor_preserved}." }
           }}},
+        { "name": "ghost_snapshot",
+          "description": "Structured, agent-planning view of a window's UI: every element with a stable id, name, role, rect, center, actionable flag, and the actions it accepts (click/type). Far cheaper than a screenshot to reason over — use it to plan, then ghost_act by name/role. Params: window? (title substring; omitted = foreground), actionable_only? (only interactable elements), limit?.",
+          "inputSchema": { "type": "object", "properties": {
+              "window": { "type": "string", "description": "Window title substring; omitted = foreground window (faster)" },
+              "actionable_only": { "type": "boolean", "description": "Return only interactable elements (buttons/edits/links/...) — cuts noise for planning" },
+              "limit": { "type": "integer", "description": "Max elements (default 150; 0 = unlimited)" }
+          }}},
         { "name": "ghost_scroll",
           "description": "Scroll. direction: up/down/left/right, amount = notches (default 3). Coord mode: pass x/y. 'Until' mode: pass until_name/until_role to scroll the foreground window repeatedly until that element becomes visible (long/virtualized lists), up to max_scrolls; returns found=true/false.",
           "inputSchema": { "type": "object", "required": ["direction"], "properties": {
@@ -2338,6 +2412,46 @@ mod tests {
         }
     }
 
+    fn desc_role(name: &str, role: &str) -> ghost_core::uia::ElementDescriptor {
+        ghost_core::uia::ElementDescriptor {
+            name: name.into(), role: role.into(), left: 0, top: 0, right: 20, bottom: 20,
+        }
+    }
+
+    #[test]
+    fn actions_for_role_maps_common_roles() {
+        assert_eq!(actions_for_role("button"), vec!["click"]);
+        assert_eq!(actions_for_role("edit"), vec!["type"]);
+        assert_eq!(actions_for_role("combobox"), vec!["click", "type"]);
+        assert!(actions_for_role("text").is_empty());
+        assert!(actions_for_role("pane").is_empty());
+    }
+
+    #[test]
+    fn snapshot_response_enriches_and_ids() {
+        let els = vec![desc_role("OK", "button"), desc_role("Name", "edit"), desc_role("label", "text")];
+        let out = snapshot_response(&els, &json!({}));
+        let list = out["elements"].as_array().unwrap();
+        assert_eq!(list.len(), 3);
+        assert_eq!(list[0]["id"], 0);
+        assert_eq!(list[0]["actionable"], true);
+        assert_eq!(list[0]["actions"][0], "click");
+        assert_eq!(list[0]["center"]["x"], 10);
+        assert_eq!(list[2]["actionable"], false);
+        assert_eq!(out["actionable_count"], 2);
+    }
+
+    #[test]
+    fn snapshot_response_actionable_only_filters() {
+        let els = vec![desc_role("OK", "button"), desc_role("label", "text")];
+        let out = snapshot_response(&els, &json!({"actionable_only": true}));
+        let list = out["elements"].as_array().unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0]["name"], "OK");
+        // ids are re-numbered contiguously after filtering.
+        assert_eq!(list[0]["id"], 0);
+    }
+
     #[test]
     fn elements_response_filters_offscreen_and_degenerate() {
         let els = vec![
@@ -2490,9 +2604,10 @@ mod tests {
     fn tools_schema_has_lean_count() {
         let tools = tools_schema();
         let list = tools.as_array().unwrap();
-        // 18 lean verbs: see, find, act, key, scroll, drag, wait, query, assert,
-        //   run, screenshot, window, clipboard, stats, reset, stop, http_get, http_post
-        assert_eq!(list.len(), 18, "expected 18 lean verbs (see+find+act+key+scroll+drag+wait+query+assert+run+screenshot+window+clipboard+stats+reset+stop+http_get+http_post)");
+        // 19 lean verbs: see, snapshot, find, act, key, scroll, drag, wait, query,
+        //   assert, run, screenshot, window, clipboard, stats, reset, stop,
+        //   http_get, http_post
+        assert_eq!(list.len(), 19, "expected 19 lean verbs (see+snapshot+find+act+key+scroll+drag+wait+query+assert+run+screenshot+window+clipboard+stats+reset+stop+http_get+http_post)");
     }
 
     #[test]
@@ -2731,7 +2846,7 @@ mod tests {
         let resp = json!({
             "protocolVersion": "2024-11-05",
             "capabilities": { "tools": {} },
-            "serverInfo": { "name": "ghost", "version": "0.14.0" }
+            "serverInfo": { "name": "ghost", "version": "0.15.0" }
         });
         assert_eq!(resp["protocolVersion"], "2024-11-05");
         assert!(resp["capabilities"]["tools"].is_object());
