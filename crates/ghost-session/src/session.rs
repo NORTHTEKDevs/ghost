@@ -1622,6 +1622,56 @@ impl GhostSession {
         Ok(out)
     }
 
+    /// Background key input: post a SINGLE key to a named window's focused control
+    /// without foreground or cursor movement. `key` is one key name ("Enter",
+    /// "Tab", "F5", "a"). Modifier combos are rejected upstream (posting can't set
+    /// the modifier state apps read). Returns {focus_preserved, cursor_preserved}.
+    pub async fn key_background(&self, window: &str, key: &str) -> Result<serde_json::Value> {
+        use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetCursorPos};
+        use windows::Win32::Foundation::POINT;
+
+        if is_stopped() { return Err(GhostError::Stopped); }
+        let windows_list = core_list_windows().map_err(GhostError::Core)?;
+        let ql = window.to_lowercase();
+        let win = windows_list.iter()
+            .find(|w| w.name.to_lowercase().contains(&ql) && w.state != "minimized")
+            .ok_or_else(|| GhostError::Vision(format!(
+                "ghost_key background: no visible window matching '{window}'"
+            )))?;
+        let target = ghost_core::input::BackgroundClicker::focused_control(win.hwnd as isize);
+
+        let fg_before = unsafe { GetForegroundWindow() };
+        let mut cur_before = POINT::default();
+        let _ = unsafe { GetCursorPos(&mut cur_before) };
+
+        // A single printable char goes as WM_CHAR (edits need WM_CHAR to insert
+        // text — a posted WM_KEYDOWN alone won't, with no message pump to translate
+        // it). Named keys (Enter/Tab/F5/arrows/Backspace/...) go as a virtual key.
+        let mut chars = key.chars();
+        match (chars.next(), chars.next()) {
+            (Some(c), None) => {
+                ghost_core::input::BackgroundClicker::send_char(target, c).map_err(GhostError::Core)?;
+            }
+            _ => {
+                let vk = ghost_core::input::keyboard::name_to_vk(key).ok_or_else(|| GhostError::Vision(format!(
+                    "ghost_key background: unknown key '{key}' (single keys only; combos need foreground)"
+                )))?;
+                ghost_core::input::BackgroundClicker::send_key(target, vk.0).map_err(GhostError::Core)?;
+            }
+        }
+
+        let fg_after = unsafe { GetForegroundWindow() };
+        let mut cur_after = POINT::default();
+        let _ = unsafe { GetCursorPos(&mut cur_after) };
+        Ok(serde_json::json!({
+            "ok": true, "mode": "background", "key": key, "window": win.name,
+            "focus_preserved": fg_before.0 == fg_after.0,
+            "cursor_preserved": cur_before.x == cur_after.x && cur_before.y == cur_after.y,
+            "verified": serde_json::Value::Null,
+            "note": "key posted to the background window's focused control; read state to confirm effect",
+        }))
+    }
+
     /// Coordinate-based action with the same focus-anchoring and verification
     /// guarantees as the UIA path. Used for OCR/VLM-grounded dispatch.
     pub async fn act_at(&self, x: i32, y: i32, action: &str, text: Option<&str>) -> Result<serde_json::Value> {

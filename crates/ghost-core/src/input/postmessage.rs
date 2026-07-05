@@ -3,14 +3,18 @@
 use crate::error::CoreError;
 use windows::Win32::Foundation::{HWND, LPARAM, POINT, WPARAM};
 use windows::Win32::Graphics::Gdi::ScreenToClient;
+use windows::Win32::UI::Input::KeyboardAndMouse::{MapVirtualKeyW, MAPVK_VK_TO_VSC};
 use windows::Win32::UI::WindowsAndMessaging::{
-    IsWindow, PostMessageW, SendMessageTimeoutW, SEND_MESSAGE_TIMEOUT_FLAGS,
-    WM_LBUTTONDOWN, WM_LBUTTONUP,
+    GetGUIThreadInfo, GetWindowThreadProcessId, IsWindow, PostMessageW, SendMessageTimeoutW,
+    GUITHREADINFO, SEND_MESSAGE_TIMEOUT_FLAGS, WM_LBUTTONDOWN, WM_LBUTTONUP,
 };
 
 // Message constants not re-exported by the enabled `windows` features.
 const BM_CLICK: u32 = 0x00F5;
 const WM_SETTEXT: u32 = 0x000C;
+const WM_KEYDOWN: u32 = 0x0100;
+const WM_KEYUP: u32 = 0x0101;
+const WM_CHAR: u32 = 0x0102;
 const WM_MOUSEMOVE: u32 = 0x0200;
 const WM_LBUTTONDBLCLK: u32 = 0x0203;
 const WM_RBUTTONDOWN: u32 = 0x0204;
@@ -141,6 +145,68 @@ impl BackgroundClicker {
             );
             if ret.0 == 0 {
                 return Err(CoreError::Win32 { code: 0, context: "BM_CLICK send timed out / target hung" });
+            }
+        }
+        Ok(())
+    }
+
+    /// The HWND that holds keyboard focus within `window_hwnd`'s GUI thread. A
+    /// thread keeps its own focus even while its window is in the background, so
+    /// this is where posted keystrokes should go. Falls back to the window itself.
+    pub fn focused_control(window_hwnd_raw: isize) -> isize {
+        let hwnd = hwnd_of(window_hwnd_raw);
+        unsafe {
+            let tid = GetWindowThreadProcessId(hwnd, None);
+            if tid == 0 {
+                return window_hwnd_raw;
+            }
+            let mut gui = GUITHREADINFO {
+                cbSize: std::mem::size_of::<GUITHREADINFO>() as u32,
+                ..Default::default()
+            };
+            if GetGUIThreadInfo(tid, &mut gui).is_ok() && !gui.hwndFocus.is_invalid() {
+                gui.hwndFocus.0 as isize
+            } else {
+                window_hwnd_raw
+            }
+        }
+    }
+
+    /// Post a single virtual-key press (WM_KEYDOWN + WM_KEYUP) to `hwnd` WITHOUT
+    /// foreground or cursor movement. Works for un-modified keys (Enter, Tab,
+    /// Escape, arrows, F-keys, Delete, single chars). NOTE: modifier combos
+    /// (Ctrl+C, Alt+F4) are NOT reliable via posted messages — apps read the real
+    /// keyboard state (GetKeyState) for modifiers, which posting doesn't set; the
+    /// caller rejects combos in background mode instead of sending a broken combo.
+    pub fn send_key(hwnd_raw: isize, vk: u16) -> Result<(), CoreError> {
+        let hwnd = hwnd_of(hwnd_raw);
+        unsafe {
+            if !IsWindow(hwnd).as_bool() {
+                return Err(CoreError::WindowGone);
+            }
+            let scan = (MapVirtualKeyW(vk as u32, MAPVK_VK_TO_VSC) & 0xFF) as isize;
+            let down = LPARAM((scan << 16) | 1);
+            let up = LPARAM((scan << 16) | 1 | (1 << 30) | (1 << 31));
+            PostMessageW(hwnd, WM_KEYDOWN, WPARAM(vk as usize), down)
+                .map_err(|e| CoreError::ComInit(format!("PostMessage KEYDOWN: {e}")))?;
+            PostMessageW(hwnd, WM_KEYUP, WPARAM(vk as usize), up)
+                .map_err(|e| CoreError::ComInit(format!("PostMessage KEYUP: {e}")))?;
+        }
+        Ok(())
+    }
+
+    /// Post a character (WM_CHAR) to `hwnd` — for text a virtual key can't express
+    /// directly. No foreground, no cursor.
+    pub fn send_char(hwnd_raw: isize, ch: char) -> Result<(), CoreError> {
+        let hwnd = hwnd_of(hwnd_raw);
+        unsafe {
+            if !IsWindow(hwnd).as_bool() {
+                return Err(CoreError::WindowGone);
+            }
+            let mut buf = [0u16; 2];
+            for unit in ch.encode_utf16(&mut buf).iter() {
+                PostMessageW(hwnd, WM_CHAR, WPARAM(*unit as usize), LPARAM(1))
+                    .map_err(|e| CoreError::ComInit(format!("PostMessage CHAR: {e}")))?;
             }
         }
         Ok(())
