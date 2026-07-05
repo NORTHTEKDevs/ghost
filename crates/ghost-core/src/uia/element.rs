@@ -86,6 +86,19 @@ impl UiaElement {
         }
     }
 
+    /// The element's native Win32 window handle (HWND) as isize, or 0 if the
+    /// element is windowless (UWP/WinUI XAML controls, most Chromium content).
+    /// Standard Win32 controls (buttons, edits, list items in classic apps)
+    /// return their own control HWND — the handle needed to drive them with
+    /// window messages (background dispatch) instead of UIA patterns.
+    pub fn native_window_handle(&self) -> isize {
+        unsafe {
+            self.0.CurrentNativeWindowHandle()
+                .map(|h| h.0 as isize)
+                .unwrap_or(0)
+        }
+    }
+
     /// Get the current text value. Tries ValuePattern first, falls back to element name.
     pub fn get_text(&self) -> String {
         use windows::Win32::UI::Accessibility::{

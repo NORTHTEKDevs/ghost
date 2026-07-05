@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.12.0] - 2026-07-05 — Background dispatch (agent-harness mode)
+
+Drive an app WITHOUT bringing it to the foreground or moving the cursor — so an
+LLM agent can operate a Windows app while the human keeps working. This is the
+capability agent harnesses (OpenClaw, Hermes/cua-driver) mount as their
+computer-use layer; Ghost adds per-action verification on top.
+
+### Added
+
+- **`ghost_act background=true`** (requires `window` + `name`/`role`; `click`/`type`).
+  Acts on a control inside a named window with NO foreground change and NO cursor
+  movement, then verifies — all without the window being visible:
+  - **True background via posted window messages.** Real Win32 controls (which
+    expose a native window handle) are driven with `BM_CLICK` / `WM_LBUTTONDOWN/UP`
+    (click) and `WM_SETTEXT` (type) — these do not activate the window, unlike UIA
+    `Invoke`/`SetValue`, whose providers bring the window to the foreground.
+  - **Occlusion-proof verification.** `type` is confirmed by reading
+    `ValuePattern.CurrentValue` back; `click` by a `PrintWindow(PW_RENDERFULLCONTENT)`
+    before/after delta that renders even an occluded/background window.
+  - **Honest reporting.** The response carries `verified`, `focus_preserved`, and
+    `cursor_preserved`. Windowless controls (UWP/WinUI/Chromium — no HWND) fall
+    back to UIA dispatch, which activates the window; the response flags this and
+    `focus_preserved` reports it truthfully. This is a real limitation of every
+    tool, not just Ghost — you cannot post a message to a control that has no
+    window handle. Classic Win32 line-of-business apps (the no-API automation
+    target) drive cleanly in the background.
+  - Verified live: charmap (Win32) click AND type while Calculator held the
+    foreground — `verified=true, focus_preserved=true, cursor_preserved=true`,
+    foreground never moved. cargo test --workspace 370 passed / 0 failed.
+
+New primitives: `ghost_core::input::BackgroundClicker::{button_click, set_text}`,
+`ghost_core::capture::capture_window_printwindow`,
+`UiaElement::native_window_handle`, and strict UIA-only `invoke_ex`/`set_value_ex`
+(no coordinate fallback).
+
 ## [0.11.0] - 2026-07-05 — Capture latency (measured, corrected), canvas vision, soak
 
 Four evidence-driven improvements. Notably, end-to-end measurement corrected the

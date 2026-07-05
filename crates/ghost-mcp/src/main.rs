@@ -434,7 +434,7 @@ async fn handle(
             Ok(json!({
                 "protocolVersion": "2024-11-05",
                 "capabilities": { "tools": {} },
-                "serverInfo": { "name": "ghost", "version": "0.11.0" }
+                "serverInfo": { "name": "ghost", "version": "0.12.0" }
             }))
         }
         "initialized" | "notifications/initialized" => Ok(json!({})),
@@ -1020,6 +1020,24 @@ async fn handle_tool(
             // HIGH-1: schema advertises text_input to avoid collision with text-target param.
             // Read text_input first (documented name), fall back to text (legacy).
             let text = p["text_input"].as_str().or_else(|| p["text"].as_str());
+
+            // Background mode (agent-harness): act inside a named window WITHOUT
+            // bringing it to the foreground or moving the cursor. UIA-pattern-only
+            // dispatch; verified via ValuePattern read-back (type) or PrintWindow
+            // delta (click). Requires `window` + `name`/`role`.
+            if p["background"].as_bool() == Some(true) {
+                let window = p["window"].as_str()
+                    .ok_or("ghost_act background=true requires 'window' (the target app to drive)")?;
+                let by = if let Some(n) = p["name"].as_str() {
+                    ghost_session::By::name(n)
+                } else if let Some(r) = p["role"].as_str() {
+                    ghost_session::By::role(r)
+                } else {
+                    return Err("ghost_act background=true requires 'name' or 'role' to locate the element".into());
+                };
+                return session.act_background(window, by, action, text).await.map_err(|e| e.to_string());
+            }
+
             let (mode_label, mode) = parse_locate_mode(p);
             // Optional window anchor — see ghost_find.
             if let Some(window) = p["window"].as_str() {
@@ -1774,14 +1792,15 @@ fn lean_tools_schema() -> Value {
           }}},
         // --- Action ---
         { "name": "ghost_act",
-          "description": "Atomic find→focus→action in one call (eliminates cross-call focus race). Anchors OS foreground to the target's window before input and verifies via screen delta. Returns {ok, verified, focus_confirmed, source, confidence, center}; verified=false means the action dispatched but nothing visibly changed — check state with ghost_see before retrying. Supply name|role|description|text to identify target.",
+          "description": "Atomic find→focus→action in one call (eliminates cross-call focus race). Anchors OS foreground to the target's window before input and verifies via screen delta. Returns {ok, verified, focus_confirmed, source, confidence, center}; verified=false means the action dispatched but nothing visibly changed — check state with ghost_see before retrying. Supply name|role|description|text to identify target. Set background=true (with window+name/role) to drive an app WITHOUT taking foreground or moving the cursor (agent-harness mode).",
           "inputSchema": { "type": "object", "required": ["action"], "properties": {
               "name": { "type": "string" }, "role": { "type": "string" },
               "description": { "type": "string" }, "text": { "type": "string" },
               "action": { "type": "string", "enum": ["click", "type", "double_click", "right_click", "hover"],
                           "description": "Action to perform" },
               "text_input": { "type": "string", "description": "Text to type when action=type (use this to avoid param collision with text-target)" },
-              "window": { "type": "string", "description": "Anchor: focus+confirm this window (title substring) before resolving/acting — use for multi-window flows" },
+              "window": { "type": "string", "description": "Anchor: focus+confirm this window (title substring) before resolving/acting — use for multi-window flows. REQUIRED when background=true." },
+              "background": { "type": "boolean", "description": "Background mode: act inside `window` WITHOUT bringing it to the foreground or moving the cursor (drive an app while the human keeps working). Uses posted window messages on real Win32 controls; supports click|type only. Returns {verified, focus_preserved, cursor_preserved}. Windowless UWP/WinUI/Chromium controls have no window handle and fall back to UIA dispatch, which may activate the window — the response flags this and focus_preserved reports the truth." },
               "index": { "type": "integer", "description": "Act on the nth match (0-based) when several elements share the name/role" },
               "mode": { "type": "string", "enum": ["instant", "deliberate", "instant_only"] }
           }}},
@@ -2676,7 +2695,7 @@ mod tests {
         let resp = json!({
             "protocolVersion": "2024-11-05",
             "capabilities": { "tools": {} },
-            "serverInfo": { "name": "ghost", "version": "0.11.0" }
+            "serverInfo": { "name": "ghost", "version": "0.12.0" }
         });
         assert_eq!(resp["protocolVersion"], "2024-11-05");
         assert!(resp["capabilities"]["tools"].is_object());

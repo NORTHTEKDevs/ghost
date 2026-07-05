@@ -219,6 +219,98 @@ fn capture_rect_gdi(
     }
 }
 
+/// Capture a window's pixels via `PrintWindow(PW_RENDERFULLCONTENT)`, rendering
+/// the window into an offscreen DC. Unlike a screen BitBlt this works even when
+/// the window is occluded or not foreground — the key primitive for verifying a
+/// background action without bringing the window to the front. Returns tightly-
+/// packed RGBA sized to the window rect.
+///
+/// Caveat: some GPU-composited surfaces (hardware-accelerated video, certain
+/// Chromium/GL windows) render black under PrintWindow; callers must treat an
+/// all-black result as "could not verify", not "no change".
+pub fn capture_window_printwindow(hwnd_raw: isize) -> Result<(Vec<u8>, usize, usize), CoreError> {
+    unsafe {
+        use windows::Win32::Foundation::{HWND, RECT};
+        use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
+        use windows::Win32::Storage::Xps::{PrintWindow, PRINT_WINDOW_FLAGS};
+        use windows::Win32::Graphics::Gdi::{
+            CreateCompatibleBitmap, CreateCompatibleDC, SelectObject, GetDIBits,
+            BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, BI_RGB, HGDIOBJ,
+        };
+
+        let hwnd = HWND(hwnd_raw as *mut core::ffi::c_void);
+        if hwnd.is_invalid() {
+            return Err(CoreError::Win32 { code: 0, context: "capture_window_printwindow: invalid hwnd" });
+        }
+        let mut r = RECT::default();
+        if GetWindowRect(hwnd, &mut r).is_err() {
+            return Err(CoreError::Win32 { code: 0, context: "PrintWindow: GetWindowRect failed" });
+        }
+        let width = (r.right - r.left).max(0) as usize;
+        let height = (r.bottom - r.top).max(0) as usize;
+        if width == 0 || height == 0 {
+            return Err(CoreError::Win32 { code: 0, context: "PrintWindow: zero-sized window" });
+        }
+
+        let raw_screen_dc = windows::Win32::Graphics::Gdi::GetDC(HWND(std::ptr::null_mut()));
+        if raw_screen_dc.is_invalid() {
+            return Err(CoreError::Win32 { code: 0, context: "PrintWindow: GetDC failed" });
+        }
+        let screen_dc = ScreenDcGuard(raw_screen_dc);
+
+        let raw_mem_dc = CreateCompatibleDC(screen_dc.0);
+        if raw_mem_dc.is_invalid() {
+            return Err(CoreError::Win32 { code: 0, context: "PrintWindow: CreateCompatibleDC failed" });
+        }
+        let mem_dc = MemDcGuard(raw_mem_dc);
+
+        let raw_bmp = CreateCompatibleBitmap(screen_dc.0, width as i32, height as i32);
+        if raw_bmp.is_invalid() {
+            return Err(CoreError::Win32 { code: 0, context: "PrintWindow: CreateCompatibleBitmap failed" });
+        }
+        let bmp = BitmapGuard(raw_bmp);
+
+        let mut bgra = vec![0u8; width * height * 4];
+        let old_gdi = SelectObject(mem_dc.0, HGDIOBJ(bmp.0.0));
+
+        // PW_RENDERFULLCONTENT (0x2): render the full content, including DirectX/
+        // composited surfaces that the plain PW_CLIENTONLY path misses.
+        let printed = PrintWindow(hwnd, mem_dc.0, PRINT_WINDOW_FLAGS(2));
+
+        let mut bmi = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: width as i32,
+                biHeight: -(height as i32), // top-down
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                biSizeImage: 0,
+                biXPelsPerMeter: 0,
+                biYPelsPerMeter: 0,
+                biClrUsed: 0,
+                biClrImportant: 0,
+            },
+            bmiColors: [Default::default()],
+        };
+        let scanlines = GetDIBits(
+            mem_dc.0, bmp.0, 0, height as u32,
+            Some(bgra.as_mut_ptr() as *mut _), &mut bmi, DIB_RGB_COLORS,
+        );
+
+        let _ = SelectObject(mem_dc.0, old_gdi);
+
+        if !printed.as_bool() {
+            return Err(CoreError::Win32 { code: 0, context: "PrintWindow returned FALSE" });
+        }
+        if scanlines == 0 {
+            return Err(CoreError::Win32 { code: 0, context: "PrintWindow: GetDIBits returned 0 scanlines" });
+        }
+        let rgba = bgra_to_rgba(&bgra, width, height, width * 4);
+        Ok((rgba, width, height))
+    }
+}
+
 // DESIGN: CaptureContext caches the full DXGI duplication session.
 //
 // D3D11 device + context are initialized once and reused across all captures.
