@@ -1279,6 +1279,23 @@ async fn handle_ghost_key(
     p: &Value,
 ) -> std::result::Result<Value, String> {
     let keys = p["keys"].as_str().ok_or("ghost_key: missing 'keys' param")?;
+
+    // Background mode: post a single key to a named window's focused control
+    // without taking foreground. Modifier combos are rejected — posting can't set
+    // the modifier state apps read (GetKeyState), so a combo would silently break.
+    if p["background"].as_bool() == Some(true) {
+        let window = p["window"].as_str()
+            .ok_or("ghost_key background=true requires 'window' (the target app)")?;
+        let (mods, key) = parse_key_combo(keys)?;
+        if !mods.is_empty() {
+            return Err(format!(
+                "ghost_key background: modifier combos ({keys}) aren't reliable in background \
+                 (the app reads real keyboard state); use foreground for combos"
+            ));
+        }
+        return session.key_background(window, &key).await.map_err(|e| e.to_string());
+    }
+
     // Keyboard SendInput routes to whichever window owns OS focus — which between
     // MCP calls is usually the client's own terminal. With `window` given we focus
     // + confirm the target first and FAIL LOUDLY if it can't be confirmed, instead
@@ -1808,7 +1825,8 @@ fn lean_tools_schema() -> Value {
           "description": "Key input. Single key: keys='Enter'. Combo: keys='Ctrl+C'. Hold/release: keys='down:Shift' / keys='up:Shift'. STRONGLY RECOMMENDED: pass window=<title substring> — keys go to whichever window owns OS focus (often the MCP client's own terminal between calls); with window set, the target is focused+confirmed first and the call fails loudly instead of typing into the wrong app.",
           "inputSchema": { "type": "object", "required": ["keys"], "properties": {
               "keys": { "type": "string", "description": "Key spec: 'Enter', 'Ctrl+C', 'Ctrl+Shift+T', 'down:Shift', 'up:Shift'" },
-              "window": { "type": "string", "description": "Target window title substring. Focus is acquired+confirmed before sending; errors if it can't be." }
+              "window": { "type": "string", "description": "Target window title substring. Focus is acquired+confirmed before sending; errors if it can't be. REQUIRED when background=true." },
+              "background": { "type": "boolean", "description": "Post a SINGLE key to `window`'s focused control WITHOUT taking foreground or moving the cursor. Single keys only (Enter/Tab/F5/arrows/char); modifier combos (Ctrl+C) are rejected — posting can't set the modifier state apps read. Returns {focus_preserved, cursor_preserved}." }
           }}},
         { "name": "ghost_scroll",
           "description": "Scroll. direction: up/down/left/right, amount = notches (default 3). Coord mode: pass x/y. 'Until' mode: pass until_name/until_role to scroll the foreground window repeatedly until that element becomes visible (long/virtualized lists), up to max_scrolls; returns found=true/false.",
