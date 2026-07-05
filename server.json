@@ -1,0 +1,34 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
+  "name": "io.github.NORTHTEKDevs/ghost",
+  "description": "Computer-use MCP server for Windows. Drives any native app (Win32/WPF/UWP/Electron), including apps with no API, in the background without stealing focus or the cursor, and verifies every action. Model-agnostic vision grounding.",
+  "repository": {
+    "url": "https://github.com/NORTHTEKDevs/ghost",
+    "source": "github"
+  },
+  "version": "0.14.0",
+  "websiteUrl": "https://github.com/NORTHTEKDevs/ghost",
+  "packages": [
+    {
+      "registryType": "github",
+      "identifier": "NORTHTEKDevs/ghost",
+      "version": "0.14.0",
+      "transport": { "type": "stdio" },
+      "runtimeHint": "Prebuilt ghost-mcp.exe (Windows 10/11), or `cargo build --release -p ghost-mcp`.",
+      "environmentVariables": [
+        {
+          "name": "GHOST_VISION_API_KEY",
+          "description": "Optional. API key for OpenAI-compatible vision grounding (or OPENAI_API_KEY / NVIDIA_API_KEY / ANTHROPIC_API_KEY). Local tiers (cache/UIA/OCR/CV) work with no key.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "GHOST_VISION_BASE_URL",
+          "description": "Optional. Endpoint for a self-hosted / alternate OpenAI-compatible vision model (vLLM/Ollama/LM Studio/OpenAI/Gemini/Groq).",
+          "isRequired": false,
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}
