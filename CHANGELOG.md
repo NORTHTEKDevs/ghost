@@ -33,7 +33,15 @@ Closes the gaps left by v0.12.0's background dispatch.
   works, plus an authorized-use note.
 
 New primitives: `BackgroundClicker::{double_click_screen, right_click_screen,
-hover_screen, send_key, send_char, focused_control}`. +4 unit tests.
+hover_screen, send_key, send_char, focused_control}`. +6 unit tests (null-hwnd
+guards for every new primitive).
+
+Adversarial review found + fixed before push: `send_key` now sets the
+extended-key bit (24) for the nav cluster (arrows/Home/End/PageUp·Down/Ins/Del)
+and synthesizes `WM_CHAR` for Enter/Tab/Backspace (a posted `WM_KEYDOWN` alone
+won't edit text without a message pump); `ghost_key background` now reports
+`focused_control: false` with a clear note when nothing held focus and the key
+went to the frame; the vision key is trimmed before use.
 
 ## [0.12.0] - 2026-07-05 — Background dispatch (agent-harness mode)
 
