@@ -1,0 +1,20 @@
+{
+  "cycles": 40,
+  "acts": 160,
+  "verify_null_rate": 0.0,
+  "verify_false_rate": 0.0312,
+  "focus_lost_rate": 0.0,
+  "warning_rate": 0.0312,
+  "error_rate": 0.0,
+  "effect_mismatch": 0,
+  "effect_mismatch_rate": 0.0,
+  "latency_ms": {
+    "p50": 84.6,
+    "p95": 116.8,
+    "p99": 365.4,
+    "max": 367.3
+  },
+  "wall_s": 21.5,
+  "verdict": "PASS",
+  "failures": []
+}
