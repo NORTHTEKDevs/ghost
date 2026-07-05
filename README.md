@@ -233,9 +233,17 @@ the correct button — versus ~250px off with coordinate regression.
 
 Honest scope: when detected elements carry accessible names (most apps), the
 labels do much of the disambiguation; for unlabeled icons the model leans on the
-badge's visual position/appearance. Truly invisible elements — pure canvas with
-no accessibility tree and no text — still need a local visual detector
-(OmniParser-style), which is a separate, GPU-dependent effort not shipped here.
+badge's visual position/appearance.
+
+**Canvas / no-accessibility-tree apps.** When the UIA tree is sparse (custom-drawn
+UIs, remote-desktop surfaces, game canvases), Ghost augments the Set-of-Marks
+candidates with a built-in **CPU classical-CV detector** (`ghost_ground::cv_detect`):
+edge density → connected components → size/aspect filter, no GPU and no model
+download. It gives the VLM real boxes to pick from where the accessibility tree
+has nothing. It is coarser than a trained detector — an optional OmniParser ONNX
+tier (`--features yolo` + `GHOST_YOLO_MODEL`) plugs into the same Set-of-Marks
+path when a GPU model is available. The CV-marks → VLM-pick end-to-end needs a
+configured vision key.
 
 ## Benchmark — task success, not "did the call return ok"
 
@@ -265,6 +273,23 @@ python bench/run_bench.py             # exit 0 iff every task passed
 python bench/run_bench.py --self-test # exit 0 iff the harness caught every planted failure
 ```
 
+### Reliability soak
+
+`bench/soak.py` drives many act-then-verify cycles and gates on the signals unit
+tests can't see: how often `verified` comes back null/false, focus-loss rate,
+error rate, whether each action's real effect happened (the display is
+re-observed, never trusted from the return), and latency percentiles.
+
+> Latest (160 acts): **PASS** — verify-null 0.0, focus-loss 0.0, effect-mismatch
+> 0 (100% correct), p50 85ms / p95 117ms. See
+> [`bench/results/soak.md`](bench/results/soak.md).
+
+```bash
+python bench/soak.py                  # exit 0 iff every reliability threshold holds
+python bench/soak.py --cycles 250     # ~1000 acts
+python bench/soak.py --self-test      # exit 0 iff the harness flags a planted-wrong effect
+```
+
 We deliberately publish only Ghost's own measured numbers — never invented
 columns for other tools. `bench/README.md` gives an honest protocol for
 comparing against Playwright-MCP / Computer Use / UI-TARS, and explains why a
@@ -275,15 +300,18 @@ vision agents need an API + VM).
 
 | Operation                          | Measured  |
 | ---------------------------------- | --------- |
-| BGRA→RGBA convert, full 1080p      | ~4.06 ms  |
+| Region capture, GDI, any size      | ~16.5 ms  |
+| Region capture, DXGI, 1600x900     | ~70-83 ms |
 | BGRA→RGBA convert, 400x300 region  | ~206 µs   |
 | JSONLogic eq/var                   | 32.2 ns   |
 | Intent compile (3op)               | 1.49 µs   |
 
-The region convert is ~20x cheaper than converting the whole frame — and every
-action captures the target window several times, so that's the path that was
-optimized in v0.10.0. Run: `cargo bench -p ghost-core --bench convert`. Older
-baselines: `docs/benches/v030-baseline.md`.
+End-to-end capture measurement (release, `tests/capture_latency_probe.rs`)
+corrected the v0.10.0 assumption: the DXGI *acquire* dominates and hits a cliff on
+large windows, so region captures (act-verify, screenshots, Set-of-Marks) route
+through flat ~16.5ms GDI BitBlt in v0.11.0; full-screen still uses DXGI. Run the
+convert microbench: `cargo bench -p ghost-core --bench convert`. Older baselines:
+`docs/benches/v030-baseline.md`.
 
 ## Requirements
 
