@@ -308,6 +308,26 @@ pub fn capture_screen_full_rgba() -> Result<(Vec<u8>, usize, usize), CoreError> 
     capture_rgba(guard.as_mut().unwrap())
 }
 
+/// Capture an on-primary-monitor rect as tightly-packed RGBA, converting ONLY
+/// that region (skips converting/cloning the whole frame — ~20x cheaper convert
+/// for a small window, see benches/convert.rs). Caller must pass an on-primary
+/// rect (off-primary goes through the GDI virtual path in capture_region_raw).
+pub fn capture_screen_region_fast(rect: (i32, i32, i32, i32)) -> Result<(Vec<u8>, usize, usize), CoreError> {
+    let (w, h) = primary_screen_size()?;
+    let l = rect.0.max(0) as usize;
+    let t = rect.1.max(0) as usize;
+    let r = (rect.2.max(0) as usize).min(w);
+    let b = (rect.3.max(0) as usize).min(h);
+    if r <= l || b <= t {
+        return Err(CoreError::Win32 { code: 0, context: "capture_screen_region_fast: degenerate rect" });
+    }
+    let mut guard = CAPTURE_STATE.lock().unwrap_or_else(|e| e.into_inner());
+    if guard.is_none() {
+        *guard = Some(init_capture_state()?);
+    }
+    capture_rgba_cropped(guard.as_mut().unwrap(), Some((l, t, r, b)))
+}
+
 /// Capture the primary monitor, downsample to `target_dim x target_dim` cells,
 /// and return the raw averaged BGRA bytes (target_dim * target_dim * 4 bytes).
 /// This is the fast path for idle detection and perceptual hashing: no PNG encode needed.
@@ -521,23 +541,51 @@ unsafe fn acquire_duplication(ctx: &mut CaptureContext) -> Result<(), CoreError>
 /// Sticky optimisation: once is_frame_black() fires, DXGI_ALWAYS_BLACK is set and
 /// all subsequent calls skip DXGI entirely (avoiding ~50ms of wasted work per frame).
 fn capture_rgba(ctx: &mut CaptureContext) -> Result<(Vec<u8>, usize, usize), CoreError> {
+    capture_rgba_cropped(ctx, None)
+}
+
+/// Capture, optionally converting only a sub-rect (`crop` = clamped l,t,r,b in
+/// primary-monitor pixels). The crop path converts far fewer pixels for a small
+/// window (~20x faster than full-frame convert per the `convert` bench) and
+/// skips the full-frame cache clone. GDI/black fallbacks use the region GDI path.
+fn capture_rgba_cropped(
+    ctx: &mut CaptureContext,
+    crop: Option<(usize, usize, usize, usize)>,
+) -> Result<(Vec<u8>, usize, usize), CoreError> {
+    let gdi_fallback = || match crop {
+        Some((l, t, r, b)) => capture_virtual_rect_gdi(l as i32, t as i32, r as i32, b as i32),
+        None => capture_screen_gdi(),
+    };
     // Fast path: DXGI known-broken — skip it, but re-probe periodically in case the
     // black frames were transient (sleep/resume, driver reset).
     if DXGI_ALWAYS_BLACK.load(Ordering::Relaxed) {
         let n = GDI_CAPTURES_SINCE_BLACK.fetch_add(1, Ordering::Relaxed) + 1;
         if !n.is_multiple_of(DXGI_REPROBE_INTERVAL) {
-            return capture_screen_gdi();
+            return gdi_fallback();
         }
         tracing::debug!(gdi_captures = n, "re-probing DXGI after sticky black-frame flag");
         DXGI_ALWAYS_BLACK.store(false, Ordering::Relaxed);
     }
-    let result = unsafe { capture_rgba_inner(ctx, true) }?;
+    let result = match unsafe { capture_rgba_inner(ctx, true, crop) } {
+        Ok(r) => r,
+        // A region capture can't serve a DXGI static-screen timeout from the
+        // full-frame cache (region captures don't populate it, and a stale-size
+        // cache returns Err). Rather than propagate — which would silently null
+        // out act-then-verify — fall back to the GDI region capture, which always
+        // produces a correct (if slower) frame. Full captures keep propagating.
+        Err(e) => {
+            if crop.is_some() {
+                return gdi_fallback();
+            }
+            return Err(e);
+        }
+    };
     // If the captured frame is entirely black, DXGI is not working correctly on this
     // system. Set the sticky flag so future calls skip straight to GDI.
     if is_frame_black(&result.0) {
         tracing::warn!("DXGI capture returned all-black frame; setting sticky GDI-only flag and falling back to GDI BitBlt (HDR/driver/RDP compat)");
         DXGI_ALWAYS_BLACK.store(true, Ordering::Relaxed);
-        return capture_screen_gdi();
+        return gdi_fallback();
     }
     Ok(result)
 }
@@ -572,6 +620,7 @@ impl Drop for FrameGuard<'_> {
 unsafe fn capture_rgba_inner(
     ctx: &mut CaptureContext,
     allow_retry: bool,
+    crop: Option<(usize, usize, usize, usize)>, // clamped l,t,r,b in monitor px
 ) -> Result<(Vec<u8>, usize, usize), CoreError> {
     use windows::Win32::Graphics::Direct3D11::*;
     use windows::Win32::Graphics::Dxgi::*;
@@ -590,10 +639,25 @@ unsafe fn capture_rgba_inner(
 
     if let Err(ref e) = acquire_result {
         let hr = e.code();
-        // DXGI_ERROR_WAIT_TIMEOUT: no new frame within the window — return cached frame.
+        // DXGI_ERROR_WAIT_TIMEOUT: no new frame within the window — return cached
+        // frame (cropped to the region if a crop was requested).
         if hr == DXGI_ERROR_WAIT_TIMEOUT {
-            if let Some(ref cached) = ctx.last_frame {
-                return Ok(cached.clone());
+            if let Some((ref cached, cw, ch)) = ctx.last_frame {
+                return match crop {
+                    Some((l, t, r, b)) => {
+                        // Re-clamp against the CACHED frame's own dims (not the
+                        // current monitor size) — they can differ if resolution
+                        // changed since the last full capture. Degenerate → Err so
+                        // capture_rgba_cropped falls back to a fresh GDI region.
+                        let l = l.min(cw); let t = t.min(ch);
+                        let r = r.min(cw); let b = b.min(ch);
+                        if r <= l || b <= t {
+                            return Err(CoreError::Win32 { code: 0, context: "cached-frame crop degenerate after re-clamp" });
+                        }
+                        Ok((crop_rgba(cached, cw, l, t, r - l, b - t), r - l, b - t))
+                    }
+                    None => Ok((cached.clone(), cw, ch)),
+                };
             }
             // No prior frame; re-try once with a fresh acquire (session just started).
             return Err(CoreError::Win32 { code: hr.0 as u32, context: "AcquireNextFrame timeout, no cached frame" });
@@ -604,7 +668,7 @@ unsafe fn capture_rgba_inner(
             || hr == DXGI_ERROR_INVALID_CALL;
         if allow_retry && is_access_error {
             acquire_duplication(ctx)?;
-            return capture_rgba_inner(ctx, false);
+            return capture_rgba_inner(ctx, false, crop);
         }
         return Err(CoreError::Win32 { code: hr.0 as u32, context: "AcquireNextFrame" });
     }
@@ -655,20 +719,41 @@ unsafe fn capture_rgba_inner(
 
     let pitch = mapped.RowPitch as usize;
     let data = std::slice::from_raw_parts(mapped.pData as *const u8, pitch * height);
-    let rgba = bgra_to_rgba(data, width, height, pitch);
 
-    ctx.context.Unmap(&staging_view, 0);
+    let out = match crop {
+        // Convert only the requested sub-rect — ~20x fewer pixels for a small
+        // window (see benches/convert.rs). Clamp to frame bounds defensively.
+        Some((l, t, r, b)) => {
+            let l = l.min(width);
+            let t = t.min(height);
+            let r = r.min(width);
+            let b = b.min(height);
+            if r <= l || b <= t {
+                ctx.context.Unmap(&staging_view, 0);
+                return Err(CoreError::Win32 { code: 0, context: "capture crop rect degenerate after clamp" });
+            }
+            let (cw, ch) = (r - l, b - t);
+            let rgba = bgra_to_rgba_region(data, pitch, l, t, cw, ch);
+            ctx.context.Unmap(&staging_view, 0);
+            // Do NOT populate last_frame from a region capture (wrong dims for a
+            // later full request); the full-frame cache is only for full captures.
+            (rgba, cw, ch)
+        }
+        None => {
+            let rgba = bgra_to_rgba(data, width, height, pitch);
+            ctx.context.Unmap(&staging_view, 0);
+            // Cache the frame so DXGI_ERROR_WAIT_TIMEOUT on static screens returns it.
+            ctx.last_frame = Some((rgba.clone(), width, height));
+            (rgba, width, height)
+        }
+    };
     // FrameGuard drop releases the frame — do NOT call ReleaseFrame explicitly here.
-
-    // Cache the frame so DXGI_ERROR_WAIT_TIMEOUT on static screens returns it.
-    ctx.last_frame = Some((rgba.clone(), width, height));
-
-    Ok((rgba, width, height))
+    Ok(out)
 }
 
 /// Convert BGRA pixel data (with row pitch) to tightly-packed RGBA.
 /// Exported for testing.
-pub(crate) fn bgra_to_rgba(data: &[u8], width: usize, height: usize, pitch: usize) -> Vec<u8> {
+pub fn bgra_to_rgba(data: &[u8], width: usize, height: usize, pitch: usize) -> Vec<u8> {
     let mut rgba = vec![0u8; width * height * 4];
     for y in 0..height {
         for x in 0..width {
@@ -681,6 +766,45 @@ pub(crate) fn bgra_to_rgba(data: &[u8], width: usize, height: usize, pitch: usiz
         }
     }
     rgba
+}
+
+/// Convert ONLY the `cw`x`ch` sub-rect at (`src_x`, `src_y`) of a BGRA frame
+/// (with row `pitch`) into a tightly-packed `cw`x`ch` RGBA buffer. Identical
+/// output to `bgra_to_rgba(full)` followed by a crop, but touches only the
+/// requested pixels — for a small window on a large monitor this converts a
+/// tiny fraction of the frame instead of the whole thing. The caller must
+/// ensure the rect lies within the frame bounds.
+pub fn bgra_to_rgba_region(
+    data: &[u8], pitch: usize, src_x: usize, src_y: usize, cw: usize, ch: usize,
+) -> Vec<u8> {
+    let mut rgba = vec![0u8; cw * ch * 4];
+    for y in 0..ch {
+        let row_src = (src_y + y) * pitch + src_x * 4;
+        let row_dst = y * cw * 4;
+        for x in 0..cw {
+            let src = row_src + x * 4;
+            let dst = row_dst + x * 4;
+            rgba[dst]     = data[src + 2]; // R <- B
+            rgba[dst + 1] = data[src + 1]; // G
+            rgba[dst + 2] = data[src];     // B <- R
+            rgba[dst + 3] = 255;           // A
+        }
+    }
+    rgba
+}
+
+/// Crop an already-packed RGBA frame (`full_w` wide) to a sub-rect. Used to serve
+/// a region request from the cached full frame on a DXGI static-screen timeout.
+pub fn crop_rgba(full: &[u8], full_w: usize, l: usize, t: usize, cw: usize, ch: usize) -> Vec<u8> {
+    let mut out = vec![0u8; cw * ch * 4];
+    for y in 0..ch {
+        let src = ((t + y) * full_w + l) * 4;
+        let dst = y * cw * 4;
+        if src + cw * 4 <= full.len() {
+            out[dst..dst + cw * 4].copy_from_slice(&full[src..src + cw * 4]);
+        }
+    }
+    out
 }
 
 /// Encode tightly-packed RGBA bytes as PNG. Exported for testing.
@@ -833,6 +957,29 @@ mod tests {
         let rgba = bgra_to_rgba(&bgra, 1, 2, 8);
         assert_eq!(&rgba[0..4], &[0x30, 0x20, 0x10, 0xFF]); // row 0 RGBA
         assert_eq!(&rgba[4..8], &[0x60, 0x50, 0x40, 0xFF]); // row 1 RGBA
+    }
+
+    #[test]
+    fn bgra_to_rgba_region_matches_full_then_crop() {
+        // Synthetic 8x6 BGRA frame with pitch padding (pitch = 8*4 + 8 = 40).
+        let (w, h, pitch) = (8usize, 6usize, 8 * 4 + 8);
+        let mut bgra = vec![0u8; pitch * h];
+        for y in 0..h {
+            for x in 0..w {
+                let s = y * pitch + x * 4;
+                bgra[s] = (x * 10) as u8;       // B
+                bgra[s + 1] = (y * 20) as u8;   // G
+                bgra[s + 2] = (x + y) as u8;    // R
+                bgra[s + 3] = 0xFF;
+            }
+        }
+        let full = bgra_to_rgba(&bgra, w, h, pitch);
+        // For every sub-rect, region-convert must equal full-then-crop.
+        for &(l, t, cw, ch) in &[(0usize, 0usize, 8usize, 6usize), (2, 1, 4, 3), (5, 4, 3, 2), (0, 5, 1, 1)] {
+            let region = bgra_to_rgba_region(&bgra, pitch, l, t, cw, ch);
+            let cropped = crop_rgba(&full, w, l, t, cw, ch);
+            assert_eq!(region, cropped, "region convert must equal full-then-crop for rect ({l},{t},{cw},{ch})");
+        }
     }
 
     #[test]

@@ -67,38 +67,18 @@ pub fn compute_verification(
 pub fn capture_region_raw(
     rect: Option<(i32, i32, i32, i32)>,
 ) -> Result<(Vec<u8>, usize, usize), CoreError> {
-    // Off-primary rects (window on a secondary monitor) can't be served by the
-    // primary-output DXGI path — route them through the GDI virtual-screen
-    // capture so verification/OCR work on any monitor instead of silently
-    // cropping garbage from the primary.
-    if let Some((l, t, r, b)) = rect {
-        if !super::screen::rect_on_primary((l, t, r, b)) {
-            return super::screen::capture_virtual_rect_gdi(l, t, r, b);
-        }
-    }
-    let (full_rgba, full_w, full_h) = super::screen::capture_screen_full_rgba()?;
     match rect {
-        None => Ok((full_rgba, full_w, full_h)),
-        Some((l, t, r, b)) => {
-            let l = l.max(0) as usize;
-            let t = t.max(0) as usize;
-            let r = (r as usize).min(full_w);
-            let b = (b as usize).min(full_h);
-            if r <= l || b <= t {
-                // MEDIUM-1: return Err instead of silently falling back to full-screen.
-                // Callers in session.rs use .ok(), so this cleanly skips verification.
-                return Err(CoreError::Win32 { code: 0, context: "capture_region_raw: degenerate rect after clamping" });
+        None => super::screen::capture_screen_full_rgba(),
+        Some(r) => {
+            // Off-primary rects (window on a secondary monitor) go through the GDI
+            // virtual-screen path; on-primary rects use the fast region capture
+            // that converts ONLY the requested pixels (~20x cheaper convert for a
+            // small window) instead of converting+cloning the whole frame.
+            if super::screen::rect_on_primary(r) {
+                super::screen::capture_screen_region_fast(r)
+            } else {
+                super::screen::capture_virtual_rect_gdi(r.0, r.1, r.2, r.3)
             }
-            let cw = r - l;
-            let ch = b - t;
-            let mut crop = vec![0u8; cw * ch * 4];
-            for y in 0..ch {
-                let src_off = ((t + y) * full_w + l) * 4;
-                let dst_off = y * cw * 4;
-                crop[dst_off..dst_off + cw * 4]
-                    .copy_from_slice(&full_rgba[src_off..src_off + cw * 4]);
-            }
-            Ok((crop, cw, ch))
         }
     }
 }
