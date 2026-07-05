@@ -14,7 +14,13 @@ Ship it three ways:
 - **`ghost-http` server** — local REST API, call it from Python, Node, curl, anything (`curl http://127.0.0.1:7878/list-windows`)
 - **`ghost-mcp` server** — Model Context Protocol server for Claude, Cursor, and any MCP client (37 tools)
 
-No Claude required. No browser required. No CDP. Unblockable because it drives the OS like a user.
+No Claude required. No browser required. No CDP. It drives apps through the OS's
+own automation and input APIs, so it works with native apps that have no API and
+no automation hooks of their own — the same reliability whether or not an app was
+built to be automated.
+
+Ghost is a general-purpose automation tool. Use it on systems you own or are
+authorized to automate, and in line with the terms of the software you drive.
 
 ## Install
 
@@ -194,8 +200,19 @@ ghost_act { "background": true, "window": "Character Map",
   line-of-business apps — the software that has no API and most needs automating —
   drive cleanly in the background.
 
-Supports `click` and `type` today (the two UIA-pattern-backed actions);
-`double_click`/`right_click`/`hover` are coordinate-only and need foreground.
+Supports `click`, `type`, `double_click`, `right_click`, and `hover` (posted mouse
+messages), plus `ghost_key background=true` for single keys (Enter/Tab/F-keys/char
+via `WM_KEYDOWN`/`WM_CHAR`). Modifier combos (Ctrl+C) are rejected in background —
+posting can't set the modifier state apps read, so a combo would silently break;
+use foreground for those.
+
+## Vision is model-agnostic
+
+Description-based grounding works with any tool-capable vision model behind an
+OpenAI-compatible endpoint — NVIDIA (free default), OpenAI, Gemini, Groq, or a
+local vLLM / Ollama / LM Studio server — or Anthropic. Point `GHOST_VISION_BASE_URL`
++ `GHOST_VISION_MODEL` at your endpoint and set `GHOST_VISION_API_KEY` (a keyless
+local server needs only the base URL). No vendor lock-in.
 
 ## Emergency Stop
 

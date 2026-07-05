@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.13.0] - 2026-07-05 — Full background input + model-agnostic vision
+
+Closes the gaps left by v0.12.0's background dispatch.
+
+### Added
+
+- **Background `double_click` / `right_click` / `hover`** (`ghost_act
+  background=true`). Posted mouse messages on windowed controls
+  (`WM_LBUTTONDBLCLK`, `WM_RBUTTONDOWN/UP`, `WM_MOUSEMOVE`) at the element's
+  `ScreenToClient` centre — no foreground, no cursor. double_click reuses the
+  element-ROI PrintWindow verify; right_click/hover report `verified: null` with a
+  note (a context menu is a separate popup; posted hover has no OS cursor).
+  Windowless controls error instead of stealing focus.
+- **Background keyboard** (`ghost_key background=true`). Posts a single key to the
+  target window's focused control (found via `GetGUIThreadInfo`) with no
+  foreground/cursor change — printable chars as `WM_CHAR`, named keys
+  (Enter/Tab/F-keys/arrows) as `WM_KEYDOWN`/`UP`. Modifier combos are rejected
+  (posting can't set the modifier state apps read via `GetKeyState`).
+  Live-verified: a char posted to a background charmap edit read back correct
+  while Calculator kept the foreground.
+- **Model-agnostic vision.** Description grounding works with any OpenAI-compatible
+  endpoint (NVIDIA, OpenAI, Gemini, Groq, local vLLM/Ollama/LM Studio) or
+  Anthropic. Key resolution is provider-agnostic (`GHOST_VISION_API_KEY` >
+  `OPENAI_API_KEY` > `NVIDIA_API_KEY`); a keyless local server needs only
+  `GHOST_VISION_BASE_URL`. Verified against a capture server: the request carried
+  the custom model + generic bearer key + image.
+
+### Changed
+
+- README: softened the "unblockable" framing to a plain description of how Ghost
+  works, plus an authorized-use note.
+
+New primitives: `BackgroundClicker::{double_click_screen, right_click_screen,
+hover_screen, send_key, send_char, focused_control}`. +4 unit tests.
+
 ## [0.12.0] - 2026-07-05 — Background dispatch (agent-harness mode)
 
 Drive an app WITHOUT bringing it to the foreground or moving the cursor — so an
