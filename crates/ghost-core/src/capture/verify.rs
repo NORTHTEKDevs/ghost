@@ -70,15 +70,16 @@ pub fn capture_region_raw(
     match rect {
         None => super::screen::capture_screen_full_rgba(),
         Some(r) => {
-            // Off-primary rects (window on a secondary monitor) go through the GDI
-            // virtual-screen path; on-primary rects use the fast region capture
-            // that converts ONLY the requested pixels (~20x cheaper convert for a
-            // small window) instead of converting+cloning the whole frame.
-            if super::screen::rect_on_primary(r) {
-                super::screen::capture_screen_region_fast(r)
-            } else {
-                super::screen::capture_virtual_rect_gdi(r.0, r.1, r.2, r.3)
-            }
+            // Region captures go through GDI BitBlt of exactly the target rect.
+            // Measured (release, tests/capture_latency_probe.rs): GDI region capture
+            // is flat ~16.5ms regardless of window size, whereas the DXGI region path
+            // must acquire+map a whole desktop frame and hits a ~70-83ms cliff for
+            // large windows (1600x900). Act-verify captures the foreground window ~5x
+            // per action, so on large windows GDI is up to ~5x faster per action.
+            // GDI BitBlt of the screen DC returns the DWM-composited image for normal
+            // apps (it is already the trusted universal fallback for the DXGI path),
+            // and it works on any monitor without per-output duplication.
+            super::screen::capture_virtual_rect_gdi(r.0, r.1, r.2, r.3)
         }
     }
 }
