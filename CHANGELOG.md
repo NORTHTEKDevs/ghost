@@ -1,5 +1,50 @@
 # Changelog
 
+## [0.11.0] - 2026-07-05 — Capture latency (measured, corrected), canvas vision, soak
+
+Four evidence-driven improvements. Notably, end-to-end measurement corrected the
+v0.10.0 assumption about the fast capture path.
+
+### Changed
+
+- **Region captures route through GDI, not DXGI (up to ~5x faster per action on
+  large windows).** v0.10.0 optimized the DXGI region *convert* (~20x on that
+  step). But `tests/capture_latency_probe.rs` (release, added here) shows the DXGI
+  *acquire* dominates: DXGI must acquire+map a whole desktop frame regardless of
+  region size and hits a **70-83ms cliff for a 1600x900 window**, while GDI BitBlt
+  of just the rect is flat **~16.5ms** at any size. act-verify captures the
+  foreground window ~5x per action, so large/maximized windows see up to ~5x less
+  capture latency. The act-verify, screenshot, and Set-of-Marks paths all route
+  region rects through GDI now; full-screen still uses DXGI (cached duplicator
+  wins there). No correctness change — GDI BitBlt already backed the DXGI path as
+  its universal fallback, and it works on any monitor.
+  - Consequence: the originally-planned per-output DXGI duplicator for secondary
+    monitors was **dropped** — evidence shows DXGI region is the *slower* path, and
+    it was unverifiable on a single-monitor box anyway. GDI already handles any
+    monitor.
+
+### Added
+
+- **GPU-free CPU element detector for canvas / no-accessibility-tree apps.** A new
+  always-compiled classical-CV detector (`ghost_ground::cv_detect`) proposes
+  element-like boxes from pixels alone (edge density -> connected components ->
+  size/aspect filter -> OmniParser-style de-nest) — no GPU, no model, no deps.
+  `build_marks` augments Set-of-Marks candidates with these regions only when the
+  UIA tree is sparse (<4 elements), so custom-drawn UIs, remote-desktop surfaces,
+  and game canvases become markable while normal apps are untouched. Set-of-Marks
+  geometry moved to a shared `marks` module; `Tier::Cv` labels these detections.
+  Verified on synthetic images (exact bbox recovery, noise filtered) and a real
+  800x600 desktop capture (35 icon/button-sized regions). NOT OmniParser (that
+  needs a GPU model); the CV-marks -> VLM-pick end-to-end needs a configured
+  vision key and was not live-run here.
+- **Reliability soak harness (`bench/soak.py`).** Drives the real ghost-mcp binary
+  through many act-then-verify cycles and gates on verify-null rate, verify-false
+  rate, focus-loss rate, error rate, effect-mismatch (display re-observed), and
+  latency percentiles. First run (160 acts): PASS — verify-null 0.0, focus-loss
+  0.0, effect-mismatch 0 (100% correct), p50 85ms / p95 117ms. Would have caught
+  the v0.10.0 static-screen regression (verify-null spike). `--self-test` proves
+  the harness can fail.
+
 ## [0.10.0] - 2026-07-04 — Region Capture (the measured latency win)
 
 The one raw-performance optimization deferred across several versions — now
