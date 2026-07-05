@@ -394,43 +394,22 @@ pub fn capture_screen_region(
     max_dim: Option<u32>,
     format: CaptureFormat,
 ) -> Result<Vec<u8>, CoreError> {
-    // Off-primary rects: DXGI only duplicates the primary output; route through
-    // the GDI virtual-screen path so screenshots work on any monitor.
+    // Any region rect: GDI BitBlt of exactly that rect. Measured flat ~16.5ms vs
+    // the DXGI full-frame acquire+convert+crop path which costs more and hits a
+    // large-window cliff (see tests/capture_latency_probe.rs). GDI also works on
+    // any monitor (DXGI only duplicates the primary output). Full-screen (rect =
+    // None) still uses DXGI below, where its cached duplicator beats a full BitBlt.
     if let Some((l, t, r, b)) = rect {
-        if !rect_on_primary((l, t, r, b)) {
-            let (rgba, w, h) = capture_virtual_rect_gdi(l, t, r, b)?;
-            return encode_region(rgba, w, h, max_dim, format);
-        }
+        let (rgba, w, h) = capture_virtual_rect_gdi(l, t, r, b)?;
+        return encode_region(rgba, w, h, max_dim, format);
     }
     let mut guard = CAPTURE_STATE.lock().unwrap_or_else(|e| e.into_inner());
     if guard.is_none() {
         *guard = Some(init_capture_state()?);
     }
+    // rect is None here (all Some rects returned via the GDI path above).
     let (full_rgba, full_w, full_h) = capture_rgba(guard.as_mut().unwrap())?;
-
-    let (rgba, w, h) = if let Some((l, t, r, b)) = rect {
-        let l = l.max(0) as usize;
-        let t = t.max(0) as usize;
-        let r = (r as usize).min(full_w);
-        let b = (b as usize).min(full_h);
-        if r <= l || b <= t {
-            return Err(CoreError::Win32 { code: 0, context: "invalid region rect" });
-        }
-        let cw = r - l;
-        let ch = b - t;
-        let mut crop = vec![0u8; cw * ch * 4];
-        for y in 0..ch {
-            let src_off = ((t + y) * full_w + l) * 4;
-            let dst_off = y * cw * 4;
-            crop[dst_off..dst_off + cw * 4]
-                .copy_from_slice(&full_rgba[src_off..src_off + cw * 4]);
-        }
-        (crop, cw, ch)
-    } else {
-        (full_rgba, full_w, full_h)
-    };
-
-    encode_region(rgba, w, h, max_dim, format)
+    encode_region(full_rgba, full_w, full_h, max_dim, format)
 }
 
 /// Downscale (to `max_dim` longest edge, if given) then encode raw RGBA.
