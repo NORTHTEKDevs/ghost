@@ -22,6 +22,39 @@ const WM_RBUTTONUP: u32 = 0x0205;
 const MK_LBUTTON: usize = 0x0001;
 const MK_RBUTTON: usize = 0x0002;
 const SMTO_ABORTIFHUNG: u32 = 0x0002;
+// Standard edit/clipboard command messages — how the common Ctrl+ shortcuts
+// actually work under the hood.
+const WM_CUT: u32 = 0x0300;
+const WM_COPY: u32 = 0x0301;
+const WM_PASTE: u32 = 0x0302;
+const WM_UNDO: u32 = 0x0304;
+const EM_SETSEL: u32 = 0x00B1;
+
+/// A background-safe edit/clipboard command, dispatched as a semantic window
+/// message instead of a raw modifier+key combo (which posting can't do — apps
+/// read the real keyboard state for modifiers).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditCommand {
+    Copy,
+    Cut,
+    Paste,
+    Undo,
+    SelectAll,
+}
+
+impl EditCommand {
+    /// Map a Ctrl+<key> shortcut to its edit command, if supported.
+    pub fn from_ctrl_key(key: &str) -> Option<Self> {
+        match key.to_lowercase().as_str() {
+            "c" => Some(Self::Copy),
+            "x" => Some(Self::Cut),
+            "v" => Some(Self::Paste),
+            "z" => Some(Self::Undo),
+            "a" => Some(Self::SelectAll),
+            _ => None,
+        }
+    }
+}
 
 fn hwnd_of(raw: isize) -> HWND {
     HWND(raw as *mut core::ffi::c_void)
@@ -145,6 +178,37 @@ impl BackgroundClicker {
             );
             if ret.0 == 0 {
                 return Err(CoreError::Win32 { code: 0, context: "BM_CLICK send timed out / target hung" });
+            }
+        }
+        Ok(())
+    }
+
+    /// Dispatch a clipboard/edit command (Copy/Cut/Paste/Undo/SelectAll) to a
+    /// control as a semantic window message — background-safe (no foreground, no
+    /// cursor) and, unlike posting Ctrl+<key>, reliable because it doesn't depend
+    /// on the modifier keyboard state apps read via GetKeyState. Uses a synchronous
+    /// bounded send so a following clipboard read sees the result.
+    pub fn edit_command(hwnd_raw: isize, cmd: EditCommand) -> Result<(), CoreError> {
+        let hwnd = hwnd_of(hwnd_raw);
+        let (msg, wparam, lparam) = match cmd {
+            EditCommand::Copy => (WM_COPY, WPARAM(0), LPARAM(0)),
+            EditCommand::Cut => (WM_CUT, WPARAM(0), LPARAM(0)),
+            EditCommand::Paste => (WM_PASTE, WPARAM(0), LPARAM(0)),
+            EditCommand::Undo => (WM_UNDO, WPARAM(0), LPARAM(0)),
+            // EM_SETSEL(0, -1) selects the entire edit contents.
+            EditCommand::SelectAll => (EM_SETSEL, WPARAM(0), LPARAM(-1)),
+        };
+        unsafe {
+            if !IsWindow(hwnd).as_bool() {
+                return Err(CoreError::WindowGone);
+            }
+            let mut result: usize = 0;
+            let ret = SendMessageTimeoutW(
+                hwnd, msg, wparam, lparam,
+                SEND_MESSAGE_TIMEOUT_FLAGS(SMTO_ABORTIFHUNG), 2000, Some(&mut result),
+            );
+            if ret.0 == 0 {
+                return Err(CoreError::Win32 { code: 0, context: "edit command send timed out / target hung" });
             }
         }
         Ok(())
@@ -315,5 +379,18 @@ mod tests {
     fn focused_control_of_zero_hwnd_returns_zero() {
         // GetWindowThreadProcessId(NULL) == 0 -> falls back to the input handle (0).
         assert_eq!(BackgroundClicker::focused_control(0), 0);
+    }
+
+    #[test]
+    fn edit_command_returns_error_when_hwnd_is_zero() {
+        assert!(matches!(BackgroundClicker::edit_command(0, EditCommand::Copy), Err(CoreError::WindowGone)));
+    }
+
+    #[test]
+    fn edit_command_maps_ctrl_shortcuts() {
+        assert_eq!(EditCommand::from_ctrl_key("c"), Some(EditCommand::Copy));
+        assert_eq!(EditCommand::from_ctrl_key("A"), Some(EditCommand::SelectAll));
+        assert_eq!(EditCommand::from_ctrl_key("z"), Some(EditCommand::Undo));
+        assert_eq!(EditCommand::from_ctrl_key("s"), None);
     }
 }
