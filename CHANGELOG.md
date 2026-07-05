@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.9.1] - 2026-07-04 — Selection + Scroll-Until Primitives
+
+### Added
+
+- **Read text selection without clobbering the clipboard** — `ghost_see
+  mode=selection` (name/role) reads an element's current text selection via UIA
+  TextPattern. Lets an agent confirm/read what's selected before copy/delete/
+  format, without a Ctrl+C round-trip that would overwrite the clipboard. Native
+  edit/RichEdit/document controls; browser controls often don't expose
+  TextPattern (documented). Live-verified: read 'select-this-text' from Notepad.
+- **`ghost_scroll` until-mode** — pass `until_name`/`until_role` to scroll the
+  foreground window repeatedly until that element becomes visible (long or
+  virtualized lists), up to `max_scrolls` (capped at 100). Returns found=true/
+  false. The one thing linear `ghost_run` steps couldn't express. Live-verified:
+  returns fast when already visible, bounded-false when absent.
+
 ## [0.9.0] - 2026-07-04 — Optimization + Capability Batch
 
 Found via a three-pass codebase audit (performance, capability, robustness).

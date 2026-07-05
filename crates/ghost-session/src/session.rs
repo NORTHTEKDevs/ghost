@@ -962,6 +962,44 @@ impl GhostSession {
         Ok(el.get_text())
     }
 
+    /// Read the current text selection of an element (TextPattern), without
+    /// clobbering the clipboard. Empty string if nothing selected/unsupported.
+    pub async fn get_selected_text(&self, by: By) -> Result<String> {
+        let el = self.find(by).await?;
+        Ok(el.get_selection())
+    }
+
+    /// Scroll `direction` in steps of `amount` notches at the foreground window
+    /// center until an element matching `by` (name/role) becomes visible, or
+    /// `max_scrolls` is reached. Returns true if the element appeared. The
+    /// "scroll a long/virtualized list until X shows" primitive that linear
+    /// ghost_run steps can't express.
+    pub async fn scroll_until(&self, by: By, direction: &str, amount: i32, max_scrolls: u32) -> Result<bool> {
+        // Center of the foreground window to aim the wheel at.
+        let (cx, cy) = match self.foreground_window_rect() {
+            Some((l, t, r, b)) => ((l + r) / 2, (t + b) / 2),
+            None => return Err(GhostError::Vision("scroll_until: no foreground window".into())),
+        };
+        for _ in 0..=max_scrolls {
+            if is_stopped() { return Err(GhostError::Stopped); }
+            let found = match &by {
+                By::Name(n) => self.tree.find_by_name_fast(n).map_err(GhostError::Core)?,
+                By::Role(r) => self.tree.find_by_role_fast(r).map_err(GhostError::Core)?,
+                By::Description(_) => return Err(GhostError::Vision(
+                    "scroll_until supports name or role, not description".into())),
+            };
+            // Visible = found AND on-screen (not just present but scrolled off).
+            if let Some(el) = found {
+                if !el.is_offscreen() {
+                    return Ok(true);
+                }
+            }
+            self.scroll(cx, cy, direction, amount).await?;
+            tokio::time::sleep(Duration::from_millis(120)).await;
+        }
+        Ok(false)
+    }
+
     /// Focus a browser window, type a URL into the address bar, press Enter, then wait for idle.
     pub async fn navigate_and_wait(
         &self,
