@@ -77,6 +77,12 @@ impl GhostElement {
         self.inner.get_text()
     }
 
+    /// Get the element's current text SELECTION via TextPattern (empty if none /
+    /// unsupported). Reads a selection without clobbering the clipboard.
+    pub fn get_selection(&self) -> String {
+        patterns::get_selection(&self.inner).unwrap_or_default()
+    }
+
     /// Set UIA focus to this element. Used before keyboard actions to ensure
     /// input lands in the right control.
     pub fn set_focus(&self) -> Result<()> {

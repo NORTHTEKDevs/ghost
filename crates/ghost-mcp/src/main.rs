@@ -434,7 +434,7 @@ async fn handle(
             Ok(json!({
                 "protocolVersion": "2024-11-05",
                 "capabilities": { "tools": {} },
-                "serverInfo": { "name": "ghost", "version": "0.9.0" }
+                "serverInfo": { "name": "ghost", "version": "0.9.1" }
             }))
         }
         "initialized" | "notifications/initialized" => Ok(json!({})),
@@ -697,12 +697,27 @@ async fn handle_tool(
             Ok(json!({ "ok": true, "from": {"x": from_x, "y": from_y}, "to": {"x": to_x, "y": to_y} }))
         }
         "ghost_scroll" => {
-            let x = p["x"].as_i64().ok_or("missing param: x")? as i32;
-            let y = p["y"].as_i64().ok_or("missing param: y")? as i32;
             let direction = p["direction"].as_str().ok_or("missing param: direction")?;
             let amount = p["amount"].as_i64().unwrap_or(3) as i32;
+            // "until" mode: scroll until the named/roled element becomes visible.
+            if p.get("until_name").is_some() || p.get("until_role").is_some() {
+                let by = if let Some(n) = p["until_name"].as_str() { ghost_session::By::name(n) }
+                         else { ghost_session::By::role(p["until_role"].as_str().unwrap_or("")) };
+                // Cap so a huge client value can't wedge the serial server (each
+                // step is a find + scroll + 120ms settle).
+                let max_scrolls = p["max_scrolls"].as_u64().unwrap_or(20).min(100) as u32;
+                let found = session.scroll_until(by, direction, amount, max_scrolls).await.map_err(|e| e.to_string())?;
+                return Ok(json!({ "ok": found, "found": found }));
+            }
+            let x = p["x"].as_i64().ok_or("missing param: x (or until_name/until_role)")? as i32;
+            let y = p["y"].as_i64().ok_or("missing param: y")? as i32;
             session.scroll(x, y, direction, amount).await.map_err(|e| e.to_string())?;
             Ok(json!({ "ok": true }))
+        }
+        "ghost_get_selection" => {
+            let by = parse_by(&p)?;
+            let text = session.get_selected_text(by).await.map_err(|e| e.to_string())?;
+            Ok(json!({ "selection": text, "has_selection": !text.is_empty() }))
         }
         "ghost_get_clipboard" => {
             let text = session.get_clipboard().await.map_err(|e| e.to_string())?;
@@ -1233,6 +1248,7 @@ async fn handle_ghost_see(
         "delta" => handle_tool(session, "ghost_describe_screen_delta", p).await,
         "text" => handle_tool(session, "ghost_read_text", p).await,
         "marks" => handle_tool(session, "ghost_render_marks", p).await,
+        "selection" => handle_tool(session, "ghost_get_selection", p).await,
         _ => handle_tool(session, "ghost_describe_screen_fast", p).await,
     }
 }
@@ -1736,10 +1752,12 @@ fn lean_tools_schema() -> Value {
     json!([
         // --- Perception ---
         { "name": "ghost_see",
-          "description": "Describe the active screen. mode=fast (default, foreground elements, 5-50x faster), mode=full (full walk, scope with window=; unknown window is an ERROR listing open windows), mode=delta (changed elements since since_seq), mode=text (READ the visible text of a window/page — cheapest way to read content, no screenshot needed), mode=marks (DEBUG: returns the Set-of-Marks annotated screenshot the VLM sees when grounding by description — use to diagnose a wrong pick). Elements: off-screen/zero-area filtered, capped at 150 (limit). Text: capped at 20000 chars (limit).",
+          "description": "Describe the active screen. mode=fast (default, foreground elements, 5-50x faster), mode=full (full walk, scope with window=; unknown window is an ERROR listing open windows), mode=delta (changed elements since since_seq), mode=text (READ the visible text of a window/page — cheapest way to read content, no screenshot needed), mode=marks (DEBUG: the Set-of-Marks annotated screenshot the VLM sees when grounding by description), mode=selection (read the current text SELECTION of a name/role element via TextPattern, without clobbering the clipboard). Elements: off-screen/zero-area filtered, capped at 150 (limit). Text: capped at 20000 chars (limit).",
           "inputSchema": { "type": "object", "properties": {
-              "mode": { "type": "string", "enum": ["fast", "full", "delta", "text", "marks"], "description": "fast=foreground elements (default), full=full tree, delta=changed only, text=readable text content, marks=annotated SoM debug image" },
+              "mode": { "type": "string", "enum": ["fast", "full", "delta", "text", "marks", "selection"], "description": "fast=foreground elements (default), full=full tree, delta=changed only, text=readable text content, marks=annotated SoM debug image, selection=selected text of name/role element" },
               "window": { "type": "string", "description": "Partial title to scope the walk (mode=full|text)" },
+              "name": { "type": "string", "description": "Element name (mode=selection)" },
+              "role": { "type": "string", "description": "Element role (mode=selection)" },
               "since_seq": { "type": "integer", "description": "Prior snapshot seq for delta mode" },
               "limit": { "type": "integer", "description": "Max elements (default 150) or chars for mode=text (default 20000); 0 = unlimited elements" }
           }}},
@@ -1774,11 +1792,14 @@ fn lean_tools_schema() -> Value {
               "window": { "type": "string", "description": "Target window title substring. Focus is acquired+confirmed before sending; errors if it can't be." }
           }}},
         { "name": "ghost_scroll",
-          "description": "Scroll at coordinates. direction: up/down/left/right. amount = notches (default 3).",
-          "inputSchema": { "type": "object", "required": ["x","y","direction"], "properties": {
+          "description": "Scroll. direction: up/down/left/right, amount = notches (default 3). Coord mode: pass x/y. 'Until' mode: pass until_name/until_role to scroll the foreground window repeatedly until that element becomes visible (long/virtualized lists), up to max_scrolls; returns found=true/false.",
+          "inputSchema": { "type": "object", "required": ["direction"], "properties": {
               "x": { "type": "integer" }, "y": { "type": "integer" },
               "direction": { "type": "string", "enum": ["up","down","left","right"] },
-              "amount": { "type": "integer", "default": 3 }
+              "amount": { "type": "integer", "default": 3 },
+              "until_name": { "type": "string", "description": "Scroll until an element with this name is visible" },
+              "until_role": { "type": "string", "description": "Scroll until an element with this role is visible" },
+              "max_scrolls": { "type": "integer", "default": 20, "description": "Max scroll steps in 'until' mode" }
           }}},
         { "name": "ghost_drag",
           "description": "Click-hold at a start point, move to an end point, release. Each endpoint may be raw coords (from_x/from_y, to_x/to_y) OR an element (from_name/from_role, to_name/to_role) resolved to its center — e.g. drag a list row onto another, or a slider handle.",
@@ -2655,7 +2676,7 @@ mod tests {
         let resp = json!({
             "protocolVersion": "2024-11-05",
             "capabilities": { "tools": {} },
-            "serverInfo": { "name": "ghost", "version": "0.9.0" }
+            "serverInfo": { "name": "ghost", "version": "0.9.1" }
         });
         assert_eq!(resp["protocolVersion"], "2024-11-05");
         assert!(resp["capabilities"]["tools"].is_object());

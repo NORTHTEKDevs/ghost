@@ -23,6 +23,39 @@ pub fn invoke(element: &UiaElement) -> Result<(), CoreError> {
     Ok(())
 }
 
+/// Read the current text SELECTION of an element via TextPattern
+/// (`GetSelection`). Returns the concatenated selected text across all ranges,
+/// or an empty string when nothing is selected or the element doesn't expose
+/// TextPattern. Lets an agent confirm/read a selection WITHOUT clobbering the
+/// clipboard via Ctrl+C. Works well on native edit/RichEdit/document controls;
+/// many Chromium/browser controls don't expose TextPattern faithfully.
+pub fn get_selection(element: &UiaElement) -> Result<String, CoreError> {
+    unsafe {
+        let pattern = match element.0.GetCurrentPattern(UIA_TextPatternId) {
+            Ok(p) => p,
+            Err(_) => return Ok(String::new()),
+        };
+        let tp: IUIAutomationTextPattern = match pattern.cast() {
+            Ok(t) => t,
+            Err(_) => return Ok(String::new()),
+        };
+        let ranges = match tp.GetSelection() {
+            Ok(r) => r,
+            Err(_) => return Ok(String::new()),
+        };
+        let count = ranges.Length().unwrap_or(0);
+        let mut out = String::new();
+        for i in 0..count {
+            if let Ok(range) = ranges.GetElement(i) {
+                if let Ok(bstr) = range.GetText(-1) {
+                    out.push_str(&bstr.to_string());
+                }
+            }
+        }
+        Ok(out)
+    }
+}
+
 /// Set value via ValuePattern (text inputs).
 /// Falls back to clicking + typing if ValuePattern unavailable.
 pub fn set_value(element: &UiaElement, value: &str) -> Result<(), CoreError> {
