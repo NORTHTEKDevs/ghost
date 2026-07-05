@@ -434,7 +434,7 @@ async fn handle(
             Ok(json!({
                 "protocolVersion": "2024-11-05",
                 "capabilities": { "tools": {} },
-                "serverInfo": { "name": "ghost", "version": "0.9.1" }
+                "serverInfo": { "name": "ghost", "version": "0.10.0" }
             }))
         }
         "initialized" | "notifications/initialized" => Ok(json!({})),
@@ -2676,7 +2676,7 @@ mod tests {
         let resp = json!({
             "protocolVersion": "2024-11-05",
             "capabilities": { "tools": {} },
-            "serverInfo": { "name": "ghost", "version": "0.9.1" }
+            "serverInfo": { "name": "ghost", "version": "0.10.0" }
         });
         assert_eq!(resp["protocolVersion"], "2024-11-05");
         assert!(resp["capabilities"]["tools"].is_object());

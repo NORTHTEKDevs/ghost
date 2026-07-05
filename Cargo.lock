@@ -718,6 +718,7 @@ name = "ghost-core"
 version = "0.3.0"
 dependencies = [
  "blake3",
+ "criterion",
  "crossbeam-channel",
  "image",
  "serde",
@@ -775,7 +776,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-mcp"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "ghost-core",
  "ghost-ground",

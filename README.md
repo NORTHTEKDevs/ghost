@@ -271,14 +271,19 @@ comparing against Playwright-MCP / Computer Use / UI-TARS, and explains why a
 naive same-suite comparison isn't apples-to-apples (Playwright is browser-only;
 vision agents need an API + VM).
 
-### Microbenchmarks (v0.3.0, Windows 11, Ryzen)
+### Microbenchmarks
 
-| Operation            | Measured  | Budget   |
-| -------------------- | --------- | -------- |
-| JSONLogic eq/var     | 32.2 ns   | 1 µs     |
-| Intent compile (3op) | 1.49 µs   | 50 µs    |
+| Operation                          | Measured  |
+| ---------------------------------- | --------- |
+| BGRA→RGBA convert, full 1080p      | ~4.06 ms  |
+| BGRA→RGBA convert, 400x300 region  | ~206 µs   |
+| JSONLogic eq/var                   | 32.2 ns   |
+| Intent compile (3op)               | 1.49 µs   |
 
-See `docs/benches/v030-baseline.md`.
+The region convert is ~20x cheaper than converting the whole frame — and every
+action captures the target window several times, so that's the path that was
+optimized in v0.10.0. Run: `cargo bench -p ghost-core --bench convert`. Older
+baselines: `docs/benches/v030-baseline.md`.
 
 ## Requirements
 

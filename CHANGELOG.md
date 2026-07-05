@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.10.0] - 2026-07-04 — Region Capture (the measured latency win)
+
+The one raw-performance optimization deferred across several versions — now
+measured, implemented, and verified rather than claimed.
+
+### Changed
+
+- **Capture converts only the pixels it needs.** Every `ghost_act` captures the
+  foreground-window rect up to ~5 times (a before-frame plus verification polls).
+  Previously each capture converted the ENTIRE monitor's BGRA→RGBA buffer (and
+  cloned it for the static-screen cache) and then software-cropped to the window.
+  Now an on-primary region capture converts only the requested sub-rect.
+  - Measured (`cargo bench -p ghost-core --bench convert`, 1080p): full-frame
+    convert **~4.06 ms** → 400x300 region convert **~206 µs** — a **~20x** cut
+    in per-capture conversion cost, which runs several times per action.
+  - Also skips the full-frame RGBA clone on region captures (a ~33 MB alloc at 4K).
+  - Live-verified pixel-correct end-to-end: action verification returns
+    verified=true and Set-of-Marks grounding still lands exactly on target (Equals
+    and Plus, 2/2). A unit test proves the region convert is byte-identical to
+    full-convert-then-crop across offsets and row-pitch padding.
+  - Off-primary and full-screen paths are unchanged; only the on-primary
+    region path (used by act-verification and SoM capture) is optimized.
+
+### Fixed
+
+- **Region captures no longer silently disable act-then-verify on a static
+  screen** (adversarial-review finding). Region captures don't warm the
+  full-frame cache, so a DXGI `AcquireNextFrame` timeout on an unchanging screen
+  (the common case for a "before" frame or a no-visible-delta action) had no
+  cached frame to crop and returned an error — which the session layer swallowed
+  into a null `verified`, defeating the double-action guard. The crop path now
+  falls back to the GDI region capture on that timeout, always returning a real
+  frame. Live-verified: two back-to-back captures of a fully static window both
+  return byte-identical valid frames.
+- **Stale-cache crop is re-clamped against the cached frame's own dimensions**,
+  not the current monitor size, so a resolution/DPI change between the last full
+  capture and a timeout can't return a partially-black region as `Ok`; a
+  degenerate crop now errors and routes to a fresh GDI region capture.
+
 ## [0.9.1] - 2026-07-04 — Selection + Scroll-Until Primitives
 
 ### Added
