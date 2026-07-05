@@ -1403,6 +1403,198 @@ impl GhostSession {
         Ok(out)
     }
 
+    /// Background action: act on an element inside a NAMED window without
+    /// bringing it to the foreground or moving the real cursor. This is the
+    /// agent-harness mode — an agent can drive an app while the human keeps
+    /// working in another window.
+    ///
+    /// Dispatch is UIA-pattern-only: `click` -> InvokePattern, `type` ->
+    /// ValuePattern.SetValue. If the element exposes no such pattern the call
+    /// errors (`NotActionableInBackground`) rather than silently stealing focus.
+    /// `double_click`/`right_click`/`hover` are coordinate-only and are rejected.
+    ///
+    /// Verification never needs the window visible: `type` is confirmed by
+    /// reading ValuePattern.CurrentValue back; `click` is confirmed by a
+    /// PrintWindow before/after delta (works on occluded windows), falling back
+    /// to `verified: null` when PrintWindow can't render the surface.
+    ///
+    /// The result reports `focus_preserved` and `cursor_preserved` so a caller
+    /// can confirm the desktop was not disturbed.
+    pub async fn act_background(&self, window: &str, by: By, action: &str, text: Option<&str>) -> Result<serde_json::Value> {
+        use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+        use windows::Win32::Foundation::{HWND, POINT};
+        use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+
+        if is_stopped() { return Err(GhostError::Stopped); }
+        if !matches!(action, "click" | "type") {
+            return Err(GhostError::Vision(format!(
+                "ghost_act background mode supports only click|type (got '{action}'); \
+                 double_click/right_click/hover are coordinate-only and need foreground"
+            )));
+        }
+
+        // Resolve the target window HWND by partial name (skip minimized).
+        let windows_list = core_list_windows().map_err(GhostError::Core)?;
+        let ql = window.to_lowercase();
+        let win = windows_list.iter()
+            .find(|w| w.name.to_lowercase().contains(&ql) && w.state != "minimized")
+            .ok_or_else(|| GhostError::Vision(format!(
+                "ghost_act background: no visible window matching '{window}' (minimized windows can't be driven in background)"
+            )))?;
+        let hwnd_raw = win.hwnd as isize;
+        let hwnd = HWND(win.hwnd);
+
+        // Snapshot desktop state so we can prove we did not disturb it.
+        let fg_before = unsafe { GetForegroundWindow() };
+        let mut cur_before = POINT::default();
+        let _ = unsafe { GetCursorPos(&mut cur_before) };
+
+        // Find the element WITHIN that window's subtree — no foreground, no set_focus.
+        let el = match &by {
+            By::Name(n) => self.tree.find_by_name_in_hwnd(hwnd, n).map_err(GhostError::Core)?,
+            By::Role(r) => self.tree.find_by_role_in_hwnd(hwnd, r).map_err(GhostError::Core)?,
+            By::Description(d) => return Err(GhostError::Vision(format!(
+                "ghost_act background: description targets need vision grounding (foreground); desc={d}"
+            ))),
+        };
+        let el = el.map(crate::GhostElement::new).ok_or_else(|| GhostError::ElementNotFound {
+            query: format!("{by:?} in window '{window}'"),
+            screenshot: None,
+        })?;
+        let name = el.name();
+        let rect = el.bounding_rect();
+
+        // A nonzero native window handle means the control is a real Win32 window
+        // we can drive with posted messages (BM_CLICK / WM_SETTEXT / WM_LBUTTON*) —
+        // TRULY non-activating. UIA Invoke/SetValue providers, by contrast,
+        // activate the target window, so they're only a last-resort fallback for
+        // windowless (UWP/WinUI/Chromium) controls, and we flag when we use them.
+        let ctrl_hwnd = el.native_window_handle();
+        const UIA_BUTTON: u32 = 50000;
+
+        // Window screen origin — used to convert the element's screen rect into the
+        // window-relative ROI for scoped click verification.
+        let win_origin = unsafe {
+            let mut wr = windows::Win32::Foundation::RECT::default();
+            if windows::Win32::UI::WindowsAndMessaging::GetWindowRect(hwnd, &mut wr).is_ok() {
+                Some((wr.left, wr.top))
+            } else { None }
+        };
+
+        let (verified, note): (Option<bool>, Option<&str>) = match action {
+            "type" => {
+                let t = text.ok_or_else(|| GhostError::Vision("ghost_act: action=type requires text param".into()))?;
+                let via_message = ctrl_hwnd != 0;
+                if via_message {
+                    // Real Win32 control: WM_SETTEXT. A failure here PROPAGATES —
+                    // we do NOT silently fall back to the focus-stealing UIA path.
+                    ghost_core::input::BackgroundClicker::set_text(ctrl_hwnd, t).map_err(GhostError::Core)?;
+                } else {
+                    // Windowless control — UIA ValuePattern (may activate the window).
+                    el.type_text_background(t)?;
+                }
+                // Read back via ValuePattern.CurrentValue — no pixels needed.
+                let got = el.get_text();
+                let ok = got.trim() == t.trim() || got.contains(t);
+                (Some(ok), if via_message { None } else {
+                    Some("typed via UIA ValuePattern (windowless control) — the window may have activated; check focus_preserved")
+                })
+            }
+            "click" => {
+                // PrintWindow before/after delta — works even while occluded.
+                let before = ghost_core::capture::capture_window_printwindow(hwnd_raw).ok();
+                let mut fallback_uia = false;
+                if ctrl_hwnd != 0 {
+                    if el.control_type() == UIA_BUTTON {
+                        ghost_core::input::BackgroundClicker::button_click(ctrl_hwnd).map_err(GhostError::Core)?;
+                    } else {
+                        // Post at the element's SCREEN centre, converted to the
+                        // handle's client space (ScreenToClient) — correct even when
+                        // the handle is an ancestor/container, not a per-control HWND.
+                        let (sx, sy) = rect.map(|(l, t, r, b)| ((l + r) / 2, (t + b) / 2)).unwrap_or((0, 0));
+                        ghost_core::input::BackgroundClicker::click_screen(ctrl_hwnd, sx, sy)
+                            .map_err(GhostError::Core)?;
+                    }
+                } else {
+                    // Windowless — UIA Invoke (activates the window). Honest fallback.
+                    fallback_uia = true;
+                    el.click_background()?;
+                }
+                // Small settle so the control repaints before the 'after' shot.
+                tokio::time::sleep(Duration::from_millis(80)).await;
+                let after = ghost_core::capture::capture_window_printwindow(hwnd_raw).ok();
+                let changed = match (before, after) {
+                    (Some((b, bw, bh)), Some((a, aw, ah))) if bw == aw && bh == ah && !b.is_empty() => {
+                        let black = a.iter().all(|&p| p == 0) || b.iter().all(|&p| p == 0);
+                        if black {
+                            None
+                        } else {
+                            // Scope the diff to the element's own rect (window-relative)
+                            // so an unrelated redraw elsewhere (caret blink, clock) can't
+                            // false-positive. Fall back to the whole window if the ROI is
+                            // unusable.
+                            let roi = match (win_origin, rect) {
+                                (Some((wl, wt)), Some((l, t, r, bo))) => {
+                                    let rl = (l - wl).max(0) as usize;
+                                    let rt = (t - wt).max(0) as usize;
+                                    let rr = ((r - wl).max(0) as usize).min(bw);
+                                    let rb = ((bo - wt).max(0) as usize).min(bh);
+                                    if rr > rl && rb > rt { Some((rl, rt, rr, rb)) } else { None }
+                                }
+                                _ => None,
+                            };
+                            match roi {
+                                Some((rl, rt, rr, rb)) => {
+                                    let cw = rr - rl;
+                                    let ch = rb - rt;
+                                    let bc = ghost_core::capture::screen::crop_rgba(&b, bw, rl, rt, cw, ch);
+                                    let ac = ghost_core::capture::screen::crop_rgba(&a, bw, rl, rt, cw, ch);
+                                    Some(compute_verification(&bc, &ac, cw, ch, true).changed)
+                                }
+                                None => Some(compute_verification(&b, &a, bw, bh, true).changed),
+                            }
+                        }
+                    }
+                    _ => None,
+                };
+                let note = if fallback_uia {
+                    Some("clicked via UIA Invoke (windowless control) — the window may have activated; check focus_preserved")
+                } else if changed.is_none() {
+                    Some("background click posted; PrintWindow couldn't verify the effect — read state to confirm")
+                } else if changed == Some(false) {
+                    Some("background click posted (focus preserved); the control's own rect didn't change — a click's effect is often elsewhere, so read state to confirm")
+                } else { None };
+                (changed, note)
+            }
+            _ => unreachable!(),
+        };
+
+        // Confirm we did not disturb the desktop.
+        let fg_after = unsafe { GetForegroundWindow() };
+        let mut cur_after = POINT::default();
+        let _ = unsafe { GetCursorPos(&mut cur_after) };
+        let focus_preserved = fg_before.0 == fg_after.0;
+        let cursor_preserved = cur_before.x == cur_after.x && cur_before.y == cur_after.y;
+
+        let rect_json = rect.map(|(l, t, r, b)| serde_json::json!({"left": l, "top": t, "right": r, "bottom": b}))
+            .unwrap_or(serde_json::Value::Null);
+        let mut out = serde_json::json!({
+            "ok": true,
+            "mode": "background",
+            "action": action,
+            "name": name,
+            "rect": rect_json,
+            "window": win.name,
+            "verified": verified,
+            "focus_preserved": focus_preserved,
+            "cursor_preserved": cursor_preserved,
+        });
+        if let (Some(obj), Some(n)) = (out.as_object_mut(), note) {
+            obj.insert("note".into(), serde_json::Value::String(n.into()));
+        }
+        Ok(out)
+    }
+
     /// Coordinate-based action with the same focus-anchoring and verification
     /// guarantees as the UIA path. Used for OCR/VLM-grounded dispatch.
     pub async fn act_at(&self, x: i32, y: i32, action: &str, text: Option<&str>) -> Result<serde_json::Value> {

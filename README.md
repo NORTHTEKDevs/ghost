@@ -166,6 +166,37 @@ calls, the client's own terminal usually retakes OS focus. Ghost is built for th
 - **Stop always works**: `ghost_stop` preempts the in-flight call the moment it arrives
   (dedicated stdin reader), and Ctrl+Alt+G remains the OS-level kill switch.
 
+## Background mode (agent-harness / computer-use)
+
+Agent harnesses (OpenClaw, Hermes/cua-driver, and any MCP client) mount a
+computer-use tool to let an LLM operate the desktop. Ghost is that tool for
+Windows — and it can act **without stealing your focus or moving your cursor**, so
+an agent drives an app while you keep working in another window.
+
+```jsonc
+// Drive Calculator-in-the-background style call:
+ghost_act { "background": true, "window": "Character Map",
+            "action": "click", "name": "Select", "role": "button" }
+// -> { "verified": true, "focus_preserved": true, "cursor_preserved": true, "mode": "background" }
+```
+
+- **True background via posted window messages.** Real Win32 controls are driven
+  with `BM_CLICK` / `WM_LBUTTONDOWN·UP` (click) and `WM_SETTEXT` (type). These do
+  not activate the window — unlike UIA `Invoke`/`SetValue`, whose providers pull
+  the window to the foreground.
+- **Verified even while occluded.** `type` is confirmed by reading the control's
+  value back; `click` by a `PrintWindow` before/after delta that renders a window
+  that isn't visible. Every response carries `verified`, `focus_preserved`,
+  `cursor_preserved` — Ghost never claims a background action it can't confirm.
+- **Honest about the edge.** Windowless controls (UWP/WinUI/Chromium — no window
+  handle) can't be message-posted by *any* tool; there Ghost falls back to UIA
+  dispatch (which activates the window) and says so in the response. Classic Win32
+  line-of-business apps — the software that has no API and most needs automating —
+  drive cleanly in the background.
+
+Supports `click` and `type` today (the two UIA-pattern-backed actions);
+`double_click`/`right_click`/`hover` are coordinate-only and need foreground.
+
 ## Emergency Stop
 
 Press **Ctrl+Alt+G** at any time to immediately halt all automation.

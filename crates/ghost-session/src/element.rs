@@ -88,6 +88,46 @@ impl GhostElement {
     pub fn set_focus(&self) -> Result<()> {
         self.inner.set_focus().map_err(GhostError::Core)
     }
+
+    /// The element's native Win32 window handle (0 if windowless). Nonzero means
+    /// the control can be driven with window messages (true background dispatch).
+    pub fn native_window_handle(&self) -> isize {
+        self.inner.native_window_handle()
+    }
+
+    /// UIA control-type id (e.g. 50000 = button).
+    pub fn control_type(&self) -> u32 {
+        self.inner.control_type()
+    }
+
+    /// Background click: InvokePattern ONLY. Never foregrounds the window, never
+    /// moves the real cursor, never falls back to a coordinate click. Errors with
+    /// `NotActionableInBackground` if the element exposes no InvokePattern — the
+    /// caller must NOT silently steal focus in that case.
+    pub fn click_background(&self) -> Result<()> {
+        if is_stopped() { return Err(GhostError::Stopped); }
+        if !self.inner.is_enabled() {
+            return Err(GhostError::ElementNotInteractable {
+                element: self.inner.name(),
+                reason: "element is disabled".into(),
+            });
+        }
+        patterns::invoke_ex(&self.inner, false).map_err(GhostError::Core)
+    }
+
+    /// Background type: ValuePattern.SetValue ONLY. No foreground, no cursor, no
+    /// keyboard fallback. Errors with `NotActionableInBackground` if there is no
+    /// ValuePattern.
+    pub fn type_text_background(&self, text: &str) -> Result<()> {
+        if is_stopped() { return Err(GhostError::Stopped); }
+        if !self.inner.is_enabled() {
+            return Err(GhostError::ElementNotInteractable {
+                element: self.inner.name(),
+                reason: "element is disabled".into(),
+            });
+        }
+        patterns::set_value_ex(&self.inner, text, false).map_err(GhostError::Core)
+    }
 }
 
 // Note: GhostElement wraps live COM objects (IUIAutomationElement) which require a

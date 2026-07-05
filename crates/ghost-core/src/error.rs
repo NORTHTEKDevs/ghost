@@ -29,4 +29,7 @@ pub enum CoreError {
 
     #[error("Could not confirm foreground for window: {window}")]
     FocusFailed { window: String },
+
+    #[error("Element not actionable in background mode: {what}")]
+    NotActionableInBackground { what: &'static str },
 }

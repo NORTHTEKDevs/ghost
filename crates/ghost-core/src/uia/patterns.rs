@@ -6,6 +6,14 @@ use crate::error::CoreError;
 /// Invoke an element via InvokePattern (buttons, links).
 /// Falls back to clicking center of bounding rect if InvokePattern unavailable.
 pub fn invoke(element: &UiaElement) -> Result<(), CoreError> {
+    invoke_ex(element, true)
+}
+
+/// Invoke via InvokePattern. When `allow_fallback` is false (background mode),
+/// this NEVER falls back to a coordinate click — a coordinate click needs the
+/// window foreground and moves the real cursor, defeating background dispatch.
+/// If the element has no InvokePattern, returns `NotActionableInBackground`.
+pub fn invoke_ex(element: &UiaElement, allow_fallback: bool) -> Result<(), CoreError> {
     unsafe {
         if let Ok(pattern) = element.0.GetCurrentPattern(UIA_InvokePatternId) {
             let invoke: IUIAutomationInvokePattern = pattern.cast()
@@ -14,6 +22,11 @@ pub fn invoke(element: &UiaElement) -> Result<(), CoreError> {
                 .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "InvokePattern.Invoke" })?;
             return Ok(());
         }
+    }
+    if !allow_fallback {
+        return Err(CoreError::NotActionableInBackground {
+            what: "click (no InvokePattern; a coordinate click needs foreground)",
+        });
     }
     // Coordinate fallback
     if let Some(rect) = element.bounding_rect() {
@@ -59,6 +72,13 @@ pub fn get_selection(element: &UiaElement) -> Result<String, CoreError> {
 /// Set value via ValuePattern (text inputs).
 /// Falls back to clicking + typing if ValuePattern unavailable.
 pub fn set_value(element: &UiaElement, value: &str) -> Result<(), CoreError> {
+    set_value_ex(element, value, true)
+}
+
+/// Set value via ValuePattern. When `allow_fallback` is false (background mode),
+/// this NEVER falls back to click+keyboard (which needs foreground and moves the
+/// cursor). If the element has no ValuePattern, returns `NotActionableInBackground`.
+pub fn set_value_ex(element: &UiaElement, value: &str, allow_fallback: bool) -> Result<(), CoreError> {
     unsafe {
         if let Ok(pattern) = element.0.GetCurrentPattern(UIA_ValuePatternId) {
             let vp: IUIAutomationValuePattern = pattern.cast()
@@ -68,6 +88,11 @@ pub fn set_value(element: &UiaElement, value: &str) -> Result<(), CoreError> {
                 .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "ValuePattern.SetValue" })?;
             return Ok(());
         }
+    }
+    if !allow_fallback {
+        return Err(CoreError::NotActionableInBackground {
+            what: "type (no ValuePattern; keyboard entry needs foreground)",
+        });
     }
     // Fallback: click to focus, clear existing content, then type. Clearing
     // matches ValuePattern.SetValue's replace semantics — without it the
