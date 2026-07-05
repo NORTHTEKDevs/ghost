@@ -1,8 +1,34 @@
 # Ghost
 
-Windows desktop automation for humans, scripts, and AI agents. Like Playwright, but for native apps.
+**The computer-use layer for AI agents on Windows.** Ghost lets an agent operate
+any Windows app — including the ones with no API — **in the background without
+taking your screen or cursor**, and it **proves every action actually happened**.
 
-Any application. Any input. Any agent. Any language.
+Like Playwright, but for native Windows apps, and built for agents: an MCP server
+any model can mount to see and drive the desktop.
+
+## Why Ghost is different
+
+- **Runs in the background.** An agent can click, type, and use shortcuts inside an
+  app *while you keep working in another window* — no focus steal, no cursor jump.
+  It posts window messages to real controls; most tools can only drive whatever is
+  in the foreground. ([how](#background-mode-agent-harness--computer-use))
+- **Every action is verified.** Ghost re-checks the screen (or reads the control's
+  value back) after acting and returns `verified` / `focus_confirmed` — never a
+  blind `ok:true`. Agents fail by acting and not knowing if it worked; Ghost closes
+  that loop.
+- **Drives apps with no API.** Legacy Win32, WPF, Electron, UWP, vendor portals —
+  the software that has no integration and most needs automating. No CDP, no
+  browser, no app cooperation required.
+- **Model-agnostic.** Vision grounding works with any OpenAI-compatible model
+  (NVIDIA, OpenAI, Gemini, Groq, local vLLM/Ollama) or Anthropic. No vendor lock-in.
+- **Windows-native and deep.** Uses UI Automation for real element discovery, not
+  pixel-guessing — the gap left by Mac/Linux-first agent tooling.
+
+See it in one script: [`examples/background_agent_demo.py`](examples/background_agent_demo.py)
+drives an app in the background while the foreground stays yours.
+Honest comparison vs Playwright-MCP / cua-driver / Computer Use:
+[`docs/comparison.md`](docs/comparison.md).
 
 ## What is Ghost?
 
