@@ -48,6 +48,8 @@ pub enum Tier {
     Ocr,
     /// OmniParser YOLO icon detector + Set-of-Marks (feature `yolo`).
     Yolo,
+    /// CPU classical-CV element detector + Set-of-Marks (always available).
+    Cv,
     /// Cloud VLM (NVIDIA / Anthropic).
     Vlm,
 }
@@ -59,6 +61,7 @@ impl std::fmt::Display for Tier {
             Tier::Uia => write!(f, "uia"),
             Tier::Ocr => write!(f, "ocr"),
             Tier::Yolo => write!(f, "yolo"),
+            Tier::Cv => write!(f, "cv"),
             Tier::Vlm => write!(f, "vlm"),
         }
     }
