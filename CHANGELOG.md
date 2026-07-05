@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.14.0] - 2026-07-05 — Background clipboard/edit shortcuts
+
+Closes the most-used part of the "no modifier combos in background" limit.
+
+### Added
+
+- **Background Ctrl+C / Ctrl+X / Ctrl+V / Ctrl+A / Ctrl+Z** via `ghost_key
+  background=true`. The common editing shortcuts are dispatched as their semantic
+  window messages (`WM_COPY` / `WM_CUT` / `WM_PASTE` / `WM_UNDO`, `EM_SETSEL` for
+  select-all) instead of a posted modifier+key — so they work reliably in the
+  background, without the `GetKeyState` problem that makes raw combos unreliable.
+  No foreground, no cursor. Other combos (Ctrl+S, custom accelerators) are still
+  rejected — those genuinely can't be posted reliably.
+  - Live-verified: typed text into a background charmap edit, then background
+    Ctrl+A + Ctrl+C, and the clipboard read back the text (replacing a sentinel)
+    while Calculator kept the foreground.
+
+New primitive: `BackgroundClicker::edit_command` + `EditCommand`. +3 unit tests.
+
+### Honest remaining limits (not closeable here, by design)
+
+- Windowless UWP/WinUI/Chromium controls (no window handle) can't be driven truly
+  in the background by any tool — Ghost falls back to UIA and flags it.
+- Arbitrary modifier combos beyond the clipboard/undo family.
+- A hosted multi-tenant Windows runner is a separate product/infra effort, not a
+  library feature.
+
 ## [0.13.0] - 2026-07-05 — Full background input + model-agnostic vision
 
 Closes the gaps left by v0.12.0's background dispatch.

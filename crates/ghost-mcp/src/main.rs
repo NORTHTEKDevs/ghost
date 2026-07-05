@@ -434,7 +434,7 @@ async fn handle(
             Ok(json!({
                 "protocolVersion": "2024-11-05",
                 "capabilities": { "tools": {} },
-                "serverInfo": { "name": "ghost", "version": "0.13.0" }
+                "serverInfo": { "name": "ghost", "version": "0.14.0" }
             }))
         }
         "initialized" | "notifications/initialized" => Ok(json!({})),
@@ -1288,9 +1288,27 @@ async fn handle_ghost_key(
             .ok_or("ghost_key background=true requires 'window' (the target app)")?;
         let (mods, key) = parse_key_combo(keys)?;
         if !mods.is_empty() {
+            // The common Ctrl+ editing shortcuts map to semantic messages that DO
+            // work in the background (WM_COPY/CUT/PASTE/UNDO, EM_SETSEL) — route
+            // those. Any other combo can't be posted reliably and is rejected.
+            let is_ctrl_only = mods.len() == 1
+                && matches!(mods[0].to_lowercase().as_str(), "ctrl" | "control");
+            if is_ctrl_only {
+                if let Some(cmd) = ghost_session::EditCommand::from_ctrl_key(&key) {
+                    let cmd_name = match cmd {
+                        ghost_session::EditCommand::Copy => "copy",
+                        ghost_session::EditCommand::Cut => "cut",
+                        ghost_session::EditCommand::Paste => "paste",
+                        ghost_session::EditCommand::Undo => "undo",
+                        ghost_session::EditCommand::SelectAll => "select_all",
+                    };
+                    return session.edit_command_background(window, cmd_name).await.map_err(|e| e.to_string());
+                }
+            }
             return Err(format!(
-                "ghost_key background: modifier combos ({keys}) aren't reliable in background \
-                 (the app reads real keyboard state); use foreground for combos"
+                "ghost_key background: combo '{keys}' can't be posted reliably (apps read real \
+                 keyboard state for modifiers). Supported background shortcuts: Ctrl+C/X/V/A/Z. \
+                 Use foreground for other combos"
             ));
         }
         return session.key_background(window, &key).await.map_err(|e| e.to_string());
@@ -1826,7 +1844,7 @@ fn lean_tools_schema() -> Value {
           "inputSchema": { "type": "object", "required": ["keys"], "properties": {
               "keys": { "type": "string", "description": "Key spec: 'Enter', 'Ctrl+C', 'Ctrl+Shift+T', 'down:Shift', 'up:Shift'" },
               "window": { "type": "string", "description": "Target window title substring. Focus is acquired+confirmed before sending; errors if it can't be. REQUIRED when background=true." },
-              "background": { "type": "boolean", "description": "Post a SINGLE key to `window`'s focused control WITHOUT taking foreground or moving the cursor. Single keys only (Enter/Tab/F5/arrows/char); modifier combos (Ctrl+C) are rejected — posting can't set the modifier state apps read. Returns {focus_preserved, cursor_preserved}." }
+              "background": { "type": "boolean", "description": "Post keys to `window`'s focused control WITHOUT taking foreground or moving the cursor. Single keys (Enter/Tab/F5/arrows/char) plus the common editing shortcuts Ctrl+C/X/V/A/Z (dispatched as semantic WM_COPY/CUT/PASTE/UNDO/EM_SETSEL messages — reliable in background). Other modifier combos are rejected (posting can't set the modifier state apps read). Returns {focus_preserved, cursor_preserved}." }
           }}},
         { "name": "ghost_scroll",
           "description": "Scroll. direction: up/down/left/right, amount = notches (default 3). Coord mode: pass x/y. 'Until' mode: pass until_name/until_role to scroll the foreground window repeatedly until that element becomes visible (long/virtualized lists), up to max_scrolls; returns found=true/false.",
@@ -2713,7 +2731,7 @@ mod tests {
         let resp = json!({
             "protocolVersion": "2024-11-05",
             "capabilities": { "tools": {} },
-            "serverInfo": { "name": "ghost", "version": "0.13.0" }
+            "serverInfo": { "name": "ghost", "version": "0.14.0" }
         });
         assert_eq!(resp["protocolVersion"], "2024-11-05");
         assert!(resp["capabilities"]["tools"].is_object());
