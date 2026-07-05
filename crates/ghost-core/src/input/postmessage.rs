@@ -185,10 +185,28 @@ impl BackgroundClicker {
                 return Err(CoreError::WindowGone);
             }
             let scan = (MapVirtualKeyW(vk as u32, MAPVK_VK_TO_VSC) & 0xFF) as isize;
-            let down = LPARAM((scan << 16) | 1);
-            let up = LPARAM((scan << 16) | 1 | (1 << 30) | (1 << 31));
+            // Extended-key bit (24) is REQUIRED for the enhanced-keyboard nav cluster
+            // (arrows, Home/End, PageUp/Down, Insert/Delete) — without it apps that
+            // branch on the extended flag mistake them for numpad keys.
+            let ext = matches!(vk, 0x21 | 0x22 | 0x23 | 0x24 | 0x25 | 0x26 | 0x27 | 0x28 | 0x2D | 0x2E) as isize;
+            let base = (scan << 16) | 1 | (ext << 24);
+            let down = LPARAM(base);
+            let up = LPARAM(base | (1 << 30) | (1 << 31));
             PostMessageW(hwnd, WM_KEYDOWN, WPARAM(vk as usize), down)
                 .map_err(|e| CoreError::ComInit(format!("PostMessage KEYDOWN: {e}")))?;
+            // We post directly (no message pump to run TranslateMessage), so EDIT
+            // controls won't insert \r/\t or delete-on-backspace from WM_KEYDOWN
+            // alone — synthesize the WM_CHAR they expect for these three keys.
+            let ch: Option<u16> = match vk {
+                0x0D => Some(b'\r' as u16), // VK_RETURN
+                0x09 => Some(b'\t' as u16), // VK_TAB
+                0x08 => Some(0x08),         // VK_BACK
+                _ => None,
+            };
+            if let Some(c) = ch {
+                PostMessageW(hwnd, WM_CHAR, WPARAM(c as usize), LPARAM(1))
+                    .map_err(|e| CoreError::ComInit(format!("PostMessage CHAR (key): {e}")))?;
+            }
             PostMessageW(hwnd, WM_KEYUP, WPARAM(vk as usize), up)
                 .map_err(|e| CoreError::ComInit(format!("PostMessage KEYUP: {e}")))?;
         }
@@ -266,5 +284,36 @@ mod tests {
     #[test]
     fn click_screen_returns_error_when_hwnd_is_zero() {
         assert!(matches!(BackgroundClicker::click_screen(0, 5, 5), Err(CoreError::WindowGone)));
+    }
+
+    #[test]
+    fn double_click_screen_returns_error_when_hwnd_is_zero() {
+        assert!(matches!(BackgroundClicker::double_click_screen(0, 5, 5), Err(CoreError::WindowGone)));
+    }
+
+    #[test]
+    fn right_click_screen_returns_error_when_hwnd_is_zero() {
+        assert!(matches!(BackgroundClicker::right_click_screen(0, 5, 5), Err(CoreError::WindowGone)));
+    }
+
+    #[test]
+    fn hover_screen_returns_error_when_hwnd_is_zero() {
+        assert!(matches!(BackgroundClicker::hover_screen(0, 5, 5), Err(CoreError::WindowGone)));
+    }
+
+    #[test]
+    fn send_key_returns_error_when_hwnd_is_zero() {
+        assert!(matches!(BackgroundClicker::send_key(0, 0x0D), Err(CoreError::WindowGone)));
+    }
+
+    #[test]
+    fn send_char_returns_error_when_hwnd_is_zero() {
+        assert!(matches!(BackgroundClicker::send_char(0, 'a'), Err(CoreError::WindowGone)));
+    }
+
+    #[test]
+    fn focused_control_of_zero_hwnd_returns_zero() {
+        // GetWindowThreadProcessId(NULL) == 0 -> falls back to the input handle (0).
+        assert_eq!(BackgroundClicker::focused_control(0), 0);
     }
 }

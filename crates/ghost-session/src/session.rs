@@ -1638,7 +1638,12 @@ impl GhostSession {
             .ok_or_else(|| GhostError::Vision(format!(
                 "ghost_key background: no visible window matching '{window}'"
             )))?;
-        let target = ghost_core::input::BackgroundClicker::focused_control(win.hwnd as isize);
+        let win_hwnd = win.hwnd as isize;
+        let target = ghost_core::input::BackgroundClicker::focused_control(win_hwnd);
+        // focused_control falls back to the top-level frame when nothing in the
+        // window's thread holds focus — a key posted to the frame usually has no
+        // text-editing effect, so surface it rather than a falsely-clean result.
+        let no_focused_control = target == win_hwnd;
 
         let fg_before = unsafe { GetForegroundWindow() };
         let mut cur_before = POINT::default();
@@ -1668,7 +1673,12 @@ impl GhostSession {
             "focus_preserved": fg_before.0 == fg_after.0,
             "cursor_preserved": cur_before.x == cur_after.x && cur_before.y == cur_after.y,
             "verified": serde_json::Value::Null,
-            "note": "key posted to the background window's focused control; read state to confirm effect",
+            "focused_control": !no_focused_control,
+            "note": if no_focused_control {
+                "no control held keyboard focus in the background window, so the key went to the top-level frame and likely had no effect — background-click a control first to focus it, then read state"
+            } else {
+                "key posted to the background window's focused control; read state to confirm effect"
+            },
         }))
     }
 

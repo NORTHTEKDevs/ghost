@@ -370,8 +370,11 @@ fn pick_provider() -> Result<Provider> {
 fn openai_compat_api_key() -> Result<String> {
     for var in ["GHOST_VISION_API_KEY", "OPENAI_API_KEY", "NVIDIA_API_KEY"] {
         if let Ok(k) = std::env::var(var) {
-            if !k.trim().is_empty() {
-                return Ok(k);
+            let k = k.trim();
+            if !k.is_empty() {
+                // Return trimmed — a trailing newline from a .env loader would
+                // corrupt the `Authorization: Bearer <key>` header.
+                return Ok(k.to_string());
             }
         }
     }
