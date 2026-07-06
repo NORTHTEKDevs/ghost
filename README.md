@@ -45,6 +45,21 @@ own automation and input APIs, so it works with native apps that have no API and
 no automation hooks of their own — the same reliability whether or not an app was
 built to be automated.
 
+### Platforms
+
+Ghost targets three OSes through one shared contract (`crates/ghost-platform`):
+
+- **Windows** — full and verified. The flagship; every feature above works here.
+- **macOS / Linux** — architecture in place, native backends in progress (not yet
+  functional). The cross-platform crate compiles for all three; the macOS
+  (Accessibility/CGEvent) and Linux (AT-SPI/XTest) engines are scaffolded with a
+  precise implementation map and must be built and verified on those machines.
+
+See [`docs/cross-platform.md`](docs/cross-platform.md) for the capability matrix
+and the plan. Note: Ghost's background-without-focus-steal wedge relies on Windows
+window messages, which have no exact macOS/Linux equivalent — that capability is
+"measure before claiming" off Windows.
+
 Ghost is a general-purpose automation tool. Use it on systems you own or are
 authorized to automate, and in line with the terms of the software you drive.
 
