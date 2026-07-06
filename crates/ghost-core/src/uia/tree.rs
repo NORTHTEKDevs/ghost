@@ -470,6 +470,7 @@ impl UiaTree {
                         top: rect.top,
                         right: rect.right,
                         bottom: rect.bottom,
+                        enabled: el.is_enabled(),
                     });
                 }
             }
