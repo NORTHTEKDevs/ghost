@@ -123,6 +123,8 @@ fn descriptor_from_cached(el: &IUIAutomationElement) -> Option<ElementDescriptor
             top: rect.top,
             right: rect.right,
             bottom: rect.bottom,
+            // IsEnabled is already in the cache request — free to read here.
+            enabled: el.CachedIsEnabled().map(|b| b.as_bool()).unwrap_or(true),
         })
     }
 }

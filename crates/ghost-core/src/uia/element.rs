@@ -179,6 +179,9 @@ pub struct ElementDescriptor {
     pub top: i32,
     pub right: i32,
     pub bottom: i32,
+    /// UIA IsEnabled — false for greyed-out controls. Lets an agent avoid trying
+    /// to click a disabled button/field. Defaults to true when unknown.
+    pub enabled: bool,
 }
 
 #[cfg(test)]

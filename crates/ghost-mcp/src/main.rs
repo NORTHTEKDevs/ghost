@@ -435,7 +435,7 @@ async fn handle(
             Ok(json!({
                 "protocolVersion": "2024-11-05",
                 "capabilities": { "tools": {} },
-                "serverInfo": { "name": "ghost", "version": "0.15.0" }
+                "serverInfo": { "name": "ghost", "version": "0.15.1" }
             }))
         }
         "initialized" | "notifications/initialized" => Ok(json!({})),
@@ -1271,7 +1271,8 @@ fn snapshot_response(elements: &[ghost_core::uia::ElementDescriptor], p: &Value)
     let mut id = 0usize;
     for e in &usable {
         let actions = actions_for_role(&e.role);
-        let actionable = !actions.is_empty();
+        // "actionable" = the agent can act on it now: an interactable role AND enabled.
+        let actionable = !actions.is_empty() && e.enabled;
         if actionable_only && !actionable { continue; }
         list.push(json!({
             "id": id,
@@ -1279,13 +1280,15 @@ fn snapshot_response(elements: &[ghost_core::uia::ElementDescriptor], p: &Value)
             "role": e.role,
             "rect": { "left": e.left, "top": e.top, "right": e.right, "bottom": e.bottom },
             "center": { "x": (e.left + e.right) / 2, "y": (e.top + e.bottom) / 2 },
+            "enabled": e.enabled,
             "actionable": actionable,
             "actions": actions,
         }));
         id += 1;
         if list.len() >= limit { break; }
     }
-    let actionable_count = usable.iter().filter(|e| !actions_for_role(&e.role).is_empty()).count();
+    let actionable_count = usable.iter()
+        .filter(|e| e.enabled && !actions_for_role(&e.role).is_empty()).count();
     json!({
         "elements": list,
         "count": list.len(),
@@ -1914,7 +1917,7 @@ fn lean_tools_schema() -> Value {
               "background": { "type": "boolean", "description": "Post keys to `window`'s focused control WITHOUT taking foreground or moving the cursor. Single keys (Enter/Tab/F5/arrows/char) plus the common editing shortcuts Ctrl+C/X/V/A/Z (dispatched as semantic WM_COPY/CUT/PASTE/UNDO/EM_SETSEL messages — reliable in background). Other modifier combos are rejected (posting can't set the modifier state apps read). Returns {focus_preserved, cursor_preserved}." }
           }}},
         { "name": "ghost_snapshot",
-          "description": "Structured, agent-planning view of a window's UI: every element with a stable id, name, role, rect, center, actionable flag, and the actions it accepts (click/type). Far cheaper than a screenshot to reason over — use it to plan, then ghost_act by name/role. Params: window? (title substring; omitted = foreground), actionable_only? (only interactable elements), limit?.",
+          "description": "Structured, agent-planning view of a window's UI: every element with a stable id, name, role, rect, center, enabled flag, actionable flag, and the actions it accepts (click/type). `actionable` = interactable role AND currently enabled — so a greyed-out button reads actionable:false. Far cheaper than a screenshot to reason over; plan here, then ghost_act by name/role. Params: window? (title substring; omitted = foreground), actionable_only? (only enabled interactable elements), limit?.",
           "inputSchema": { "type": "object", "properties": {
               "window": { "type": "string", "description": "Window title substring; omitted = foreground window (faster)" },
               "actionable_only": { "type": "boolean", "description": "Return only interactable elements (buttons/edits/links/...) — cuts noise for planning" },
@@ -2408,13 +2411,13 @@ mod tests {
 
     fn desc(name: &str, l: i32, t: i32, r: i32, b: i32) -> ghost_core::uia::ElementDescriptor {
         ghost_core::uia::ElementDescriptor {
-            name: name.into(), role: "button".into(), left: l, top: t, right: r, bottom: b,
+            name: name.into(), role: "button".into(), left: l, top: t, right: r, bottom: b, enabled: true,
         }
     }
 
     fn desc_role(name: &str, role: &str) -> ghost_core::uia::ElementDescriptor {
         ghost_core::uia::ElementDescriptor {
-            name: name.into(), role: role.into(), left: 0, top: 0, right: 20, bottom: 20,
+            name: name.into(), role: role.into(), left: 0, top: 0, right: 20, bottom: 20, enabled: true,
         }
     }
 
@@ -2450,6 +2453,23 @@ mod tests {
         assert_eq!(list[0]["name"], "OK");
         // ids are re-numbered contiguously after filtering.
         assert_eq!(list[0]["id"], 0);
+    }
+
+    #[test]
+    fn snapshot_response_disabled_button_is_not_actionable() {
+        let mut disabled = desc_role("Greyed", "button");
+        disabled.enabled = false;
+        let els = vec![desc_role("OK", "button"), disabled];
+        let out = snapshot_response(&els, &json!({}));
+        let list = out["elements"].as_array().unwrap();
+        assert_eq!(list[0]["enabled"], true);
+        assert_eq!(list[0]["actionable"], true);
+        assert_eq!(list[1]["enabled"], false);
+        assert_eq!(list[1]["actionable"], false); // a disabled button can't be acted on
+        assert_eq!(out["actionable_count"], 1);
+        // actionable_only drops the disabled one.
+        let only = snapshot_response(&els, &json!({"actionable_only": true}));
+        assert_eq!(only["elements"].as_array().unwrap().len(), 1);
     }
 
     #[test]
@@ -2846,7 +2866,7 @@ mod tests {
         let resp = json!({
             "protocolVersion": "2024-11-05",
             "capabilities": { "tools": {} },
-            "serverInfo": { "name": "ghost", "version": "0.15.0" }
+            "serverInfo": { "name": "ghost", "version": "0.15.1" }
         });
         assert_eq!(resp["protocolVersion"], "2024-11-05");
         assert!(resp["capabilities"]["tools"].is_object());

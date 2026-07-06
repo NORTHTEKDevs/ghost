@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.15.1] - 2026-07-05 — Snapshot knows enabled/disabled state
+
+### Changed
+
+- **`ghost_snapshot` now reports `enabled`** per element, and `actionable` means
+  "interactable role AND currently enabled" — so a greyed-out button reads
+  `actionable: false` and `actionable_only` drops it. An agent won't waste a call
+  clicking a disabled control. Nearly free: `IsEnabled` was already in the UIA
+  cache batch. `ElementDescriptor` gained an `enabled` field.
+  - Live-verified: a fresh Calculator snapshot marked the three disabled memory
+    buttons (Recall / Clear / flyout) `enabled:false, actionable:false` while
+    digit buttons stayed `enabled:true` (33 of 36 actionable).
+
 ## [0.15.0] - 2026-07-05 — Structured agent-planning snapshot
 
 ### Added
