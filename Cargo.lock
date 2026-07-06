@@ -776,7 +776,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-mcp"
-version = "0.12.0"
+version = "0.15.1"
 dependencies = [
  "ghost-core",
  "ghost-ground",
@@ -790,6 +790,13 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "windows",
+]
+
+[[package]]
+name = "ghost-platform"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

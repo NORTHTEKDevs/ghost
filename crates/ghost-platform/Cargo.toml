@@ -1,0 +1,15 @@
+[package]
+name = "ghost-platform"
+version = "0.1.0"
+edition = "2021"
+description = "Cross-platform contract for Ghost: the capability model, shared types, and per-OS backend selection (Windows full; macOS/Linux scaffolded)."
+
+[dependencies]
+serde = { workspace = true }
+
+# Platform-specific backend dependencies are gated by target so this crate still
+# `cargo check`s for every OS. The Windows engine (ghost-session) is intentionally
+# NOT pulled in here — it remains the standalone Windows runtime; this crate only
+# declares the contract/capabilities. Native macOS (accessibility/objc2) and Linux
+# (atspi/x11) deps get added under their target sections when those backends are
+# implemented on-device.
