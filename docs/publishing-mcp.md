@@ -39,3 +39,20 @@ agent or user finds Ghost without already knowing it exists.
 ```
 
 Works with any MCP client. See the README for the full tool list.
+
+## Keeping the installed binary current (auto-update)
+
+New Claude sessions launch `~/.local/bin/ghost-mcp.exe` (a stable path outside the
+build folder, so it survives `cargo clean` and repo moves). Two things keep it on
+the latest build:
+
+- **`scripts/install.ps1`** — `cargo build --release -p ghost-mcp` then install to
+  the stable path. Run it to publish a new version immediately.
+- **`GhostMcpAutoSync`** scheduled task (hourly) — copies the newest release build
+  to the stable path automatically. Because Windows locks a running `.exe`, the
+  sync renames the in-use binary aside and drops the fresh one in, so it updates
+  even while sessions are live; new sessions pick it up, running sessions keep
+  their copy, and the renamed leftovers self-clean once their process exits.
+
+After any `cargo build --release -p ghost-mcp`, the installed binary refreshes
+within the hour (or instantly via `scripts/install.ps1`).
