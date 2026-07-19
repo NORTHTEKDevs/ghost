@@ -776,7 +776,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-mcp"
-version = "0.15.1"
+version = "0.16.0"
 dependencies = [
  "ghost-core",
  "ghost-ground",

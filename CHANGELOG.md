@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.16.0] - 2026-07-19 — Shell control (terminal / PowerShell / CLIs)
+
+### Added
+
+- **`ghost_shell`** — run terminal commands and drive persistent shells, so an
+  agent can do more than click GUIs: run builds, git, and CLIs, edit files on
+  machines with no file tools, and open apps (including spawning a new Claude
+  Code session) from a command line.
+  - `op=run` (default): one-shot. Spawns `powershell` (default), `pwsh`, or `cmd`,
+    runs `cmd`, returns `{output, exit_code, timed_out, duration_ms}`. Merged
+    stdout+stderr, tail-capped at 24000 chars. Kills the process on timeout.
+  - `op=open` / `send` / `read` / `kill` / `list`: **persistent PowerShell
+    sessions** whose variables, cwd, and env persist across commands. A timed-out
+    `send` leaves the command running (`busy:true`); `read` drains the rest.
+  - Injection-safe framing: each command is base64-encoded and the persistent
+    driver decodes it, so arbitrary command text (quotes, newlines, `$`) is safe.
+    A per-session nonce sentinel means a late reply from a timed-out command can
+    never be misread as a later command's result.
+  - Emergency-stop (`ghost_stop` / Ctrl+Alt+G) kills a runaway command mid-wait.
+  - **Kill-switch:** set `GHOST_SHELL=off` to disable the verb entirely; every op
+    returns a clear error. Ghost is public — deployments that want GUI automation
+    without shell access can opt out.
+  - To start a new Claude Code session:
+    `ghost_shell op=run cmd='Start-Process wt -ArgumentList "pwsh","-NoExit","-Command","claude"'`,
+    then drive the terminal window with `ghost_see` / `ghost_act` / `ghost_key`.
+  - Live-verified end to end: one-shot exit codes captured (`exit 7` → 7),
+    variable + cwd persistence across sends (`$x=41` then `$x+1` → 42, `Set-Location`
+    survives), timeout→busy→read drain, kill, and `GHOST_SHELL=off` refusal.
+  - 20 lean verbs now advertised (was 19). Boot latency unchanged (~20ms).
+
 ## [0.15.1] - 2026-07-05 — Snapshot knows enabled/disabled state
 
 ### Changed

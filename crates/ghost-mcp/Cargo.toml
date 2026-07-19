@@ -1,8 +1,8 @@
 [package]
 name = "ghost-mcp"
-version = "0.15.1"
+version = "0.16.0"
 edition = "2021"
-description = "MCP server binary exposing 24 Ghost desktop automation tools over stdio JSON-RPC"
+description = "MCP server binary exposing 20 Ghost desktop + shell automation tools over stdio JSON-RPC"
 keywords = ["automation", "windows", "mcp", "agent", "claude"]
 categories = ["os::windows-apis", "command-line-utilities"]
 license = "MIT"

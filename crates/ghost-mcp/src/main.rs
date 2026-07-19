@@ -412,6 +412,7 @@ fn dispatch_tool_inner<'a>(
             "ghost_key" => handle_ghost_key(session, args).await,
             "ghost_wait" => handle_ghost_wait(session, args).await,
             "ghost_window" => handle_ghost_window(session, args).await,
+            "ghost_shell" => handle_ghost_shell(session, args).await,
             "ghost_clipboard" => handle_ghost_clipboard(session, args).await,
             "ghost_assert" => handle_ghost_assert(session, args).await,
             "ghost_run" if !in_run => handle_ghost_run(session, args).await,
@@ -435,7 +436,7 @@ async fn handle(
             Ok(json!({
                 "protocolVersion": "2024-11-05",
                 "capabilities": { "tools": {} },
-                "serverInfo": { "name": "ghost", "version": "0.15.1" }
+                "serverInfo": { "name": "ghost", "version": "0.16.0" }
             }))
         }
         "initialized" | "notifications/initialized" => Ok(json!({})),
@@ -1480,6 +1481,15 @@ async fn handle_ghost_window(
     }
 }
 
+/// `ghost_shell(op=run|open|send|read|list|kill, ...)` — shell control.
+/// Delegates to GhostSession::shell which owns the persistent-session registry.
+async fn handle_ghost_shell(
+    session: &GhostSession,
+    p: &Value,
+) -> std::result::Result<Value, String> {
+    session.shell(p).await.map_err(|e| e.to_string())
+}
+
 /// `ghost_clipboard(op=get|set, text?)` — unified clipboard access.
 async fn handle_ghost_clipboard(
     session: &GhostSession,
@@ -2009,6 +2019,17 @@ fn lean_tools_schema() -> Value {
               "name": { "type": "string", "description": "Window title (op=focus|state). Also accepted as alias for 'exe' on op=launch." },
               "state": { "type": "string", "enum": ["maximize","minimize","restore","close"], "description": "op=state" },
               "exe": { "type": "string", "description": "Executable path (op=launch)" }
+          }}},
+        // --- Shell control ---
+        { "name": "ghost_shell",
+          "description": "Run terminal / PowerShell commands and drive persistent shells. THE way to run builds, git, CLIs, scripts, or open apps from a command line, and to edit files on machines with no file tools. op=run (default): one-shot — spawn shell, run 'cmd', return {output, exit_code, timed_out}. shell=powershell (default) | pwsh | cmd. op=open: start a persistent PowerShell whose variables/cwd/env survive across commands (returns an 'id'). op=send: run 'cmd' in session 'id' (state persists). op=read: drain the rest of a command that hit its timeout (busy=true). op=list: show sessions. op=kill: end a session. Output is merged stdout+stderr, tail-capped at 24000 chars. Emergency-stop (ghost_stop / Ctrl+Alt+G) kills a runaway command. To START A NEW CLAUDE CODE SESSION: op=run cmd='Start-Process wt -ArgumentList \"pwsh\",\"-NoExit\",\"-Command\",\"claude\"', then drive the terminal window with ghost_see / ghost_act / ghost_key. Disabled entirely when GHOST_SHELL=off.",
+          "inputSchema": { "type": "object", "properties": {
+              "op": { "type": "string", "enum": ["run","open","send","read","list","kill"], "description": "Operation (default run)" },
+              "cmd": { "type": "string", "description": "Command text (op=run|send)" },
+              "shell": { "type": "string", "enum": ["powershell","pwsh","cmd"], "description": "op=run shell (default powershell). Persistent sessions are PowerShell only." },
+              "id": { "type": "string", "description": "Session id (op=send|read|kill required; op=open optional custom name, else auto s1,s2,...)" },
+              "cwd": { "type": "string", "description": "Working directory (op=run|open)" },
+              "timeout_ms": { "type": "integer", "description": "Per-command timeout, default 30000, max 600000. On timeout op=run kills the process; op=send leaves it running (drain via op=read)." }
           }}},
         // --- Clipboard ---
         { "name": "ghost_clipboard",
@@ -2624,10 +2645,10 @@ mod tests {
     fn tools_schema_has_lean_count() {
         let tools = tools_schema();
         let list = tools.as_array().unwrap();
-        // 19 lean verbs: see, snapshot, find, act, key, scroll, drag, wait, query,
-        //   assert, run, screenshot, window, clipboard, stats, reset, stop,
+        // 20 lean verbs: see, snapshot, find, act, key, scroll, drag, wait, query,
+        //   assert, run, screenshot, window, shell, clipboard, stats, reset, stop,
         //   http_get, http_post
-        assert_eq!(list.len(), 19, "expected 19 lean verbs (see+snapshot+find+act+key+scroll+drag+wait+query+assert+run+screenshot+window+clipboard+stats+reset+stop+http_get+http_post)");
+        assert_eq!(list.len(), 20, "expected 20 lean verbs (see+snapshot+find+act+key+scroll+drag+wait+query+assert+run+screenshot+window+shell+clipboard+stats+reset+stop+http_get+http_post)");
     }
 
     #[test]
@@ -2637,7 +2658,7 @@ mod tests {
             .filter_map(|t| t["name"].as_str()).collect();
         for lean in ["ghost_see","ghost_find","ghost_act","ghost_key","ghost_scroll",
                      "ghost_drag","ghost_wait","ghost_query","ghost_assert","ghost_run",
-                     "ghost_screenshot","ghost_window","ghost_clipboard",
+                     "ghost_screenshot","ghost_window","ghost_shell","ghost_clipboard",
                      "ghost_reset","ghost_stop","ghost_http_get","ghost_http_post"] {
             assert!(names.contains(&lean), "lean verb missing from tools/list: {lean}");
         }
@@ -2866,7 +2887,7 @@ mod tests {
         let resp = json!({
             "protocolVersion": "2024-11-05",
             "capabilities": { "tools": {} },
-            "serverInfo": { "name": "ghost", "version": "0.15.1" }
+            "serverInfo": { "name": "ghost", "version": "0.16.0" }
         });
         assert_eq!(resp["protocolVersion"], "2024-11-05");
         assert!(resp["capabilities"]["tools"].is_object());
