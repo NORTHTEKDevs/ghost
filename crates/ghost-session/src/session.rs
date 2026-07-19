@@ -71,6 +71,9 @@ pub struct GhostSession {
     grounding_stats: RefCell<GroundingStats>,
     /// Keeps COM initialized for the session lifetime — calls CoUninitialize on drop.
     _com_guard: ComGuard,
+    /// Persistent shell sessions (ghost_shell op=open/send/read/kill). RefCell is
+    /// sound for the same reason as the fields above: single STA block_on thread.
+    pub(crate) shells: RefCell<crate::shell::ShellRegistry>,
 }
 
 impl GhostSession {
@@ -106,6 +109,7 @@ impl GhostSession {
             reflection: RefCell::new(crate::reflection::ReflectionBuffer::default()),
             grounding_stats: RefCell::new(GroundingStats::default()),
             _com_guard: com_guard,
+            shells: RefCell::new(crate::shell::ShellRegistry::new()),
         })
     }
 

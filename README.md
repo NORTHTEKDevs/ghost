@@ -187,7 +187,24 @@ Add to Claude Desktop config (`%APPDATA%\Claude\claude_desktop_config.json`):
 }
 ```
 
-Works with any MCP client (Claude, Cursor, etc.) — 19 lean verbs advertised (legacy names stay dispatchable) covering see/snapshot/find/act/keys/scroll/drag/clipboard/screenshot/windows/waits/query/run.
+Works with any MCP client (Claude, Cursor, etc.) — 20 lean verbs advertised (legacy names stay dispatchable) covering see/snapshot/find/act/keys/scroll/drag/clipboard/screenshot/windows/shell/waits/query/run.
+
+### Shell control (`ghost_shell`)
+
+Ghost drives GUIs *and* the command line. `ghost_shell` runs terminal commands and
+persistent PowerShell sessions — builds, git, CLIs, file edits on hosts without file
+tools, or launching apps. `op=run` is a one-shot (`powershell`/`pwsh`/`cmd`); `op=open`
+starts a persistent PowerShell whose variables and cwd survive across `op=send` calls.
+Output is merged stdout+stderr, tail-capped for the agent's context window; a timed-out
+command keeps running and is drained with `op=read`; `ghost_stop` kills a runaway.
+
+Spawn a fresh Claude Code session from the agent:
+`ghost_shell op=run cmd='Start-Process wt -ArgumentList "pwsh","-NoExit","-Command","claude"'`,
+then drive the new terminal window with `ghost_see` / `ghost_act` / `ghost_key`.
+
+**Security:** shell access is powerful. Set `GHOST_SHELL=off` in the server's env to
+disable the verb entirely — every op then returns a clear refusal, leaving the GUI
+automation verbs fully usable.
 
 ## Reliability Model (v0.7.x)
 
