@@ -36,7 +36,26 @@
 
 # TRACK A — RELIABILITY (repo: `~/projects/active/ghost`)
 
-## Task 1: Fix the WinUI text-surface role gap
+> **STATUS 2026-07-25 (commit `e60c958`).** Task 1 as written below is
+> **OBSOLETE — its premise was wrong.** Win11 Notepad resolves to Edit (50004);
+> the `edit -> document` alias was added, measured, and reverted. See the
+> corrected root-cause section in the design doc. What was actually found and
+> fixed: the multi-monitor click bug in `input/mouse.rs`, the App Paths browser
+> launch failure in `process/manager.rs`, exact-before-alias role resolution plus
+> the cache validators that disagreed with it, `splitbutton`/`dataitem` in
+> `INTERACTIVE_ROLES`, removal of two empty tests that reported PASS forever, and
+> a properly isolated live matrix test.
+>
+> Verified: workspace 413 passed / 0 failed; live suite 18 passed / 0 failed.
+>
+> **Still open from the audit:** `ghost_assert` and the form-field heuristic read
+> text via ValuePattern only with no TextPattern fallback (`ghost-mcp/src/main.rs`
+> lines 1546 and 1814); no DPI-awareness call or manifest anywhere; CI still runs
+> no `-- --ignored` pass; `notepad.rs` and `notepad_flow.rs` still leak WinUI
+> processes because they kill the launcher stub pid. Tasks 3-8 below and all of
+> Track B are untouched.
+
+## Task 1: Fix the WinUI text-surface role gap — OBSOLETE, see status note above
 
 The red test already exists and fails. This is the whole bug.
 

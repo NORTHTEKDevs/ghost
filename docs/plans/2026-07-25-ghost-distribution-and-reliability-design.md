@@ -40,19 +40,40 @@ let Some(s) = run_on("msedge.exe").await else { return; };  // missing app -> si
 let _ = s.navigate_and_wait("Edge", &url, 10_000).await;     // result discarded, no assertion
 ```
 
-### Root cause candidate — WinUI text surfaces
+### Root cause — CORRECTED 2026-07-25
 
-This machine runs `Microsoft.WindowsNotepad 11.2605.34.0`, the WinUI Store app.
-`crates/ghost-core/src/uia/element.rs:128` maps only `50004 => "edit"`, while a
-WinUI `RichEditBox` surfaces as Document (`50030`). `find(By::role("edit"))` is
-exact-match and therefore misses modern WinUI text surfaces.
+The original hypothesis was a WinUI role-mapping gap: that Win11's Notepad
+exposes its text area as Document (50030) while `find(By::role("edit"))` matched
+only Edit (50004). **Measurement disproved this.** On a clean desktop with the
+window explicitly focused, Win11 Notepad resolves to Edit (50004), and
+`test_notepad_type_text` passes with no alias at all. An `edit -> document` alias
+was added and then reverted.
 
-`crates/ghost-core/src/uia/tree.rs:50` already treats `["edit", "document"]` as
-text roles, so the codebase is inconsistent with itself. Because every Windows 11
-box ships these apps, this single gap plausibly explains "fails on other
-machines".
+What actually made the test fail, and what actually breaks Ghost on other
+machines (all fixed in commit `e60c958`):
 
-Confidence: high, **unproven** until the red test goes green under the fix.
+1. **Clicks land on the wrong monitor.** `input/mouse.rs` scaled coordinates by
+   `SM_CXSCREEN`/`SM_CYSCREEN` (the primary monitor) and never set
+   `MOUSEEVENTF_VIRTUALDESK`, while the coordinates it receives are UIA
+   virtual-desktop coordinates. Invisible here — this box has one monitor at
+   (0,0) — and wrong on every multi-monitor machine.
+2. **Browsers could not be launched by name.** `CreateProcessW` searches only
+   PATH; no major browser is on PATH, they register under App Paths. So
+   `launch("msedge.exe")` returned FILE_NOT_FOUND. This is also why the three
+   Edge tests never caught anything: they returned early on the failed launch
+   and discarded their results.
+3. **`find()` can return another application's element.** `find_by_role_fast`
+   falls back to a desktop-wide walk when the foreground window yields nothing,
+   so without an explicit focus it can hand back a control from an unrelated
+   window. This is the best explanation found for "flaky/unreliable results".
+4. **Test runs leaked processes.** `process::kill` on the pid from `launch` does
+   not stop a WinUI Store app; 13 Notepad processes accumulated, and a later run
+   read one of them instead of its own window — which is what produced the false
+   confirmation of the original hypothesis.
+
+Lesson worth keeping: the first live "proof" of the WinUI theory was an artifact
+of a polluted desktop. Test isolation was a prerequisite for a trustworthy
+diagnosis, not a tidiness concern.
 
 ### Not established
 
