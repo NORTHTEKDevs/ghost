@@ -262,7 +262,13 @@ impl GhostSession {
                                     By::Name(n) => el.name().to_lowercase() == n.to_lowercase(),
                                     By::Role(r) => {
                                         let role = ghost_core::uia::element::role_id_to_name(el.control_type());
+                                        // Must accept the same aliases the original walk accepted.
+                                        // A WinUI text area cached for role=edit reports "document";
+                                        // an exact-only check rejected it on EVERY revalidation, so
+                                        // the entry was invalidated and re-walked on every call -
+                                        // a cache that could never hit for WinUI apps.
                                         role == r.as_str()
+                                            || ghost_core::uia::tree::role_alias_matches(r.as_str(), role)
                                     }
                                     By::Description(_) => false,
                                 };

@@ -30,15 +30,16 @@ async fn fsm_halts_on_max_duration_when_retry_if_always_true() {
     assert!(r.duration_ms < 1000, "should halt within 1s, got {}", r.duration_ms);
 }
 
-#[tokio::test]
-#[ignore]
-async fn cache_recovers_from_com_disconnect() {
-    // Requires chaos feature + real UiaCache wiring through session.
-    // Placeholder: see ghost-cache chaos_drop_events().
-}
-
-#[tokio::test]
-#[ignore]
-async fn sta_pool_circuit_trips_on_repeated_panics() {
-    // Covered by ghost-core::uia::sta_pool tests; this is an E2E smoke.
-}
+// REMOVED 2026-07-25: `cache_recovers_from_com_disconnect` and
+// `sta_pool_circuit_trips_on_repeated_panics` lived here as empty function
+// bodies. They contained no code at all, so they reported PASS forever and
+// were cited as evidence that COM-disconnect recovery and the STA-pool circuit
+// breaker were verified end to end. They were not.
+//
+// The behaviour they named is genuinely covered by unit tests that do assert:
+//   - ghost-cache        chaos_drop_events()
+//   - ghost-core::uia::sta_pool  circuit-breaker tests
+//
+// A test that cannot fail is worse than a missing one, because it is counted
+// as coverage. If an E2E smoke for either path is wanted later, write it with
+// real assertions rather than restoring a stub.
