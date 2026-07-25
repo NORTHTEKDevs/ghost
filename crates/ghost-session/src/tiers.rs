@@ -73,7 +73,11 @@ impl<'s> GroundingTier for CacheTier<'s> {
                 Target::Name(n) => el.name().to_lowercase() == n.to_lowercase(),
                 Target::Role(r) => {
                     let role = ghost_core::uia::element::role_id_to_name(el.control_type());
+                    // Same alias acceptance as the locator-cache validation in
+                    // session.rs - otherwise this tier can never hit for WinUI
+                    // text surfaces, which report "document" for role=edit.
                     role == r.as_str()
+                        || ghost_core::uia::tree::role_alias_matches(r.as_str(), role)
                 }
                 _ => false,
             };

@@ -15,27 +15,29 @@ use windows::Win32::System::Threading::{GetCurrentThreadId, AttachThreadInput};
 use super::element::{UiaElement, role_id_to_name, ElementDescriptor, INTERACTIVE_ROLES};
 use crate::error::CoreError;
 
-/// Check if a searched role matches an element role through defined aliases.
-/// By::Role("tab") matches both "tab" and "tabitem".
-/// By::Role("list") matches both "list" and "listitem".
 /// Roles that are acceptable *substitutes* when no exact match exists.
+/// `By::Role("tab")` matches "tabitem"; `By::Role("list")` matches "listitem".
 ///
-/// Callers name the thing they want ("edit" = the text input); apps disagree on
-/// which control type expresses it. Win11 ships Notepad and other WinUI apps
-/// whose text area reports Document (50030) rather than Edit (50004), so an
-/// exact-only search fails on a stock Windows 11 box.
+/// Aliases are strictly a FALLBACK - see `search_subtree_by_role`, which returns
+/// an exact match immediately and only falls back to an aliased candidate once
+/// the walk finds no exact one.
 ///
-/// Aliases are strictly a FALLBACK - see `search_subtree_by_role`, which always
-/// prefers an exact match found anywhere in the subtree. That ordering matters:
-/// in Chromium the whole page is a Document, so aliasing eagerly would return
-/// the page body instead of the omnibox.
+/// Deliberately one-way: an explicit "listitem" search must not return a list.
 ///
-/// Deliberately one-way: an explicit "document" search must not return a textbox.
-pub(crate) fn role_alias_matches(searched: &str, el_role: &str) -> bool {
+/// NOTE (2026-07-25): an `edit` -> `document` alias was added and then REVERTED.
+/// The theory was that Win11's WinUI Notepad exposes its text area as Document
+/// (50030), making an exact `role=edit` search fail. Measurement disproved it -
+/// with a clean desktop and the window explicitly focused,
+/// `find(By::role("edit"))` on Win11 Notepad returns control type 50004 (Edit),
+/// and `test_notepad_type_text` passes with no alias at all. The original
+/// ElementNotFound was an environment artifact (a fixed 800ms sleep and no
+/// explicit focus), not a role-mapping gap. Do not re-add that alias without a
+/// failing test on a clean machine: it risks returning a browser's page body,
+/// which is a Document, in place of a real input.
+pub fn role_alias_matches(searched: &str, el_role: &str) -> bool {
     match searched {
         "tab" => el_role == "tabitem",
         "list" => el_role == "listitem",
-        "edit" => el_role == "document",
         _ => false,
     }
 }
@@ -814,19 +816,16 @@ mod tests {
         assert_eq!(s4, "short");
     }
 
-    #[test]
-    fn edit_role_aliases_winui_document_surface() {
-        // Win11 WinUI apps (Notepad et al.) expose their text area as
-        // Document (50030), not Edit (50004). Asking for "edit" means
-        // "the text input", so document must be an acceptable substitute.
-        assert!(role_alias_matches("edit", "document"));
-    }
+
 
     #[test]
-    fn document_role_does_not_reverse_match_edit() {
-        // Aliases are one-way: an explicit document search must not hand back
-        // a plain textbox.
-        assert!(!role_alias_matches("document", "edit"));
+    fn interactive_roles_cover_winui_command_bar_controls() {
+        use crate::uia::element::INTERACTIVE_ROLES;
+        // ghost-mcp's actions_for_role treats splitbutton as clickable, but
+        // collect_interactive filters on this list first - so omitting it here
+        // made that branch unreachable and hid the control from snapshots.
+        assert!(INTERACTIVE_ROLES.contains(&"splitbutton"));
+        assert!(INTERACTIVE_ROLES.contains(&"dataitem"));
     }
 
     #[test]
@@ -834,23 +833,6 @@ mod tests {
         assert!(role_alias_matches("tab", "tabitem"));
         assert!(role_alias_matches("list", "listitem"));
         assert!(!role_alias_matches("button", "edit"));
-        assert!(!role_alias_matches("edit", "button"));
     }
 
-    #[test]
-    fn alias_is_fallback_only_never_preferred_over_exact() {
-        // Regression guard for the Chromium hazard: a browser page body is a
-        // Document that encloses the real Edit controls. A depth-first walk
-        // meets the Document first, so if aliasing were eager, find(role=edit)
-        // in a browser would return the page instead of the omnibox.
-        //
-        // search_subtree_by_role encodes the ordering by returning exact
-        // matches immediately and only accumulating alias hits, with callers
-        // resolving `exact.or(alias_hit)`. This asserts the invariant that
-        // makes that safe: "edit" and "document" are distinct roles, so an
-        // exact Edit is always distinguishable from an aliased Document.
-        assert_ne!("edit", "document");
-        assert!(role_alias_matches("edit", "document"));
-        assert!(!role_alias_matches("edit", "edit"), "exact match must not route through the alias table");
-    }
 }

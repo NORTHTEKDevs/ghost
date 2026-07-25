@@ -169,6 +169,12 @@ pub const INTERACTIVE_ROLES: &[&str] = &[
     "button", "edit", "checkbox", "combobox", "menu", "menuitem",
     "tab", "tabitem", "list", "listitem", "toolbar", "radiobutton",
     "hyperlink", "treeitem", "document",
+    // WinUI command bars expose split buttons (50031) and virtualised list
+    // rows as data items (50029). Both are clickable and ghost-mcp's
+    // actions_for_role already handles "splitbutton" - but collect_interactive
+    // filtered them out first, so describe_screen/snapshot never showed them
+    // and that branch was unreachable.
+    "splitbutton", "dataitem",
 ];
 
 #[derive(Debug, Clone)]
