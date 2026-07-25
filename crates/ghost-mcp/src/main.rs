@@ -238,6 +238,8 @@ struct McpResponse {
 // spawn_blocking still uses the separate blocking pool and is unaffected.
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
+    // Physical-pixel coordinates. Must precede any window/DC use.
+    ghost_core::system::dpi::ensure_process_dpi_aware();
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .init();

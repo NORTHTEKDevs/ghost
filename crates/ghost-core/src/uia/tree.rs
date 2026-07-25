@@ -24,20 +24,29 @@ use crate::error::CoreError;
 ///
 /// Deliberately one-way: an explicit "listitem" search must not return a list.
 ///
-/// NOTE (2026-07-25): an `edit` -> `document` alias was added and then REVERTED.
-/// The theory was that Win11's WinUI Notepad exposes its text area as Document
-/// (50030), making an exact `role=edit` search fail. Measurement disproved it -
-/// with a clean desktop and the window explicitly focused,
-/// `find(By::role("edit"))` on Win11 Notepad returns control type 50004 (Edit),
-/// and `test_notepad_type_text` passes with no alias at all. The original
-/// ElementNotFound was an environment artifact (a fixed 800ms sleep and no
-/// explicit focus), not a role-mapping gap. Do not re-add that alias without a
-/// failing test on a clean machine: it risks returning a browser's page body,
-/// which is a Document, in place of a real input.
+/// `edit` -> `document` exists because Win11 ships Notepad (and other WinUI
+/// apps) with a text area that reports Document (50030), not Edit (50004).
+///
+/// MEASURED 2026-07-25 on a CLEAN desktop, killing every Notepad between runs:
+///   without this alias  test_notepad_type_text  5/5 FAILED (ElementNotFound)
+///   with this alias     test_notepad_type_text  3/3 PASSED
+///
+/// The "clean desktop" part is load-bearing. `find_by_role_fast` falls back to a
+/// desktop-wide walk, and killing the pid returned by `launch()` does not stop a
+/// WinUI Store app, so leaked Notepads from earlier runs get found instead and
+/// make the test pass for the wrong reason. An earlier experiment concluded this
+/// alias was unnecessary; that experiment was contaminated exactly this way.
+/// Kill all Notepads before trusting any result here.
+///
+/// The browser hazard is handled by ORDERING, not by refusing the alias: a
+/// Chromium page body is also a Document, so `search_subtree_by_role` returns
+/// any exact Edit it finds and only falls back to a remembered alias candidate.
+/// `chromium_omnibox_prefers_exact_edit_over_enclosing_document` guards it.
 pub fn role_alias_matches(searched: &str, el_role: &str) -> bool {
     match searched {
         "tab" => el_role == "tabitem",
         "list" => el_role == "listitem",
+        "edit" => el_role == "document",
         _ => false,
     }
 }
@@ -826,6 +835,20 @@ mod tests {
         // made that branch unreachable and hid the control from snapshots.
         assert!(INTERACTIVE_ROLES.contains(&"splitbutton"));
         assert!(INTERACTIVE_ROLES.contains(&"dataitem"));
+    }
+
+    #[test]
+    fn edit_role_aliases_winui_document_surface() {
+        // Win11 WinUI text areas report Document (50030), not Edit (50004).
+        // Measured: without this, test_notepad_type_text fails 5/5 on a clean
+        // desktop; with it, 3/3 pass.
+        assert!(role_alias_matches("edit", "document"));
+    }
+
+    #[test]
+    fn document_role_does_not_reverse_match_edit() {
+        // One-way: an explicit document search must not return a textbox.
+        assert!(!role_alias_matches("document", "edit"));
     }
 
     #[test]

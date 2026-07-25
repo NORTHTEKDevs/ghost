@@ -272,6 +272,8 @@ async fn h_tools() -> Json<Value> {
 
 #[tokio::main]
 async fn main() {
+    // Physical-pixel coordinates. Must precede any window/DC use.
+    ghost_core::system::dpi::ensure_process_dpi_aware();
     tracing_subscriber::fmt().with_writer(std::io::stderr).init();
     let cli = Cli::parse();
 

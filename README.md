@@ -65,10 +65,14 @@ authorized to automate, and in line with the terms of the software you drive.
 
 ## Install
 
-**Option A — Ready-to-run kit ($20, one-time).** Prebuilt, verified Windows binaries (`ghost.exe`,
+**Option A — Ready-to-run kit ($20, one-time).** Prebuilt Windows binaries (`ghost.exe`,
 `ghost-http.exe`, `ghost-mcp.exe`) plus a quick-start, MCP config, and examples — no Rust toolchain, runs in
-two minutes. Get it at **[northtek.io/ghost](https://northtek.io/ghost)**. (This just buys convenience; the
-source below is free.)
+two minutes. Every kit is built by `scripts/package-kit.ps1`, which refuses to package unless the full live
+desktop suite passes. Get it at **[northtek.io/ghost](https://northtek.io/ghost.html)**.
+
+The binaries are **not code-signed**, so Windows SmartScreen will warn you on first run (click *More info*
+→ *Run anyway*). The kit buys convenience, not capability — everything Ghost can do is in the free source
+below, and building it yourself takes one command.
 
 **Option B — Build from source (free, MIT).** Ghost is open source. Compile it yourself:
 
@@ -79,7 +83,17 @@ cargo build --release --bin ghost --bin ghost-http --bin ghost-mcp
 # binaries in target/release/
 ```
 
-Requirements: Windows 10+ (and Rust stable only if building from source).
+Requirements: Windows 10 build 19041+ (and Rust stable only if building from source).
+
+**Check your machine first:**
+
+```bash
+ghost doctor
+```
+
+Reports PASS/WARN/FAIL for the Windows build, interactive desktop, UI Automation, DPI awareness,
+monitor layout, screen capture, and optional vision credentials. Exit code 1 if anything is FAIL.
+Run this before opening an issue — it usually names the problem outright.
 
 ## Quick Start — CLI
 

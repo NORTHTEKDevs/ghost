@@ -13,6 +13,7 @@ name = "ghost-http"
 path = "src/main.rs"
 
 [dependencies]
+ghost-core = { path = "../ghost-core" }
 ghost-session = { path = "../ghost-session" }
 ghost-intent = { path = "../ghost-intent" }
 tokio = { workspace = true }

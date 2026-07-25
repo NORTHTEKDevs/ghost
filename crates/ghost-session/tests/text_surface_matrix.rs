@@ -101,10 +101,9 @@ async fn winui_document_surface_resolves_via_alias() {
         .await
         .expect("WinUI text surface must resolve");
 
-    // Measured 2026-07-25: Win11 WinUI Notepad resolves to Edit (50004). It was
-    // believed to be Document (50030); that belief came from reading a LEAKED
-    // Notepad left behind by an earlier run, not from the window under test.
-    // Accept either, since which one Microsoft ships is not Ghost's contract -
+    // Measured on a CLEAN desktop: Win11 WinUI Notepad's text area is a
+    // Document (50030), reached through the edit->document alias. Accept Edit
+    // too, because which control type Microsoft ships is not Ghost's contract -
     // "role=edit finds a usable text surface" is.
     assert!(
         p.control_type == UIA_EDIT || p.control_type == UIA_DOCUMENT,
@@ -127,6 +126,16 @@ async fn chromium_omnibox_prefers_exact_edit_over_enclosing_document() {
     let mut last_err = String::new();
     let mut found = None;
     for (exe, hint) in [("msedge.exe", "Edge"), ("chrome.exe", "Chrome")] {
+        // Chromium browsers are multi-process singletons: launching one when an
+        // instance is already up hands the request to the existing browser and
+        // exits, so this test cannot tell its own window from the user's. PID
+        // diffing (which works for Notepad) cannot fix that. Refuse to run
+        // rather than assert against a window we do not own - an unisolated
+        // run here produced a phantom failure on 2026-07-25.
+        if !pids_named(exe).is_empty() {
+            last_err = format!("{exe} is already running; cannot isolate a test window");
+            continue;
+        }
         match probe(exe, hint, "example.com").await {
             Ok(p) => {
                 found = Some(p);

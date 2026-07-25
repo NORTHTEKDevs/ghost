@@ -749,6 +749,7 @@ version = "0.3.0"
 dependencies = [
  "axum",
  "clap",
+ "ghost-core",
  "ghost-intent",
  "ghost-session",
  "serde",
