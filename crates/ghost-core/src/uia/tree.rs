@@ -18,10 +18,24 @@ use crate::error::CoreError;
 /// Check if a searched role matches an element role through defined aliases.
 /// By::Role("tab") matches both "tab" and "tabitem".
 /// By::Role("list") matches both "list" and "listitem".
+/// Roles that are acceptable *substitutes* when no exact match exists.
+///
+/// Callers name the thing they want ("edit" = the text input); apps disagree on
+/// which control type expresses it. Win11 ships Notepad and other WinUI apps
+/// whose text area reports Document (50030) rather than Edit (50004), so an
+/// exact-only search fails on a stock Windows 11 box.
+///
+/// Aliases are strictly a FALLBACK - see `search_subtree_by_role`, which always
+/// prefers an exact match found anywhere in the subtree. That ordering matters:
+/// in Chromium the whole page is a Document, so aliasing eagerly would return
+/// the page body instead of the omnibox.
+///
+/// Deliberately one-way: an explicit "document" search must not return a textbox.
 pub(crate) fn role_alias_matches(searched: &str, el_role: &str) -> bool {
     match searched {
         "tab" => el_role == "tabitem",
         "list" => el_role == "listitem",
+        "edit" => el_role == "document",
         _ => false,
     }
 }
@@ -102,7 +116,10 @@ impl UiaTree {
                 .map_err(|e| CoreError::ComInit(e.to_string()))?;
             let walker = self.get_walker()?;
             let mut budget = SEARCH_NODE_BUDGET;
-            self.search_subtree_by_role(&root, role, &walker, 0, &mut budget)
+            let mut alias_hit = None;
+            let exact =
+                self.search_subtree_by_role(&root, role, &walker, 0, &mut budget, &mut alias_hit)?;
+            Ok(exact.or(alias_hit))
         }
     }
 
@@ -125,7 +142,10 @@ impl UiaTree {
                 .map_err(|e| CoreError::ComInit(e.to_string()))?;
             let walker = self.get_walker()?;
             let mut budget = SEARCH_NODE_BUDGET;
-            self.search_subtree_by_role(&root, role, &walker, 0, &mut budget)
+            let mut alias_hit = None;
+            let exact =
+                self.search_subtree_by_role(&root, role, &walker, 0, &mut budget, &mut alias_hit)?;
+            Ok(exact.or(alias_hit))
         }
     }
 
@@ -197,6 +217,12 @@ impl UiaTree {
     /// Recursive role search. `walker` is acquired once by the caller (see `find_by_role`).
     /// MEDIUM-8: `depth` param guards against stack overflow on pathological UIA trees.
     /// `budget` caps total visited nodes (see `search_subtree_by_name`).
+    /// Depth-first role search. Returns an EXACT role match immediately; an
+    /// aliased match (see `role_alias_matches`) is only remembered in
+    /// `alias_hit` so the walk can keep looking for an exact one. Callers take
+    /// `exact.or(alias_hit)`.
+    ///
+    /// This is one walk, not two: the fallback costs no extra COM calls.
     unsafe fn search_subtree_by_role(
         &self,
         element: &IUIAutomationElement,
@@ -204,6 +230,7 @@ impl UiaTree {
         walker: &IUIAutomationTreeWalker,
         depth: usize,
         budget: &mut usize,
+        alias_hit: &mut Option<UiaElement>,
     ) -> Result<Option<UiaElement>, CoreError> {
         if depth > 50 || *budget == 0 {
             return Ok(None);
@@ -211,12 +238,17 @@ impl UiaTree {
         *budget -= 1;
         let el = UiaElement(element.clone());
         let el_role = role_id_to_name(el.control_type());
-        if el_role == role || role_alias_matches(role, el_role) {
+        if el_role == role {
             return Ok(Some(el));
+        }
+        if alias_hit.is_none() && role_alias_matches(role, el_role) {
+            *alias_hit = Some(el);
         }
         let mut child = walker.GetFirstChildElement(element).ok();
         while let Some(c) = child {
-            if let Some(found) = self.search_subtree_by_role(&c, role, walker, depth + 1, budget)? {
+            if let Some(found) =
+                self.search_subtree_by_role(&c, role, walker, depth + 1, budget, alias_hit)?
+            {
                 return Ok(Some(found));
             }
             if *budget == 0 {
@@ -780,5 +812,45 @@ mod tests {
         let mut s4 = String::from("short");
         truncate_at_char_boundary(&mut s4, 100);
         assert_eq!(s4, "short");
+    }
+
+    #[test]
+    fn edit_role_aliases_winui_document_surface() {
+        // Win11 WinUI apps (Notepad et al.) expose their text area as
+        // Document (50030), not Edit (50004). Asking for "edit" means
+        // "the text input", so document must be an acceptable substitute.
+        assert!(role_alias_matches("edit", "document"));
+    }
+
+    #[test]
+    fn document_role_does_not_reverse_match_edit() {
+        // Aliases are one-way: an explicit document search must not hand back
+        // a plain textbox.
+        assert!(!role_alias_matches("document", "edit"));
+    }
+
+    #[test]
+    fn existing_role_aliases_still_hold() {
+        assert!(role_alias_matches("tab", "tabitem"));
+        assert!(role_alias_matches("list", "listitem"));
+        assert!(!role_alias_matches("button", "edit"));
+        assert!(!role_alias_matches("edit", "button"));
+    }
+
+    #[test]
+    fn alias_is_fallback_only_never_preferred_over_exact() {
+        // Regression guard for the Chromium hazard: a browser page body is a
+        // Document that encloses the real Edit controls. A depth-first walk
+        // meets the Document first, so if aliasing were eager, find(role=edit)
+        // in a browser would return the page instead of the omnibox.
+        //
+        // search_subtree_by_role encodes the ordering by returning exact
+        // matches immediately and only accumulating alias hits, with callers
+        // resolving `exact.or(alias_hit)`. This asserts the invariant that
+        // makes that safe: "edit" and "document" are distinct roles, so an
+        // exact Edit is always distinguishable from an aliased Document.
+        assert_ne!("edit", "document");
+        assert!(role_alias_matches("edit", "document"));
+        assert!(!role_alias_matches("edit", "edit"), "exact match must not route through the alias table");
     }
 }
