@@ -68,7 +68,7 @@ authorized to automate, and in line with the terms of the software you drive.
 **Option A — Ready-to-run kit ($20, one-time).** Prebuilt Windows binaries (`ghost.exe`,
 `ghost-http.exe`, `ghost-mcp.exe`) plus a quick-start, MCP config, and examples — no Rust toolchain, runs in
 two minutes. Every kit is built by `scripts/package-kit.ps1`, which refuses to package unless the full live
-desktop suite passes. Get it at **[northtek.io/ghost](https://northtek.io/ghost.html)**.
+desktop suite passes. Get it at **[northtek.io/ghost](https://northtek.io/ghost)**.
 
 The binaries are **not code-signed**, so Windows SmartScreen will warn you on first run (click *More info*
 → *Run anyway*). The kit buys convenience, not capability — everything Ghost can do is in the free source
