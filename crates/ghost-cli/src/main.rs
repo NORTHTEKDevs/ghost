@@ -15,6 +15,8 @@
 //!   ghost query --fields "title,status"
 //!   ghost serve
 
+mod doctor;
+
 use clap::{Parser, Subcommand};
 use ghost_session::{By, GhostSession, LocateMode, Target};
 use std::path::PathBuf;
@@ -171,13 +173,28 @@ enum Command {
     /// Start the ghost MCP stdio server. Executes the ghost-mcp binary found in PATH
     /// or adjacent to this binary. Communicates over stdio; there is no addr/port.
     Serve,
+
+    /// Check that this machine can run Ghost. Reports PASS/WARN/FAIL per item.
+    /// Exit code 1 if anything is FAIL. Run this before reporting a problem.
+    Doctor,
 }
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    // Physical-pixel coordinates. Must precede any window/DC use.
+    ghost_core::system::dpi::ensure_process_dpi_aware();
     let cli = Cli::parse();
     if cli.verbose {
         tracing_subscriber::fmt().with_writer(std::io::stderr).init();
+    }
+
+    // Handled here rather than in run(): doctor owns its own exit code, and it
+    // must report WHY a session cannot be created rather than failing to start
+    // alongside one.
+    if let Command::Doctor = &cli.command {
+        let checks = doctor::run_checks();
+        print!("{}", doctor::render(&checks));
+        return ExitCode::from(doctor::exit_code(&checks));
     }
 
     match run(cli).await {
@@ -438,7 +455,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             }
         }
 
-        Command::Serve => unreachable!("handled above"),
+        Command::Serve | Command::Doctor => unreachable!("handled above"),
     }
     Ok(())
 }

@@ -1,0 +1,15 @@
+{
+  "_comment": "Replace REPLACE_WITH_YOUR_PATH with the folder you copied the binaries into, e.g. C:\\Users\\you\\AppData\\Local\\Programs\\ghost. Backslashes must be doubled in JSON. Then merge this mcpServers block into your Claude config.",
+  "mcpServers": {
+    "ghost": {
+      "command": "REPLACE_WITH_YOUR_PATH\\ghost-mcp.exe",
+      "args": [],
+      "env": {
+        "_comment_vision": "OPTIONAL. Vision is a fallback for canvas/windowless apps that expose no accessibility tree. Ghost works without it; leave these unset if you do not need it. Any OpenAI-compatible endpoint works.",
+        "GHOST_VISION_API_KEY": "",
+        "GHOST_VISION_BASE_URL": "",
+        "GHOST_VISION_MODEL": ""
+      }
+    }
+  }
+}
