@@ -72,10 +72,18 @@ foreach ($b in $binaries) {
     Copy-Item $src (Join-Path $stage $b)
 }
 
-foreach ($f in 'quick-start.md', 'mcp-config.json') {
+foreach ($f in 'quick-start.md', 'mcp-config.json', 'install.ps1') {
     $src = Join-Path $repo "kit/$f"
     if (-not (Test-Path $src)) { throw "missing kit file: $src" }
     Copy-Item $src (Join-Path $stage $f)
+}
+
+# Recipes: working starting points, minus any local run output.
+$recipesSrc = Join-Path $repo 'kit/recipes'
+if (Test-Path $recipesSrc) {
+    Copy-Item $recipesSrc (Join-Path $stage 'recipes') -Recurse
+    Get-ChildItem (Join-Path $stage 'recipes') -Recurse -Include '__pycache__','*.pyc','extracted.csv' -Force |
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 Copy-Item (Join-Path $repo 'LICENSE') (Join-Path $stage 'LICENSE') -ErrorAction SilentlyContinue
