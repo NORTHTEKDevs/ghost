@@ -86,11 +86,24 @@ async fn probe(exe: &str, window_hint: &str, text: &str) -> Result<Probe, String
     }
     .await;
 
-    for p in pids_named(exe) {
-        if !before.contains(&p) {
-            ghost_core::process::kill(p).ok();
-        }
+    // Kill only what this call started, then WAIT for the processes to actually
+    // go away. process::kill is asynchronous: returning while a killed window is
+    // still tearing down left the desktop in a state where the next test's
+    // launch could not be focused (FocusFailed), which failed the release gate.
+    let mine: Vec<u32> = pids_named(exe).into_iter().filter(|p| !before.contains(p)).collect();
+    for p in &mine {
+        ghost_core::process::kill(*p).ok();
     }
+    for _ in 0..40 {
+        let still = pids_named(exe);
+        if !mine.iter().any(|p| still.contains(p)) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    // Give the shell a moment to settle focus after the window disappears.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
     result
 }
 

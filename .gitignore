@@ -11,3 +11,6 @@ public/ghost_*.png
 __pycache__/
 *.pyc
 notepad_test_screenshot.png
+
+# isolated build dir used when target/release is locked by a running ghost-mcp
+target-kit/
