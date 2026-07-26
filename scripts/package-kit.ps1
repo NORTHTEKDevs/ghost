@@ -17,7 +17,11 @@
 [CmdletBinding()]
 param(
     [switch]$SkipGate,
-    [string]$OutDir
+    [string]$OutDir,
+    # Alternate binary directory. Lets the kit be built from an isolated
+    # CARGO_TARGET_DIR when other Claude sessions hold a lock on
+    # target/release/ghost-mcp.exe.
+    [string]$BinDir
 )
 
 $ErrorActionPreference = 'Stop'
@@ -36,11 +40,15 @@ Push-Location $repo
 try {
     # A running ghost-mcp.exe holds a lock and cargo silently skips the relink.
     $running = @(Get-Process ghost-mcp -ErrorAction SilentlyContinue)
-    if ($running.Count) {
+    if ($running.Count -and -not $BinDir) {
         throw "$($running.Count) ghost-mcp.exe process(es) are running and hold a lock on the output binary; cargo would silently skip the relink and you would ship a stale exe. Stop them and re-run."
     }
-    cargo build --release --bin ghost --bin ghost-http --bin ghost-mcp
-    if ($LASTEXITCODE -ne 0) { throw 'cargo build failed' }
+    if ($BinDir) {
+        Write-Host "using prebuilt binaries from $BinDir" -ForegroundColor DarkGray
+    } else {
+        cargo build --release --bin ghost --bin ghost-http --bin ghost-mcp
+        if ($LASTEXITCODE -ne 0) { throw 'cargo build failed' }
+    }
 } finally { Pop-Location }
 
 # --- 2. gate ---
@@ -59,7 +67,7 @@ New-Item -ItemType Directory -Path $stage -Force | Out-Null
 
 $binaries = 'ghost.exe', 'ghost-http.exe', 'ghost-mcp.exe'
 foreach ($b in $binaries) {
-    $src = Join-Path $repo "target/release/$b"
+    $src = if ($BinDir) { Join-Path $BinDir $b } else { Join-Path $repo "target/release/$b" }
     if (-not (Test-Path $src)) { throw "missing binary: $src" }
     Copy-Item $src (Join-Path $stage $b)
 }
