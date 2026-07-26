@@ -29,36 +29,40 @@ certificate is on the roadmap. If you would rather not trust a binary at all,
 the full source is MIT-licensed at https://github.com/NORTHTEKDevs/ghost and
 builds with `cargo build --release`.
 
-## 2. Put the binaries somewhere permanent
-
-Anywhere is fine, but **not** your Downloads folder — the MCP config below
-points at this path, and moving the files later will break it.
+## 2. Install
 
 ```powershell
-mkdir "$env:LOCALAPPDATA\Programs\ghost"
-Copy-Item .\*.exe "$env:LOCALAPPDATA\Programs\ghost\"
+powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
-## 3. Check your machine
+That copies the binaries to `%LOCALAPPDATA%\Programs\ghost`, clears the
+downloaded-file block flag, adds them to PATH, writes the MCP config for Claude
+Code and Claude Desktop (merging into your existing config, with a backup, never
+overwriting it), and finishes by running `ghost doctor`.
+
+It only stops Ghost processes running from the folder it is installing into, so
+it will not disturb an agent or automation you already have running elsewhere.
+
+Prefer to do it by hand? `-SkipPath` and `-SkipClaude` turn those steps off, and
+section 4 below has the manual equivalents.
+
+## 3. Check the machine
 
 ```powershell
-& "$env:LOCALAPPDATA\Programs\ghost\ghost.exe" doctor
+ghost doctor
 ```
 
-Every line should read PASS or WARN. A WARN on vision credentials is expected
-and harmless — vision is an optional fallback, and everything else works
-without it.
+Every line should read PASS or WARN. A WARN on vision credentials is expected -
+vision is an optional fallback and everything else works without it. If anything
+reads FAIL, send us that output and we will tell you exactly what is wrong.
 
-## 4. Wire it into Claude
+## 4. Wiring Claude by hand (only if you skipped it)
 
-Open `mcp-config.json` from this kit, replace `REPLACE_WITH_YOUR_PATH` with the
-folder from step 2, and merge it into your Claude config:
+- **Claude Code** - `claude mcp add ghost --scope user -- "%LOCALAPPDATA%\Programs\ghost\ghost-mcp.exe"`
+- **Claude Desktop** - merge the `mcpServers` block from `mcp-config.json` into
+  `%APPDATA%\Claude\claude_desktop_config.json`, replacing the placeholder path.
 
-- **Claude Code** — `claude mcp add ghost --scope user -- "%LOCALAPPDATA%\Programs\ghost\ghost-mcp.exe"`
-- **Claude Desktop** — paste the `mcpServers` block into
-  `%APPDATA%\Claude\claude_desktop_config.json`
-
-Restart Claude. You should see the `ghost_*` tools available.
+Restart Claude and the `ghost_*` tools appear.
 
 ## 5. Prove it works
 
@@ -85,8 +89,24 @@ paying attention to is that it can do this **in the background**, using posted
 window messages, so it does not steal your foreground window or your cursor
 while it works. You can keep using your machine.
 
-Read `examples/` for working scripts, and `docs/` in the repo for the full
-verb reference.
+## Where to start
+
+`recipes/` has two working starting points for the jobs that make up most real
+automation work:
+
+- **`01_batch_data_entry.py`** - reads a CSV, types each row into an app, reads
+  it back, and halts on the first row that does not land. That verify-and-halt
+  loop is the part worth copying: a run that stops on row 40 costs you ten
+  minutes, a run that silently skips it costs you a reconciliation.
+- **`02_extract_to_csv.py`** - dumps every element a window exposes to CSV. Use
+  it to pull data out of software with no export, and to find reliable
+  `name`+`role` selectors instead of clicking at coordinates.
+
+Both run against Notepad as-is, so you can watch them work before pointing them
+at anything that matters. `recipes/README.md` explains how to adapt them.
+
+`examples/` has the lower-level demos, and `docs/` in the repo has the full verb
+reference.
 
 ## Known limits, stated up front
 
