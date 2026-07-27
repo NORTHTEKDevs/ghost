@@ -92,8 +92,10 @@ jobs:
       - name: Headless unit tests
         run: cargo test -p ghost-platform --features mac-headless-tests
 
+      # `--all-targets` so the headless test bodies are linted too, not just the
+      # library.
       - name: Clippy
-        run: cargo clippy -p ghost-platform --features mac-headless-tests -- -D warnings
+        run: cargo clippy -p ghost-platform --features mac-headless-tests --all-targets -- -D warnings
 
   check-linux:
     name: Check (Linux)
