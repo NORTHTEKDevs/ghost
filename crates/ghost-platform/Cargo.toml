@@ -4,6 +4,12 @@ version = "0.1.0"
 edition = "2021"
 description = "Cross-platform contract for Ghost: the capability model, shared types, and per-OS backend selection (Windows full; macOS/Linux scaffolded)."
 
+[features]
+# Unit tests that exercise the macOS backend's pure logic (coordinate math, error
+# mapping, CFString round-trips, modifier flags) without touching the window
+# server, so they run on a headless CI runner with no TCC grants.
+mac-headless-tests = []
+
 [dependencies]
 serde = { workspace = true }
 

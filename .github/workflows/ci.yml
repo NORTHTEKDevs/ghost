@@ -58,6 +58,43 @@ jobs:
       - name: Test platform contract
         run: cargo test -p ghost-platform
 
+  # The authoritative proof that Ghost's macOS code compiles and links against a
+  # real Apple SDK. Local cross-compilation is a convenience; this job is the gate.
+  # It is deliberately package-scoped, never `--workspace`: ghost-core /
+  # ghost-cache / ghost-intent are Windows-only and expected to fail here.
+  build-macos:
+    name: Build (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-mac-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-mac-
+
+      - name: Show toolchain and SDK
+        run: |
+          rustc -vV
+          xcrun --sdk macosx --show-sdk-version
+
+      - name: Build macOS backend
+        run: cargo build -p ghost-platform
+
+      - name: Headless unit tests
+        run: cargo test -p ghost-platform --features mac-headless-tests
+
+      - name: Clippy
+        run: cargo clippy -p ghost-platform --features mac-headless-tests -- -D warnings
+
   check-linux:
     name: Check (Linux)
     runs-on: ubuntu-latest
@@ -92,8 +129,10 @@ jobs:
           key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-release-
 
+      # `-p` is required: the workspace sets `default-members` to the portable
+      # crates, so a bare `--bin ghost` would not see ghost-cli's target.
       - name: Release build
-        run: cargo build --release --bin ghost --bin ghost-http --bin ghost-mcp
+        run: cargo build --release -p ghost-cli -p ghost-http -p ghost-mcp --bin ghost --bin ghost-http --bin ghost-mcp
 
       - name: Upload binary artifacts
         uses: actions/upload-artifact@v4
