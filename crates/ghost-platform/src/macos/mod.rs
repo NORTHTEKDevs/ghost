@@ -144,6 +144,9 @@ impl MacBackend {
     /// and needs a captured image plus a VLM — not something this backend resolves
     /// on its own, so it is rejected here rather than silently mis-handled.
     pub fn find(&self, window_query: &str, locator: &Locator) -> MacResult<ElementInfo> {
+        // Checked before the window lookup so an unsupported locator reports itself
+        // rather than being masked by whatever the window search happens to say.
+        reject_vision_locator(locator)?;
         let root = self.window_element(window_query)?;
         let candidates = root.snapshot()?;
 
@@ -156,11 +159,9 @@ impl MacBackend {
                 .iter()
                 .find(|e| e.actionable && e.role.eq_ignore_ascii_case(role))
                 .or_else(|| candidates.iter().find(|e| e.role.eq_ignore_ascii_case(role))),
-            Locator::Description(_) => {
-                return Err(MacError::Unsupported(
-                    "description locators are resolved by ghost-ground vision grounding, not by the macOS backend directly".into(),
-                ))
-            }
+            // Already rejected above; repeated so the match stays exhaustive without a
+            // catch-all arm that would swallow a future variant.
+            Locator::Description(_) => return Err(vision_locator_error()),
         };
 
         found
@@ -217,6 +218,10 @@ impl MacBackend {
     /// [`find`] returns the inert [`ElementInfo`] an agent plans over; acting via
     /// AX needs the handle itself, which cannot be stored in that struct.
     fn find_ax(&self, root: &AxElement, locator: &Locator) -> MacResult<AxElement> {
+        // Without this the walk below would match nothing and report "element not
+        // found", which reads as "your description was wrong" rather than "this
+        // backend cannot resolve descriptions at all".
+        reject_vision_locator(locator)?;
         let mut queue = vec![root.clone()];
         let mut depth = 0;
         while let Some(current) = queue.pop() {
@@ -227,7 +232,7 @@ impl MacBackend {
             let matches = match locator {
                 Locator::Name(name) => ax::name_matches(&current.name()?, name),
                 Locator::Role(role) => ax::ghost_role(&current.role()?).eq_ignore_ascii_case(role),
-                Locator::Description(_) => false,
+                Locator::Description(_) => return Err(vision_locator_error()),
             };
             if matches {
                 return Ok(current);
@@ -275,6 +280,25 @@ impl MacBackend {
     /// `false` here.
     pub fn supports(&self, feature: Feature) -> bool {
         MAC_FEATURES.contains(&feature)
+    }
+}
+
+/// The error a [`Locator::Description`] earns from this backend.
+fn vision_locator_error() -> MacError {
+    MacError::Unsupported(
+        "description locators are resolved by ghost-ground vision grounding, not by the macOS backend directly".into(),
+    )
+}
+
+/// Reject a locator this backend cannot resolve, before any work is done.
+///
+/// Ordering matters: if the window lookup ran first, an unsupported locator would
+/// surface as `WindowNotFound` whenever the window also happened to be missing,
+/// which points the caller at the wrong problem.
+fn reject_vision_locator(locator: &Locator) -> MacResult<()> {
+    match locator {
+        Locator::Name(_) | Locator::Role(_) => Ok(()),
+        Locator::Description(_) => Err(vision_locator_error()),
     }
 }
 

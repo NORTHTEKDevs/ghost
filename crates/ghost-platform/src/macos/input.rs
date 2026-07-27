@@ -261,18 +261,33 @@ const UNICODE_CHUNK: usize = 20;
 ///
 /// Splitting a pair would post half of an astral character (an emoji, say) and the
 /// app would render a replacement glyph, so the boundary check is load-bearing.
+///
+/// A surrogate pair is indivisible, so when `max` is 1 and the text contains an
+/// astral character the chunk has to be two units wide. `max` is therefore a target,
+/// not a hard cap — it may be exceeded by exactly one unit, and never more.
 pub fn chunk_utf16(text: &str, max: usize) -> Vec<Vec<u16>> {
     let units: Vec<u16> = text.encode_utf16().collect();
     if units.is_empty() {
         return Vec::new();
     }
+    // A zero-width chunk would make no progress and loop forever.
+    let max = max.max(1);
+
     let mut chunks = Vec::new();
     let mut start = 0;
     while start < units.len() {
         let mut end = (start + max).min(units.len());
         // 0xD800..=0xDBFF is a high surrogate; it must keep its low partner.
         if end < units.len() && (0xD800..=0xDBFF).contains(&units[end - 1]) {
-            end -= 1;
+            if end - 1 > start {
+                // Room to spare: end the chunk before the pair.
+                end -= 1;
+            } else {
+                // The pair starts exactly at `start`, so shrinking would produce an
+                // empty chunk, make no progress, and spin forever. Take the low
+                // surrogate too and overshoot `max` by one instead.
+                end += 1;
+            }
         }
         chunks.push(units[start..end].to_vec());
         start = end;
@@ -484,5 +499,56 @@ mod tests {
     #[test]
     fn empty_text_produces_no_events() {
         assert!(chunk_utf16("", 20).is_empty());
+    }
+
+    #[test]
+    fn a_chunk_size_smaller_than_a_surrogate_pair_terminates() {
+        // Regression: the first version shrank the chunk to avoid splitting a pair,
+        // which produced a zero-length chunk when the pair began at the chunk start.
+        // `start` never advanced, so this pushed empty vectors until the process was
+        // OOM-killed. It hung CI rather than failing it, which is the worst failure
+        // mode there is.
+        let chunks = chunk_utf16("😀😀", 1);
+        assert_eq!(chunks.len(), 2, "expected one chunk per pair: {chunks:?}");
+        for chunk in &chunks {
+            assert_eq!(chunk.len(), 2, "a pair cannot be narrower than 2 units");
+        }
+        let rejoined: Vec<u16> = chunks.iter().flatten().copied().collect();
+        assert_eq!(String::from_utf16(&rejoined).unwrap(), "😀😀");
+    }
+
+    #[test]
+    fn a_zero_chunk_size_terminates_instead_of_spinning() {
+        // `max` comes from a caller, and 0 would otherwise never advance `start`.
+        let chunks = chunk_utf16("ab", 0);
+        let rejoined: Vec<u16> = chunks.iter().flatten().copied().collect();
+        assert_eq!(String::from_utf16(&rejoined).unwrap(), "ab");
+        assert!(chunks.iter().all(|c| !c.is_empty()));
+    }
+
+    #[test]
+    fn chunking_always_makes_progress_and_never_overshoots_by_more_than_one() {
+        // Every chunk must be non-empty (progress) and at most one unit over `max`
+        // (the indivisible-pair allowance). Together those bound the loop.
+        for text in ["😀", "😀a", "a😀", "😀😀😀", "a😀b😀c", "日本😀語"] {
+            for max in 0..=6 {
+                let chunks = chunk_utf16(text, max);
+                let target = max.max(1);
+                for chunk in &chunks {
+                    assert!(!chunk.is_empty(), "empty chunk for {text:?} at {max}");
+                    assert!(
+                        chunk.len() <= target + 1,
+                        "chunk of {} units exceeds {target}+1 for {text:?}",
+                        chunk.len()
+                    );
+                }
+                let rejoined: Vec<u16> = chunks.iter().flatten().copied().collect();
+                assert_eq!(
+                    String::from_utf16(&rejoined).as_deref().ok(),
+                    Some(text),
+                    "chunks of {text:?} at {max} do not reassemble"
+                );
+            }
+        }
     }
 }
