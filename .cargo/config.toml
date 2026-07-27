@@ -1,0 +1,7 @@
+# `default-members` in the workspace manifest limits a bare `cargo build` to the
+# crates that build on every OS. These aliases are the explicit "give me
+# everything" verbs for Windows development.
+[alias]
+build-all = "build --workspace"
+check-all = "check --workspace"
+test-all = "test --workspace"

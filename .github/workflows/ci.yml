@@ -39,6 +39,40 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace -- -D warnings
 
+  # The portable subset only. These jobs must never be given `--workspace`: the
+  # Windows-only crates are *expected* to fail off Windows, and a red X on an
+  # expected failure trains people to ignore CI.
+  # See docs/plans/2026-07-cross-platform-plan.md.
+  check-macos:
+    name: Check (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Check portable crates
+        run: cargo check -p ghost-platform -p ghost-ground
+
+      - name: Test platform contract
+        run: cargo test -p ghost-platform
+
+  check-linux:
+    name: Check (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Check portable crates
+        run: cargo check -p ghost-platform -p ghost-ground
+
+      - name: Test platform contract
+        run: cargo test -p ghost-platform
+
   release-build:
     name: Release build
     runs-on: windows-latest

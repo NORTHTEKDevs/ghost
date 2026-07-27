@@ -220,7 +220,12 @@ fn capture_probe() -> Result<usize, String> {
 
 #[cfg(not(windows))]
 pub fn run_checks() -> Vec<Check> {
-    vec![Check::new("platform", Status::Fail, "Ghost's engine is Windows-only")]
+    vec![Check::new(
+        "platform",
+        Status::Fail,
+        "Ghost is Windows-only at v0.16.x; macOS/Linux backends land in v0.17+. \
+         See docs/cross-platform.md.",
+    )]
 }
 
 #[cfg(test)]

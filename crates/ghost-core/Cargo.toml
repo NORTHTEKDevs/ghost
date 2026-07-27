@@ -10,8 +10,6 @@ repository = "https://github.com/NORTHTEKDevs/ghost"
 readme = "../../README.md"
 
 [dependencies]
-windows = { workspace = true }
-windows-core = "0.58"
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true }
@@ -20,6 +18,13 @@ crossbeam-channel = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 blake3 = { workspace = true }
+
+# Ghost's engine is Windows-only today. Keeping the Win32 bindings under a target
+# section lets the workspace be resolved and checked from macOS/Linux without
+# pulling Win32 FFI; see docs/plans/2026-07-cross-platform-plan.md.
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true }
+windows-core = "0.58"
 
 [dev-dependencies]
 criterion = { workspace = true }
