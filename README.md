@@ -38,7 +38,7 @@ Ship it three ways:
 
 - **`ghost` CLI** — one-shot commands, great for scripts and CI (`ghost click --name "Submit"`)
 - **`ghost-http` server** — local REST API, call it from Python, Node, curl, anything (`curl http://127.0.0.1:7878/list-windows`)
-- **`ghost-mcp` server** — Model Context Protocol server for Claude, Cursor, and any MCP client (37 tools)
+- **`ghost-mcp` server** — Model Context Protocol server for Claude, Cursor, and any MCP client (20 verbs; legacy tool names stay dispatchable)
 
 No Claude required. No browser required. No CDP. It drives apps through the OS's
 own automation and input APIs, so it works with native apps that have no API and
@@ -47,23 +47,25 @@ built to be automated.
 
 ### Platforms
 
-Ghost targets three OSes through one shared contract (`crates/ghost-platform`):
+Today Ghost runs on **Windows 10/11 only.** macOS and Linux are on the roadmap
+and have a shared cross-platform contract in place (`crates/ghost-platform`),
+but the native backends are not written yet — those binaries will not build or
+run until they are. See [`docs/cross-platform.md`](docs/cross-platform.md) for
+the capability matrix and
+[`docs/plans/2026-07-cross-platform-plan.md`](docs/plans/2026-07-cross-platform-plan.md)
+for the plan.
 
-- **Windows** — full and verified. The flagship; every feature above works here.
-- **macOS / Linux** — architecture in place, native backends in progress (not yet
-  functional). The cross-platform crate compiles for all three; the macOS
-  (Accessibility/CGEvent) and Linux (AT-SPI/XTest) engines are scaffolded with a
-  precise implementation map and must be built and verified on those machines.
-
-See [`docs/cross-platform.md`](docs/cross-platform.md) for the capability matrix
-and the plan. Note: Ghost's background-without-focus-steal wedge relies on Windows
-window messages, which have no exact macOS/Linux equivalent — that capability is
-"measure before claiming" off Windows.
+Ghost's background-without-focus-steal wedge relies on Windows posted window
+messages; that specific capability has no exact macOS/Linux equivalent and will
+be re-measured once the native backends land.
 
 Ghost is a general-purpose automation tool. Use it on systems you own or are
 authorized to automate, and in line with the terms of the software you drive.
 
-## Install
+## Install (Windows 10/11)
+
+Ghost binaries only build and run on Windows today. macOS/Linux support is
+tracked in [`docs/cross-platform.md`](docs/cross-platform.md).
 
 **Option A — Ready-to-run kit ($20, one-time).** Prebuilt Windows binaries (`ghost.exe`,
 `ghost-http.exe`, `ghost-mcp.exe`) plus a quick-start, MCP config, and examples — no Rust toolchain, runs in
@@ -326,9 +328,11 @@ Run with `ghost run flow.json`, `POST /run`, or `ghost_execute_intent` over MCP.
 ghost-cli     ghost-http     ghost-mcp     Rust SDK
     \            |              /             |
      \           |             /              |
-      +-----> ghost-session  <----------------+   ← safe Rust API
+      +-----> ghost-session  <----------------+   ← safe Rust API (today: Windows-only)
                    |
               ghost-core                         ← Win32 FFI: UIA, SendInput, DXGI
+                   |
+              ghost-platform                     ← cross-OS contract; Win backend today, mac/linux scaffolded
                    |
               Windows OS
 ```

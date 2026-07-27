@@ -1,5 +1,9 @@
 # Ghost on three platforms
 
+> Implementation plan for the macOS and Linux backends:
+> [`docs/plans/2026-07-cross-platform-plan.md`](plans/2026-07-cross-platform-plan.md).
+> This page stays the capability contract; the plan is the how and the when.
+
 Ghost ships as three versions that share one contract (`crates/ghost-platform`):
 
 | Platform | Status | Engine |

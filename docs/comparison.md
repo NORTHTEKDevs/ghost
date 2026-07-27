@@ -9,6 +9,7 @@ screen.** For web scraping or cross-OS VM agents, other tools are the right call
 
 | Capability | **Ghost** | Playwright-MCP | Anthropic Computer Use | cua-driver (Hermes) | pywinauto / WinAppDriver |
 | --- | --- | --- | --- | --- | --- |
+| Platform coverage | ⚠️ Windows only today; mac/linux scaffolded | any (via browser) | mac/win/linux VM | mac/win/linux | Windows |
 | Native Windows apps (Win32/WPF/UWP) | ✅ deep (UI Automation) | ❌ browser only | ⚠️ via screenshots | ✅ | ✅ |
 | Web / browser | ⚠️ drives it like a user (no DOM) | ✅ deep (CDP/DOM) | ⚠️ screenshots | ⚠️ | ❌ |
 | **Background (no focus/cursor steal)** | ✅ posts window messages | ❌ | ❌ (drives the VM screen) | ✅ | ❌ |

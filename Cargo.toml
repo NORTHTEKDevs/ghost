@@ -10,6 +10,16 @@ members = [
     "crates/ghost-ground",
     "crates/ghost-platform",
 ]
+# The crates that legitimately build on every OS. A bare `cargo build` / `cargo
+# check` therefore produces a green, honest build on macOS and Linux, while the
+# Windows-only crates fail with a single explanatory line if you ask for them
+# explicitly. Windows developers get everything with `cargo build --workspace`
+# (or the `cargo build-all` alias in .cargo/config.toml).
+# See docs/plans/2026-07-cross-platform-plan.md.
+default-members = [
+    "crates/ghost-platform",
+    "crates/ghost-ground",
+]
 resolver = "2"
 
 [workspace.dependencies]
