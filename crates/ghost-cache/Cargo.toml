@@ -12,6 +12,9 @@ serde.workspace = true
 serde_json.workspace = true
 blake3.workspace = true
 crossbeam-channel.workspace = true
+
+# Windows-only today; see docs/plans/2026-07-cross-platform-plan.md.
+[target.'cfg(windows)'.dependencies]
 windows.workspace = true
 
 [features]

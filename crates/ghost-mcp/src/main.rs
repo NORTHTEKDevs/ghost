@@ -1,5 +1,10 @@
 #![recursion_limit = "512"]
 
+// Ghost's engine is Windows-only today. Off Windows this crate compiles to
+// nothing and its build script fails with a one-line explanation; see
+// docs/cross-platform.md and docs/plans/2026-07-cross-platform-plan.md.
+#![cfg(windows)]
+
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use ghost_session::{GhostSession, Target, LocateMode};

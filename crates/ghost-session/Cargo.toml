@@ -18,11 +18,14 @@ tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 async-trait = "0.1"
-windows = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 image = { workspace = true }
 reqwest = { workspace = true }
+
+# Windows-only today; see docs/plans/2026-07-cross-platform-plan.md.
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true }
 
 [dev-dependencies]
 ghost-intent = { path = "../ghost-intent" }
