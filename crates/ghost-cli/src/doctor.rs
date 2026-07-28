@@ -4,6 +4,13 @@
 //! issue about. Checks are pure where possible so the formatting and the
 //! pass/fail policy are unit-testable without a desktop.
 
+// Off Windows, [`run_checks`] produces a single FAIL row, so the Win32 policy
+// helpers and `Status::Pass` are unreachable — but their unit tests are pure and
+// host-independent, and are worth keeping runnable everywhere. Deleting or cfg'ing
+// them item-by-item would cost that coverage to silence a lint about code the
+// compiler correctly notices no macOS caller reaches.
+#![cfg_attr(not(windows), allow(dead_code))]
+
 use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -218,9 +225,23 @@ fn capture_probe() -> Result<usize, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Plain `ghost doctor` off Windows.
+///
+/// Still a `Fail`: the checks this command runs are about the Win32 automation
+/// engine, and that engine is not here. On a Mac the useful command is
+/// `ghost doctor --mac`, so the message names it rather than leaving the reader to
+/// guess that it exists.
 #[cfg(not(windows))]
 pub fn run_checks() -> Vec<Check> {
-    vec![Check::new("platform", Status::Fail, "Ghost's engine is Windows-only")]
+    #[cfg(target_os = "macos")]
+    let detail = "Ghost's automation engine is Windows-only at v0.16.x. The macOS \
+                  backend is built but unverified on hardware — run `ghost doctor --mac` \
+                  to test it on this machine. See docs/mac-testing.md.";
+    #[cfg(not(target_os = "macos"))]
+    let detail = "Ghost is Windows-only at v0.16.x; macOS/Linux backends land in v0.17+. \
+                  See docs/cross-platform.md.";
+
+    vec![Check::new("platform", Status::Fail, detail)]
 }
 
 #[cfg(test)]

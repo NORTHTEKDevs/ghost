@@ -4,12 +4,54 @@ version = "0.1.0"
 edition = "2021"
 description = "Cross-platform contract for Ghost: the capability model, shared types, and per-OS backend selection (Windows full; macOS/Linux scaffolded)."
 
+[features]
+# Unit tests that exercise the macOS backend's pure logic (coordinate math, error
+# mapping, CFString round-trips, modifier flags) without touching the window
+# server, so they run on a headless CI runner with no TCC grants.
+mac-headless-tests = []
+
 [dependencies]
 serde = { workspace = true }
 
 # Platform-specific backend dependencies are gated by target so this crate still
 # `cargo check`s for every OS. The Windows engine (ghost-session) is intentionally
 # NOT pulled in here — it remains the standalone Windows runtime; this crate only
-# declares the contract/capabilities. Native macOS (accessibility/objc2) and Linux
-# (atspi/x11) deps get added under their target sections when those backends are
-# implemented on-device.
+# declares the contract/capabilities. Linux (atspi/x11) deps get added under its
+# target section when that backend is implemented on-device.
+
+# macOS backend. Deliberately C-FFI-first: the Accessibility, CGEvent, and
+# CGWindowList APIs are all plain C, so only the clipboard and NSWorkspace bits
+# need Objective-C messaging. Keeping the objc2 surface small keeps the number of
+# things that can break on a machine we cannot compile on locally small too.
+[target.'cfg(target_os = "macos")'.dependencies]
+thiserror = { workspace = true }
+image = { workspace = true }
+libc = "0.2"
+# Accessibility (AXUIElement*, kAX* constants, AXError).
+accessibility-sys = "0.2"
+# CFType plumbing: CFString/CFArray/CFNumber/CFBoolean, retain/release, CFHash.
+core-foundation = "0.10"
+core-foundation-sys = "0.8"
+# CGEvent (keyboard/mouse synthesis), CGWindowList capture, CGDisplay geometry.
+core-graphics = "0.25"
+core-graphics-types = "0.2"
+# NSPasteboard (clipboard read-back) and NSWorkspace/NSRunningApplication
+# (frontmost-app checks). These have no C-level equivalent.
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+    "std",
+    # Gates `pid_t` on NSRunningApplication. Pid is how Ghost crosses from a
+    # CGWindowList entry to an AXUIElement, so this is load-bearing, not cosmetic.
+    "libc",
+    "NSPasteboard",
+    "NSWorkspace",
+    "NSRunningApplication",
+] }
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSString",
+    "NSArray",
+] }
+
+[lints]
+workspace = true

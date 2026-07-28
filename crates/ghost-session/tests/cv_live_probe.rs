@@ -3,6 +3,10 @@
 //! detector produces sane output on actual UI pixels. Run:
 //!   cargo test -p ghost-session --test cv_live_probe -- --ignored --nocapture
 
+// The detector itself is portable, but the pixels come from `ghost_core::capture`,
+// which is Win32-only. Compiles on Windows only; see the note in calculator.rs.
+#![cfg(windows)]
+
 use ghost_ground::cv_detect::{detect_regions, Opts};
 
 #[test]

@@ -10,28 +10,45 @@ repository = "https://github.com/NORTHTEKDevs/ghost"
 readme = "../../README.md"
 
 [dependencies]
-ghost-core = { path = "../ghost-core" }
-ghost-cache = { path = "../ghost-cache" }
-ghost-intent = { path = "../ghost-intent" }
+ghost-platform = { path = "../ghost-platform" }
 ghost-ground = { path = "../ghost-ground" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 async-trait = "0.1"
-windows = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 image = { workspace = true }
 reqwest = { workspace = true }
 
-[dev-dependencies]
+# ghost-core, ghost-cache and ghost-intent are Win32-only crates: the UIA tree, the
+# UIA mirror cache and the intent FSM all speak to COM directly. They are scoped to
+# Windows so that `cargo build -p ghost-session` on a Mac builds the macOS backend
+# instead of failing in their FFI.
+# See docs/plans/2026-07-cross-platform-plan.md.
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true }
+ghost-core = { path = "../ghost-core" }
+ghost-cache = { path = "../ghost-cache" }
 ghost-intent = { path = "../ghost-intent" }
+
+[target.'cfg(windows)'.dev-dependencies]
+ghost-intent = { path = "../ghost-intent" }
+
+[dev-dependencies]
 async-trait = "0.1"
 
 [features]
 default = []
+# Failure injection (crates/ghost-session/tests/chaos.rs). ghost-cache is a
+# Windows-only dependency; naming its feature here is still valid because cargo
+# resolves features across every target, not just the host's.
 chaos = ["ghost-cache/chaos"]
 yolo = ["ghost-ground/yolo"]
+
+# Tests that touch macOS system APIs which behave sanely on a headless CI runner.
+# Off by default so a Mac developer's `cargo test` does not depend on TCC grants.
+mac-headless-tests = ["ghost-platform/mac-headless-tests"]
 
 [[example]]
 name = "notepad_hello"
@@ -40,3 +57,6 @@ path = "../../examples/notepad_hello.rs"
 [[example]]
 name = "diagnose"
 path = "../../examples/diagnose.rs"
+
+[lints]
+workspace = true

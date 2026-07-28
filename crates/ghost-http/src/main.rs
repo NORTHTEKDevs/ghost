@@ -9,6 +9,11 @@
 //! GhostSession holds !Send COM handles, so it runs on a dedicated OS thread
 //! and we dispatch requests to it via a channel actor.
 
+// Ghost's engine is Windows-only today. Off Windows this crate compiles to
+// nothing and its build script fails with a one-line explanation; see
+// docs/cross-platform.md and docs/plans/2026-07-cross-platform-plan.md.
+#![cfg(windows)]
+
 use axum::{extract::State, http::StatusCode, response::Json, routing::{get, post}, Router};
 use clap::Parser;
 use ghost_session::{By, GhostSession, Region};

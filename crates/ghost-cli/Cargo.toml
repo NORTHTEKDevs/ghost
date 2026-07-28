@@ -14,12 +14,30 @@ path = "src/main.rs"
 
 [dependencies]
 ghost-session = { path = "../ghost-session" }
-ghost-core = { path = "../ghost-core" }
-ghost-intent = { path = "../ghost-intent" }
+ghost-platform = { path = "../ghost-platform" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 clap = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+
+# The automation verbs are Win32/UIA; only `ghost doctor --mac` builds elsewhere.
+# See docs/plans/2026-07-cross-platform-plan.md.
+[target.'cfg(windows)'.dependencies]
 windows = { workspace = true }
+ghost-core = { path = "../ghost-core" }
+ghost-intent = { path = "../ghost-intent" }
+
+# `ghost doctor --mac` decodes the PNG it captures, to prove the bytes are a real
+# image rather than a plausible-looking buffer. Only that command needs it.
+[target.'cfg(target_os = "macos")'.dependencies]
+image = { workspace = true }
+
+[features]
+default = []
+# Unit tests for the `doctor --mac` report that need no desktop and no TCC grant.
+mac-headless-tests = ["ghost-session/mac-headless-tests"]
+
+[lints]
+workspace = true

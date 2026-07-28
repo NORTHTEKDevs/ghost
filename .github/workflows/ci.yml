@@ -39,6 +39,87 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace -- -D warnings
 
+  # The portable subset only. These jobs must never be given `--workspace`: the
+  # Windows-only crates are *expected* to fail off Windows, and a red X on an
+  # expected failure trains people to ignore CI.
+  # See docs/plans/2026-07-cross-platform-plan.md.
+  check-macos:
+    name: Check (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Check portable crates
+        run: cargo check -p ghost-platform -p ghost-ground
+
+      - name: Test platform contract
+        run: cargo test -p ghost-platform
+
+  # The authoritative proof that Ghost's macOS code compiles and links against a
+  # real Apple SDK. Local cross-compilation is a convenience; this job is the gate.
+  # It is deliberately package-scoped, never `--workspace`: ghost-core /
+  # ghost-cache / ghost-intent are Windows-only and expected to fail here.
+  build-macos:
+    name: Build (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-mac-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-mac-
+
+      - name: Show toolchain and SDK
+        run: |
+          rustc -vV
+          xcrun --sdk macosx --show-sdk-version
+
+      # This job is the authoritative proof that the macOS backend is real: it is the
+      # only place the code is compiled and linked against Apple's SDK. Locally,
+      # `cargo check --target aarch64-apple-darwin` on Linux covers ghost-platform and
+      # stops there, because `ring` (via reqwest -> rustls) has a C build script that
+      # needs a macOS SDK.
+      #
+      # ghost-core, ghost-cache and ghost-intent speak to COM directly and are left
+      # Windows-only rather than ported.
+      - name: Build the macOS-capable crates
+        run: cargo build -p ghost-platform -p ghost-session -p ghost-cli
+
+      - name: Headless unit tests
+        run: cargo test -p ghost-platform -p ghost-session -p ghost-cli --features ghost-cli/mac-headless-tests
+
+      # `--all-targets` so the headless test bodies and the examples are linted too,
+      # not just the libraries.
+      - name: Clippy
+        run: cargo clippy -p ghost-platform -p ghost-session -p ghost-cli --features ghost-cli/mac-headless-tests --all-targets -- -D warnings
+
+  check-linux:
+    name: Check (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Check portable crates
+        run: cargo check -p ghost-platform -p ghost-ground
+
+      - name: Test platform contract
+        run: cargo test -p ghost-platform
+
   release-build:
     name: Release build
     runs-on: windows-latest
@@ -58,8 +139,10 @@ jobs:
           key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-release-
 
+      # `-p` is required: the workspace sets `default-members` to the portable
+      # crates, so a bare `--bin ghost` would not see ghost-cli's target.
       - name: Release build
-        run: cargo build --release --bin ghost --bin ghost-http --bin ghost-mcp
+        run: cargo build --release -p ghost-cli -p ghost-http -p ghost-mcp --bin ghost --bin ghost-http --bin ghost-mcp
 
       - name: Upload binary artifacts
         uses: actions/upload-artifact@v4

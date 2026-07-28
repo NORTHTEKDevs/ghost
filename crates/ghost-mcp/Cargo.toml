@@ -24,4 +24,10 @@ sonic-rs = { workspace = true }
 reqwest = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+
+# Windows-only today; see docs/plans/2026-07-cross-platform-plan.md.
+[target.'cfg(windows)'.dependencies]
 windows = { workspace = true }
+
+[lints]
+workspace = true

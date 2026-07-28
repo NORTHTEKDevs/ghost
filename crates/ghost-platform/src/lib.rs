@@ -85,13 +85,35 @@ impl Capabilities {
     }
 }
 
-/// The full feature set — every capability Ghost offers (as on Windows today).
-pub fn all_features() -> Vec<Feature> {
+/// Every capability Ghost offers, as a const so per-platform sets can be compared
+/// at compile time.
+pub const ALL_FEATURES: [Feature; 9] = {
     use Feature::*;
-    vec![
+    [
         ElementDiscovery, Act, PerActionVerify, BackgroundDispatch,
         StructuredSnapshot, Screenshot, KeyInput, EditShortcuts, VisionGrounding,
     ]
+};
+
+/// What the macOS backend implements: everything except
+/// [`Feature::BackgroundDispatch`], which has no macOS equivalent — see
+/// [`macos`](crate::macos) for why.
+///
+/// Listing these is not a claim that they work on a Mac.
+/// `capabilities_for(Platform::MacOS).functional` stays `false` until
+/// `ghost doctor --mac` passes on real hardware; this is the set of features whose
+/// native code exists.
+pub const MAC_FEATURES: [Feature; 8] = {
+    use Feature::*;
+    [
+        ElementDiscovery, Act, PerActionVerify, StructuredSnapshot,
+        Screenshot, KeyInput, EditShortcuts, VisionGrounding,
+    ]
+};
+
+/// The full feature set — every capability Ghost offers (as on Windows today).
+pub fn all_features() -> Vec<Feature> {
+    ALL_FEATURES.to_vec()
 }
 
 // ---------------------------------------------------------------------------
@@ -131,6 +153,35 @@ pub fn current() -> Box<dyn Backend> {
     { compile_error!("Ghost supports Windows, macOS, and Linux only") }
 }
 
+/// Declared capabilities per platform — the single source of truth for the
+/// three-version status. Windows is full + functional; macOS/Linux are scaffolds
+/// (functional = false) until their native backends are built and verified.
+pub fn capabilities_for(platform: Platform) -> Capabilities {
+    match platform {
+        Platform::Windows => Capabilities {
+            platform,
+            functional: true,
+            supported: all_features(),
+            status: "full and verified (ghost-core/ghost-session over Win32 UIA + window messages)",
+        },
+        // `supported` says which features have native code; `functional` says
+        // whether that code has been run on a Mac. The second is the honest one and
+        // it stays false.
+        Platform::MacOS => Capabilities {
+            platform,
+            functional: false,
+            supported: MAC_FEATURES.to_vec(),
+            status: "native backend implemented (Accessibility/AXUIElement + CGEvent + CGWindowList capture); builds on macos-latest but not yet verified on-device",
+        },
+        Platform::Linux => Capabilities {
+            platform,
+            functional: false,
+            supported: vec![],
+            status: "scaffold — native backend (AT-SPI over D-Bus + XTest/libei + X11/portal capture) not yet implemented/verified",
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -166,30 +217,31 @@ mod tests {
             assert!(!caps.functional, "{:?} must not claim functional yet", p);
         }
     }
-}
 
-/// Declared capabilities per platform — the single source of truth for the
-/// three-version status. Windows is full + functional; macOS/Linux are scaffolds
-/// (functional = false) until their native backends are built and verified.
-pub fn capabilities_for(platform: Platform) -> Capabilities {
-    match platform {
-        Platform::Windows => Capabilities {
-            platform,
-            functional: true,
-            supported: all_features(),
-            status: "full and verified (ghost-core/ghost-session over Win32 UIA + window messages)",
-        },
-        Platform::MacOS => Capabilities {
-            platform,
-            functional: false,
-            supported: vec![],
-            status: "scaffold — native backend (Accessibility/AXUIElement + CGEvent + ScreenCaptureKit) not yet implemented/verified",
-        },
-        Platform::Linux => Capabilities {
-            platform,
-            functional: false,
-            supported: vec![],
-            status: "scaffold — native backend (AT-SPI over D-Bus + XTest/libei + X11/portal capture) not yet implemented/verified",
-        },
+    #[test]
+    fn macos_declares_every_feature_except_background_dispatch() {
+        // Having native code is not the same as being verified: the feature list
+        // grew when the backend landed, `functional` did not.
+        let caps = capabilities_for(Platform::MacOS);
+        assert!(!caps.functional);
+        assert!(!caps.supports(Feature::BackgroundDispatch));
+        for f in all_features() {
+            assert_eq!(
+                caps.supports(f),
+                f != Feature::BackgroundDispatch,
+                "{f:?} is claimed on macOS but should not be (or vice versa)"
+            );
+        }
+        assert_eq!(MAC_FEATURES.len(), ALL_FEATURES.len() - 1);
+    }
+
+    #[test]
+    fn linux_remains_a_pure_scaffold_with_no_native_code() {
+        let caps = capabilities_for(Platform::Linux);
+        assert!(!caps.functional);
+        assert!(
+            caps.supported.is_empty(),
+            "Linux has no native backend yet, so it must claim nothing"
+        );
     }
 }
