@@ -362,7 +362,7 @@ fn run_smoke_tests() -> Vec<Step> {
     step(&mut steps, "screenshot window", "a decodable, non-blank PNG", || {
         let shot = backend.screenshot_window(TARGET_APP)?;
         let decoded = image::load_from_memory(&shot.png)
-            .map_err(|e| MacError::Encode(format!("captured bytes are not a valid PNG: {e}")))?;
+            .map_err(|e| MacError::CaptureUnusable(format!("not a decodable PNG: {e}")))?;
         let observed = format!(
             "{}x{} px, {}x{} pt, scale {:.1}, {} bytes{}",
             shot.pixel_width,
@@ -401,14 +401,27 @@ fn run_smoke_tests() -> Vec<Step> {
     // --- window enumeration ---
     step(&mut steps, "list windows", format!("{TARGET_APP} present"), || {
         let windows = backend.list_windows()?;
-        let found = windows.iter().any(|w| {
-            w.title
-                .to_lowercase()
-                .contains(&TARGET_APP.to_lowercase())
-        }) || window::list_windows()?
+        // The neutral `WindowRef` carries the *document* title, which for TextEdit is
+        // "Untitled", not the app name. Owning pid is the reliable test; the title
+        // match is kept because it is the check an agent would actually write, and
+        // knowing which of the two matched is worth a line in the report.
+        let by_title = windows
             .iter()
-            .any(|w| w.pid == pid);
-        verdict(found, format!("{} window(s) listed", windows.len()))
+            .any(|w| w.title.to_lowercase().contains(&TARGET_APP.to_lowercase()));
+        let by_pid = window::list_windows()?.iter().any(|w| w.pid == pid);
+        verdict(
+            by_title || by_pid,
+            format!(
+                "{} window(s) listed; matched by {}",
+                windows.len(),
+                match (by_title, by_pid) {
+                    (true, true) => "title and pid",
+                    (true, false) => "title only",
+                    (false, true) => "pid only",
+                    (false, false) => "neither",
+                }
+            ),
+        )
     });
 
     // --- focus round-trip ---

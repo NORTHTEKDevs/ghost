@@ -49,11 +49,6 @@ impl ReflectionBuffer {
         }
     }
 
-    /// Create a buffer with [`Self::DEFAULT_CAPACITY`].
-    pub fn default() -> Self {
-        Self::new(Self::DEFAULT_CAPACITY)
-    }
-
     /// Push a new entry, evicting the oldest if at capacity.
     pub fn push(&mut self, entry: ReflectionEntry) {
         if self.entries.len() >= self.capacity {
@@ -126,6 +121,13 @@ impl ReflectionBuffer {
     /// Snapshot the current entries (newest-first) for diagnostics.
     pub fn entries(&self) -> impl Iterator<Item = &ReflectionEntry> {
         self.entries.iter().rev()
+    }
+}
+
+impl Default for ReflectionBuffer {
+    /// A buffer with [`ReflectionBuffer::DEFAULT_CAPACITY`].
+    fn default() -> Self {
+        Self::new(Self::DEFAULT_CAPACITY)
     }
 }
 
