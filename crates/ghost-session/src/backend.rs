@@ -124,17 +124,17 @@ pub enum Session {
 
 impl Session {
     /// Build the engine for the host OS.
+    ///
+    /// `return` rather than trailing blocks: a cfg'd-out block still has to typecheck
+    /// as a statement on the other host, and a statement block must evaluate to `()`.
     pub fn new() -> Result<Self> {
         #[cfg(windows)]
-        {
-            Ok(Session::Windows(crate::win_backend::WinBackend::new()?))
-        }
+        return Ok(Session::Windows(crate::win_backend::WinBackend::new()?));
+
         #[cfg(target_os = "macos")]
-        {
-            Ok(Session::MacOS(
-                crate::mac_backend::MacSessionBackend::new()?,
-            ))
-        }
+        return Ok(Session::MacOS(
+            crate::mac_backend::MacSessionBackend::new()?,
+        ));
     }
 
     /// The full Windows engine, or `None` off Windows.
