@@ -1,6 +1,11 @@
 //! Integration test: automate Calculator
 //! Run with: cargo test -p ghost-session --test calculator -- --ignored --nocapture
 
+// Drives the Win32/UIA engine, so it can only be *compiled* on Windows — the types
+// it names do not exist elsewhere. `#[ignore]` alone is not enough: an ignored test
+// is still built.
+#![cfg(windows)]
+
 use ghost_session::{GhostSession, By};
 use std::time::Duration;
 
