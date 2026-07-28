@@ -198,6 +198,12 @@ pub enum MacError {
 
     #[error("invalid argument: {0}")]
     InvalidArgument(String),
+
+    /// A wait for the system to catch up ran out. Separate from the errors above
+    /// because nothing failed: the OS was asked to do something asynchronous and
+    /// had not finished. Retrying is reasonable; the others are not.
+    #[error("timed out: {0}")]
+    Timeout(String),
 }
 
 impl MacError {

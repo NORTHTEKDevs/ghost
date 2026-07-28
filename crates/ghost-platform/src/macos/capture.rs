@@ -55,6 +55,13 @@ pub struct Capture {
     pub pixel_height: u32,
     /// The region, in points, that was asked for.
     pub region: Rect,
+    /// Whether every pixel was the same colour.
+    ///
+    /// Computed here, while the RGBA buffer is still in hand, because that buffer is
+    /// dropped once the PNG exists and answering this later would mean decoding the
+    /// PNG again. It matters because macOS returns a valid, fully black image rather
+    /// than an error when Screen Recording is missing — see [`is_blank`].
+    pub blank: bool,
 }
 
 impl Capture {
@@ -221,12 +228,14 @@ fn encode(image: core_graphics::image::CGImage, region: Rect) -> MacResult<Captu
         }
     }
 
+    let blank = is_blank(&rgba);
     let png = encode_png(&rgba, width as u32, height as u32)?;
     Ok(Capture {
         png,
         pixel_width: width as u32,
         pixel_height: height as u32,
         region,
+        blank,
     })
 }
 
@@ -314,6 +323,7 @@ mod tests {
         // at (100,50) captured on a 2x display is an 800x600-pixel image.
         let capture = Capture {
             png: Vec::new(),
+            blank: true,
             pixel_width: 800,
             pixel_height: 600,
             region: Rect {
@@ -344,6 +354,7 @@ mod tests {
     fn non_retina_capture_maps_pixels_straight_through() {
         let capture = Capture {
             png: Vec::new(),
+            blank: true,
             pixel_width: 400,
             pixel_height: 300,
             region: Rect {
@@ -364,6 +375,7 @@ mod tests {
     fn a_capture_on_a_display_left_of_main_keeps_its_negative_offset() {
         let capture = Capture {
             png: Vec::new(),
+            blank: true,
             pixel_width: 800,
             pixel_height: 600,
             region: Rect {
