@@ -9,6 +9,8 @@
 //! and links against Apple's SDK in CI but has not been run on a Mac. See
 //! docs/mac-testing.md and docs/plans/2026-07-cross-platform-plan.md.
 #![cfg(any(windows, target_os = "macos"))]
+// Pre-existing Windows-side lint in shell.rs; tracked with the ghost-core cleanup pass.
+#![cfg_attr(windows, allow(clippy::manual_div_ceil))]
 
 // Portable: neutral types, or pure logic with no OS calls.
 pub mod backend;
