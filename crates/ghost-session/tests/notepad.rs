@@ -1,6 +1,9 @@
 //! Integration test: automate Notepad
 //! Run with: cargo test -p ghost-session --test notepad -- --ignored --nocapture
 
+// Compiles on Windows only; see the note in calculator.rs.
+#![cfg(windows)]
+
 use ghost_session::{GhostSession, By, session::Region};
 use std::time::Duration;
 
