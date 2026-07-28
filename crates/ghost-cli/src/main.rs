@@ -658,7 +658,7 @@ mod tests {
     #[test]
     fn parse_screenshot_default_out() {
         let cli = parse(&["screenshot"]).unwrap();
-        assert!(matches!(cli.command, Command::Screenshot { out } if out == PathBuf::from("ghost.png")));
+        assert!(matches!(cli.command, Command::Screenshot { out } if out.as_path() == std::path::Path::new("ghost.png")));
     }
 
     #[test]

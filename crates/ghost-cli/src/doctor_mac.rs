@@ -463,13 +463,16 @@ fn run_smoke_tests() -> Vec<Step> {
         ),
         ms: 0,
     });
-    println!(
-        "  {}{:<7}\x1b[0m {:<22} {}",
-        Outcome::Skip.colour(),
-        Outcome::Skip,
-        "background dispatch",
-        "no macOS equivalent of Windows posted messages"
-    );
+    #[allow(clippy::print_literal)] // preserves the aligned row format used by every other step()
+    {
+        println!(
+            "  {}{:<7}\x1b[0m {:<22} {}",
+            Outcome::Skip.colour(),
+            Outcome::Skip,
+            "background dispatch",
+            "no macOS equivalent of Windows posted messages",
+        );
+    }
 
     // --- quit ---
     step(&mut steps, "quit app", format!("{TARGET_APP} exits"), || {
