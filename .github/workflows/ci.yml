@@ -86,16 +86,24 @@ jobs:
           rustc -vV
           xcrun --sdk macosx --show-sdk-version
 
-      - name: Build macOS backend
-        run: cargo build -p ghost-platform
+      # This job is the authoritative proof that the macOS backend is real: it is the
+      # only place the code is compiled and linked against Apple's SDK. Locally,
+      # `cargo check --target aarch64-apple-darwin` on Linux covers ghost-platform and
+      # stops there, because `ring` (via reqwest -> rustls) has a C build script that
+      # needs a macOS SDK.
+      #
+      # ghost-core, ghost-cache and ghost-intent speak to COM directly and are left
+      # Windows-only rather than ported.
+      - name: Build the macOS-capable crates
+        run: cargo build -p ghost-platform -p ghost-session -p ghost-cli
 
       - name: Headless unit tests
-        run: cargo test -p ghost-platform --features mac-headless-tests
+        run: cargo test -p ghost-platform -p ghost-session -p ghost-cli --features ghost-cli/mac-headless-tests
 
-      # `--all-targets` so the headless test bodies are linted too, not just the
-      # library.
+      # `--all-targets` so the headless test bodies and the examples are linted too,
+      # not just the libraries.
       - name: Clippy
-        run: cargo clippy -p ghost-platform --features mac-headless-tests --all-targets -- -D warnings
+        run: cargo clippy -p ghost-platform -p ghost-session -p ghost-cli --features ghost-cli/mac-headless-tests --all-targets -- -D warnings
 
   check-linux:
     name: Check (Linux)

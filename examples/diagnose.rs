@@ -1,8 +1,19 @@
 //! Diagnostic: verify all 24 Ghost MCP tools. Run: cargo run --example diagnose
 
+// UIA drives these examples, so they exist only on Windows. The stub `main` below
+// keeps `cargo test -p ghost-session` compiling on a Mac, where cargo still builds
+// every example target.
+#[cfg(not(windows))]
+fn main() {
+    eprintln!("this example automates the Ghost MCP tools on Windows and is Windows-only");
+}
+
+#[cfg(windows)]
 use ghost_session::{GhostSession, By, session::Region};
+#[cfg(windows)]
 use std::time::Duration;
 
+#[cfg(windows)]
 #[tokio::main]
 async fn main() {
     println!("=== Ghost v0.2.0 Diagnostic (24 tools) ===");
@@ -177,10 +188,12 @@ async fn main() {
     println!("\n=== Diagnostic complete. Review diag_*.png ===");
 }
 
+#[cfg(windows)]
 fn check(label: &str, result: String) {
     println!("[{}] {}", label, result);
 }
 
+#[cfg(windows)]
 async fn save_screenshot(session: &GhostSession, path: &str) {
     if let Ok(png) = session.screenshot(Region::full()).await {
         std::fs::write(path, &png).ok();
