@@ -1,16 +1,37 @@
-// Ghost's engine is Windows-only today. Off Windows this crate compiles to
-// nothing and its build script fails with a one-line explanation; see
-// docs/cross-platform.md and docs/plans/2026-07-cross-platform-plan.md.
-#![cfg(windows)]
+//! Ghost's session API.
+//!
+//! Windows is the verified platform. macOS now compiles here too and gets the subset
+//! of the API that [`backend::SessionBackend`] describes — see that module for what is
+//! in the subset and why the rest is not. Linux has no native code at all, so this
+//! crate still compiles to nothing there.
+//!
+//! `capabilities_for(Platform::MacOS).functional` is `false`: the macOS path builds
+//! and links against Apple's SDK in CI but has not been run on a Mac. See
+//! docs/mac-testing.md and docs/plans/2026-07-cross-platform-plan.md.
+#![cfg(any(windows, target_os = "macos"))]
 
+// Portable: neutral types, or pure logic with no OS calls.
+pub mod backend;
 pub mod error;
 pub mod locator;
-pub mod element;
 pub mod reflection;
-pub mod session;
-pub mod shell;
-pub mod tiers;
 pub mod vision;
+
+// Win32/UIA. Every one of these reaches COM through ghost-core, ghost-cache or
+// ghost-intent, which are Windows-only crates.
+#[cfg(windows)]
+pub mod element;
+#[cfg(windows)]
+pub mod session;
+#[cfg(windows)]
+pub mod shell;
+#[cfg(windows)]
+pub mod tiers;
+#[cfg(windows)]
+pub mod win_backend;
+
+#[cfg(target_os = "macos")]
+pub mod mac_backend;
 
 /// Returns true only if the env var is set AND non-empty/non-whitespace.
 /// `std::env::var::is_ok()` returns true for `Ok("")`, which looks SET but
@@ -20,15 +41,31 @@ pub(crate) fn env_key_is_set(name: &str) -> bool {
     matches!(std::env::var(name), Ok(v) if !v.trim().is_empty())
 }
 
-pub use session::{GhostSession, Region};
-pub use locator::By;
-pub use element::GhostElement;
+// Portable surface.
+pub use backend::{Session, SessionBackend};
 pub use error::GhostError;
-pub use ghost_core::uia::{ElementDescriptor, WindowInfo};
-pub use ghost_core::input::EditCommand;
-pub use reflection::{ReflectionBuffer, ActionOutcome, ReflectionEntry, hash_obs};
-pub use ghost_ground::types::{Grounded, Target, Tier};
+pub use ghost_platform::{Capabilities, ElementInfo, Feature, Locator, Platform, Point, WindowRef};
+pub use locator::By;
+pub use reflection::{hash_obs, ActionOutcome, ReflectionBuffer, ReflectionEntry};
 pub use ghost_ground::engine::LocateMode;
+pub use ghost_ground::types::{Grounded, Target, Tier};
+
+// The Windows engine and the Win32 vocabulary it speaks. `GhostSession` is
+// deliberately still its own type rather than an alias for [`Session`]; see
+// [`backend::Session`] for why.
+#[cfg(windows)]
+pub use element::GhostElement;
+#[cfg(windows)]
+pub use ghost_core::input::EditCommand;
+#[cfg(windows)]
+pub use ghost_core::uia::{ElementDescriptor, WindowInfo};
+#[cfg(windows)]
+pub use session::{GhostSession, Region};
+#[cfg(windows)]
+pub use win_backend::WinBackend;
+
+#[cfg(target_os = "macos")]
+pub use mac_backend::MacSessionBackend;
 
 #[cfg(test)]
 mod tests {

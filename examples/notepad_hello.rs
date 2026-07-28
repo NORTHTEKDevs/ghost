@@ -1,9 +1,20 @@
 //! Example: Open Notepad and type a message
 //! Run: cargo run --example notepad_hello
 
+// UIA drives these examples, so they exist only on Windows. The stub `main` below
+// keeps `cargo test -p ghost-session` compiling on a Mac, where cargo still builds
+// every example target.
+#[cfg(not(windows))]
+fn main() {
+    eprintln!("this example automates Notepad and is Windows-only");
+}
+
+#[cfg(windows)]
 use ghost_session::{GhostSession, By, session::Region};
+#[cfg(windows)]
 use std::time::Duration;
 
+#[cfg(windows)]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Ghost - Desktop Automation Example");

@@ -15,15 +15,23 @@
 //!   ghost query --fields "title,status"
 //!   ghost serve
 
-// Ghost's engine is Windows-only today. Off Windows this crate compiles to
-// nothing and its build script fails with a one-line explanation; see
-// docs/cross-platform.md and docs/plans/2026-07-cross-platform-plan.md.
-#![cfg(windows)]
+// The automation verbs are Win32/UIA and stay Windows-only. macOS compiles this
+// binary for one reason: `ghost doctor --mac`, the on-device verification the macOS
+// backend is waiting on. Linux has no native code at all and is excluded.
+// See docs/mac-testing.md and docs/plans/2026-07-cross-platform-plan.md.
+#![cfg(any(windows, target_os = "macos"))]
 
 mod doctor;
+#[cfg(target_os = "macos")]
+mod doctor_mac;
 
 use clap::{Parser, Subcommand};
-use ghost_session::{By, GhostSession, LocateMode, Target};
+#[cfg(windows)]
+use ghost_session::{By, GhostSession};
+// Used by the Windows verbs and by the argument-parsing tests, which are worth
+// running on both hosts because the argument surface is shared.
+#[cfg(any(windows, test))]
+use ghost_session::{LocateMode, Target};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -181,13 +189,22 @@ enum Command {
 
     /// Check that this machine can run Ghost. Reports PASS/WARN/FAIL per item.
     /// Exit code 1 if anything is FAIL. Run this before reporting a problem.
-    Doctor,
+    Doctor {
+        /// Verify the macOS backend on this Mac: request the Accessibility and
+        /// Screen Recording grants, then drive TextEdit through every implemented
+        /// capability and write a JSON report. macOS only; exits 2 elsewhere.
+        #[arg(long)]
+        mac: bool,
+    },
 }
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    // Physical-pixel coordinates. Must precede any window/DC use.
+    // Physical-pixel coordinates. Must precede any window/DC use. No macOS
+    // equivalent is needed: Quartz reports points and the backend converts.
+    #[cfg(windows)]
     ghost_core::system::dpi::ensure_process_dpi_aware();
+
     let cli = Cli::parse();
     if cli.verbose {
         tracing_subscriber::fmt().with_writer(std::io::stderr).init();
@@ -196,21 +213,54 @@ async fn main() -> ExitCode {
     // Handled here rather than in run(): doctor owns its own exit code, and it
     // must report WHY a session cannot be created rather than failing to start
     // alongside one.
-    if let Command::Doctor = &cli.command {
+    if let Command::Doctor { mac } = &cli.command {
+        if *mac {
+            return run_doctor_mac();
+        }
         let checks = doctor::run_checks();
         print!("{}", doctor::render(&checks));
         return ExitCode::from(doctor::exit_code(&checks));
     }
 
-    match run(cli).await {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(e) => {
-            eprintln!("ghost: {e}");
-            ExitCode::FAILURE
+    #[cfg(windows)]
+    {
+        match run(cli).await {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("ghost: {e}");
+                ExitCode::FAILURE
+            }
         }
+    }
+    // The automation verbs need UIA. Saying so is better than a partial
+    // implementation that appears to work and silently does nothing.
+    #[cfg(not(windows))]
+    {
+        eprintln!(
+            "ghost: the automation verbs are Windows-only; on macOS this binary only \
+             offers `ghost doctor --mac`. See docs/mac-testing.md."
+        );
+        ExitCode::from(2)
     }
 }
 
+/// `ghost doctor --mac`, which exists to be run once on a Mac.
+#[cfg(target_os = "macos")]
+fn run_doctor_mac() -> ExitCode {
+    doctor_mac::run()
+}
+
+/// Off macOS the flag is accepted and refused, rather than being hidden.
+///
+/// Exit code 2 is "wrong host", distinct from 1, which `doctor` uses for "this host
+/// is the right one and something on it failed".
+#[cfg(not(target_os = "macos"))]
+fn run_doctor_mac() -> ExitCode {
+    eprintln!("ghost: doctor --mac requires macOS");
+    ExitCode::from(2)
+}
+
+#[cfg(windows)]
 async fn run(cli: Cli) -> Result<(), String> {
     // Serve is special — it exec/spawns ghost-mcp, no GhostSession needed.
     if let Command::Serve = &cli.command {
@@ -460,13 +510,14 @@ async fn run(cli: Cli) -> Result<(), String> {
             }
         }
 
-        Command::Serve | Command::Doctor => unreachable!("handled above"),
+        Command::Serve | Command::Doctor { .. } => unreachable!("handled above"),
     }
     Ok(())
 }
 
 /// Implement `ghost serve`: exec the ghost-mcp binary (stdio loop).
 /// Looks for ghost-mcp adjacent to this binary first, then in PATH.
+#[cfg(windows)]
 fn run_serve() -> Result<(), String> {
     // Find ghost-mcp binary path.
     let mcp_bin = locate_ghost_mcp()?;
@@ -490,6 +541,7 @@ fn run_serve() -> Result<(), String> {
 }
 
 /// Locate the ghost-mcp binary: adjacent to this binary first, then PATH.
+#[cfg(windows)]
 fn locate_ghost_mcp() -> Result<PathBuf, String> {
     // Check adjacent to the current executable.
     if let Ok(exe) = std::env::current_exe() {
@@ -507,6 +559,7 @@ fn locate_ghost_mcp() -> Result<PathBuf, String> {
     which_ghost_mcp()
 }
 
+#[cfg(windows)]
 fn which_ghost_mcp() -> Result<PathBuf, String> {
     let name = if cfg!(target_os = "windows") { "ghost-mcp.exe" } else { "ghost-mcp" };
     std::env::var_os("PATH")
@@ -519,6 +572,7 @@ fn which_ghost_mcp() -> Result<PathBuf, String> {
              Build it with: cargo build -p ghost-mcp --release".to_string())
 }
 
+#[cfg(windows)]
 fn parse_by(name: Option<String>, role: Option<String>) -> Result<By, String> {
     match (name, role) {
         (Some(n), _) => Ok(By::name(&n)),
@@ -527,6 +581,10 @@ fn parse_by(name: Option<String>, role: Option<String>) -> Result<By, String> {
     }
 }
 
+/// Reachable from the Windows verbs and from the tests. Naming `test` keeps the
+/// argument-parsing coverage alive on a Mac without leaving a dead function in the
+/// macOS binary.
+#[cfg(any(windows, test))]
 fn parse_target(
     name: Option<String>,
     role: Option<String>,
@@ -540,6 +598,7 @@ fn parse_target(
     Err("must provide --name, --role, --description, or --text".into())
 }
 
+#[cfg(any(windows, test))]
 fn parse_locate_mode(mode: &str) -> LocateMode {
     match mode {
         "deliberate" => LocateMode::Deliberate,
@@ -548,6 +607,7 @@ fn parse_locate_mode(mode: &str) -> LocateMode {
     }
 }
 
+#[cfg(windows)]
 fn base64_encode(data: &[u8]) -> String {
     const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
@@ -691,6 +751,20 @@ mod tests {
     fn serve_rejects_addr_flag() {
         // --addr is not a valid flag on the stdio-only Serve subcommand.
         assert!(parse(&["serve", "--addr", "0.0.0.0:9000"]).is_err());
+    }
+
+    #[test]
+    fn parse_doctor_defaults_to_the_windows_checks() {
+        let cli = parse(&["doctor"]).unwrap();
+        assert!(matches!(cli.command, Command::Doctor { mac: false }));
+    }
+
+    #[test]
+    fn parse_doctor_mac() {
+        // The Mac owner is given this exact string to type. If the flag stops
+        // parsing, the one-command test protocol stops working.
+        let cli = parse(&["doctor", "--mac"]).unwrap();
+        assert!(matches!(cli.command, Command::Doctor { mac: true }));
     }
 
     // --- parse_target helper ---
