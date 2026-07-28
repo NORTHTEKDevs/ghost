@@ -4,6 +4,13 @@
 //! issue about. Checks are pure where possible so the formatting and the
 //! pass/fail policy are unit-testable without a desktop.
 
+// Off Windows, [`run_checks`] produces a single FAIL row, so the Win32 policy
+// helpers and `Status::Pass` are unreachable — but their unit tests are pure and
+// host-independent, and are worth keeping runnable everywhere. Deleting or cfg'ing
+// them item-by-item would cost that coverage to silence a lint about code the
+// compiler correctly notices no macOS caller reaches.
+#![cfg_attr(not(windows), allow(dead_code))]
+
 use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
