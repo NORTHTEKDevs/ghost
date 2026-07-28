@@ -7,6 +7,7 @@
 //! | frontmost app | `[NSWorkspace sharedWorkspace].frontmostApplication` |
 //! | running apps | `[NSWorkspace sharedWorkspace].runningApplications` |
 //! | focus an app | `[NSRunningApplication activateWithOptions:]` |
+//! | launch an app | `[NSWorkspace launchApplication:]` |
 //! | raise a window within an app | `AXUIElementPerformAction(kAXRaiseAction)` |
 //!
 //! # Why titles are matched rather than handles being derived
@@ -33,6 +34,7 @@ use core_graphics::window::{
     kCGWindowListOptionOnScreenOnly,
 };
 use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication, NSWorkspace};
+use objc2_foundation::NSString;
 
 use super::ax::{name_matches, AxElement};
 use super::error::{MacError, MacResult};
@@ -220,6 +222,105 @@ pub fn focus_window(window: &MacWindow) -> MacResult<()> {
         }
     }
     Ok(())
+}
+
+/// The pid of a running application, matched on its localized name —
+/// `NSWorkspace.runningApplications`.
+///
+/// Matching is the same substring/case-insensitive rule the rest of the backend
+/// uses, so `"textedit"` finds `TextEdit`.
+pub fn running_app_pid(name: &str) -> Option<i32> {
+    let workspace = NSWorkspace::sharedWorkspace();
+    let apps = workspace.runningApplications();
+    // Indexed rather than iterated: `NSArray::iter` lives behind objc2's
+    // NSEnumerator feature, and pulling that in for one loop is not worth it.
+    for i in 0..apps.count() {
+        let app = apps.objectAtIndex(i);
+        if app
+            .localizedName()
+            .is_some_and(|n| name_matches(&n.to_string(), name))
+        {
+            return Some(app.processIdentifier());
+        }
+    }
+    None
+}
+
+/// Launch an application by name — `NSWorkspace.launchApplication:`.
+///
+/// If the app is already running this activates it instead of starting a second
+/// copy, which is why [`super::MacBackend`] can call it unconditionally.
+///
+/// # Why the deprecated call
+///
+/// The replacement, `openApplicationAtURL:configuration:completionHandler:`,
+/// needs a resolved bundle URL and delivers its result to a block on another
+/// queue. Ghost launches an app from exactly one place — `ghost doctor --mac`,
+/// which then polls [`running_app_pid`] anyway — so the async API would add a
+/// block, a URL lookup and a channel to reach the same place. The deprecated
+/// selector still ships in macOS 15.
+pub fn launch_app(name: &str) -> MacResult<()> {
+    let workspace = NSWorkspace::sharedWorkspace();
+    #[allow(deprecated)]
+    let ok = workspace.launchApplication(&NSString::from_str(name));
+    if ok {
+        Ok(())
+    } else {
+        Err(MacError::WindowNotFound(format!(
+            "no application named {name:?} could be launched"
+        )))
+    }
+}
+
+/// Poll until an application is running, or the deadline passes.
+///
+/// Returns its pid. Launching is asynchronous — `launchApplication:` returns as
+/// soon as the request is accepted — so every caller that needs the app to exist
+/// has to wait for it explicitly.
+pub fn wait_for_app(name: &str, timeout: std::time::Duration) -> MacResult<i32> {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if let Some(pid) = running_app_pid(name) {
+            return Ok(pid);
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(MacError::Timeout(format!(
+                "{name:?} did not start within {:?}",
+                timeout
+            )));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+}
+
+/// Poll until an application has at least `count` windows, or the deadline passes.
+///
+/// Used by `ghost doctor --mac` to tell "File > New worked" from "the menu item
+/// was clicked and nothing happened": the window appears some frames after the
+/// click returns.
+pub fn wait_for_window_count(
+    pid: i32,
+    count: usize,
+    timeout: std::time::Duration,
+) -> MacResult<usize> {
+    let deadline = std::time::Instant::now() + timeout;
+    let mut seen = 0;
+    loop {
+        if let Ok(app) = AxElement::for_app(pid) {
+            if let Ok(windows) = app.windows() {
+                seen = windows.len();
+                if seen >= count {
+                    return Ok(seen);
+                }
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(MacError::Timeout(format!(
+                "pid {pid} had {seen} window(s), expected at least {count}, after {timeout:?}"
+            )));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
 }
 
 fn dict_value(dict: &CFDictionary<CFString, CFType>, key: &str) -> Option<CFType> {

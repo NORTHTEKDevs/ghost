@@ -258,10 +258,76 @@ impl AxElement {
 
     /// The app's focused window — `kAXFocusedWindowAttribute`.
     pub fn focused_window(&self) -> MacResult<Option<AxElement>> {
-        let Some(value) = self.attribute(kAXFocusedWindowAttribute)? else {
+        self.element_attribute(kAXFocusedWindowAttribute)
+    }
+
+    /// An attribute whose value is itself an element.
+    pub fn element_attribute(&self, name: &str) -> MacResult<Option<AxElement>> {
+        let Some(value) = self.attribute(name)? else {
             return Ok(None);
         };
         Ok(Some(retain_as_element(&value)))
+    }
+
+    /// The application's menu bar — `kAXMenuBarAttribute`.
+    ///
+    /// The menu bar is reachable only from the *application* element, never from a
+    /// window, which is why `ghost doctor --mac` walks down from
+    /// [`AxElement::for_app`] to drive File > New.
+    pub fn menu_bar(&self) -> MacResult<Option<AxElement>> {
+        self.element_attribute(accessibility_sys::kAXMenuBarAttribute)
+    }
+
+    /// The first descendant whose accessible name matches, breadth-first, bounded.
+    ///
+    /// Breadth-first because menus are shallow and wide: a depth-first walk into the
+    /// first menu would open and traverse every item under it before reaching the
+    /// second title. `max_depth` bounds a tree that an app is free to make cyclic.
+    pub fn find_child_named(&self, needle: &str, max_depth: u32) -> MacResult<Option<AxElement>> {
+        self.find_descendant(max_depth, |child| Ok(name_matches(&child.name()?, needle)))
+    }
+
+    /// The first descendant whose *raw* `kAXRoleAttribute` equals `raw_role`.
+    ///
+    /// Raw rather than [`ghost_role`]-normalised: `ghost doctor --mac` asserts on the
+    /// Apple role string itself (`AXTextArea`), because the point of that check is to
+    /// prove the accessibility tree came back as Apple documents it, not that Ghost's
+    /// own mapping table is self-consistent.
+    pub fn find_child_with_role(
+        &self,
+        raw_role: &str,
+        max_depth: u32,
+    ) -> MacResult<Option<AxElement>> {
+        self.find_descendant(max_depth, |child| Ok(child.role()? == raw_role))
+    }
+
+    /// Breadth-first bounded search shared by the finders above.
+    ///
+    /// Breadth-first because menus are shallow and wide: a depth-first walk into the
+    /// first menu would open and traverse every item under it before reaching the
+    /// second title. `max_depth` bounds a tree that an app is free to make cyclic.
+    fn find_descendant(
+        &self,
+        max_depth: u32,
+        mut matches: impl FnMut(&AxElement) -> MacResult<bool>,
+    ) -> MacResult<Option<AxElement>> {
+        let mut frontier = vec![self.clone()];
+        for _ in 0..max_depth {
+            let mut next = Vec::new();
+            for element in frontier {
+                for child in element.children()? {
+                    if matches(&child)? {
+                        return Ok(Some(child));
+                    }
+                    next.push(child);
+                }
+            }
+            if next.is_empty() {
+                return Ok(None);
+            }
+            frontier = next;
+        }
+        Ok(None)
     }
 
     fn element_array(&self, attr: &str) -> MacResult<Vec<AxElement>> {
