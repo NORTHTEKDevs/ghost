@@ -32,3 +32,6 @@ criterion = { workspace = true }
 [[bench]]
 name = "convert"
 harness = false
+
+[lints]
+workspace = true

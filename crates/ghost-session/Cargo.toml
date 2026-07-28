@@ -57,3 +57,6 @@ path = "../../examples/notepad_hello.rs"
 [[example]]
 name = "diagnose"
 path = "../../examples/diagnose.rs"
+
+[lints]
+workspace = true

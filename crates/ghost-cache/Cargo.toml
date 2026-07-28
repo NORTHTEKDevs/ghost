@@ -21,3 +21,6 @@ windows.workspace = true
 default = []
 chaos = []
 test-hooks = []
+
+[lints]
+workspace = true

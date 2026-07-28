@@ -38,3 +38,6 @@ image = { workspace = true }
 default = []
 # Unit tests for the `doctor --mac` report that need no desktop and no TCC grant.
 mac-headless-tests = ["ghost-session/mac-headless-tests"]
+
+[lints]
+workspace = true
