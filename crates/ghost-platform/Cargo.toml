@@ -9,6 +9,10 @@ description = "Cross-platform contract for Ghost: the capability model, shared t
 # mapping, CFString round-trips, modifier flags) without touching the window
 # server, so they run on a headless CI runner with no TCC grants.
 mac-headless-tests = []
+# The same idea for Linux: session detection, keysym mapping, AT-SPI role
+# mapping and coordinate math are pure functions, so they run on a CI runner
+# with no X server, no Wayland compositor and no accessibility bus.
+linux-headless-tests = []
 
 [dependencies]
 serde = { workspace = true }
@@ -52,6 +56,37 @@ objc2-foundation = { version = "0.3", default-features = false, features = [
     "NSString",
     "NSArray",
 ] }
+
+# Linux backend. Unlike the macOS side this is pure Rust end to end: x11rb speaks
+# the X11 wire protocol over a socket rather than linking libX11, zbus/atspi/ashpd
+# are a pure-Rust D-Bus stack, and reis is a pure-Rust libei implementation. There
+# is no `-sys` crate and no `build.rs` that shells out to a C compiler, so the
+# build needs no system development headers. What it needs at *runtime* is a
+# display server and an accessibility bus, which is exactly what CI does not have
+# — hence `functional: false` and the on-device doctor run.
+[target.'cfg(target_os = "linux")'.dependencies]
+thiserror = { workspace = true }
+image = { workspace = true }
+tokio = { workspace = true }
+# AT-SPI2 over D-Bus: discovery, roles, states, actions, text read-back. This is
+# the one API that is identical under X11 and Wayland, which is why it carries
+# most of the backend.
+atspi = { version = "0.30", default-features = false, features = ["tokio"] }
+# D-Bus, used directly for the bits of the a11y bus atspi does not wrap.
+zbus = { version = "5", default-features = false, features = ["tokio"] }
+# X11 wire protocol. `xtest` is synthetic input, `randr` is display geometry,
+# `shm` is the fast path for XGetImage, and `allow-unsafe-code` is what gates the
+# shm segment handling.
+x11rb = { version = "0.13", features = ["allow-unsafe-code", "xtest", "randr", "shm"] }
+x11rb-protocol = "0.13"
+# libei: the sanctioned Wayland synthetic-input path. The socket comes from the
+# RemoteDesktop portal, not from reis itself.
+reis = { version = "0.7", features = ["tokio"] }
+# xdg-desktop-portal client: Screenshot, ScreenCast and RemoteDesktop.
+ashpd = { version = "0.13", default-features = false, features = ["tokio", "wayland"] }
+# Needed to hand the portal a window handle / session token on Wayland.
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["staging", "client"] }
 
 [lints]
 workspace = true
