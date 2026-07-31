@@ -105,6 +105,62 @@ jobs:
       - name: Clippy
         run: cargo clippy -p ghost-platform -p ghost-session -p ghost-cli --features ghost-cli/mac-headless-tests --all-targets -- -D warnings
 
+  # The authoritative proof that Ghost's Linux code compiles. Same role as
+  # `Build (macOS)`, and package-scoped for the same reason: ghost-core,
+  # ghost-cache and ghost-intent speak to COM and are expected to fail here.
+  #
+  # A runner has no X server, no Wayland compositor and no accessibility bus, so
+  # this job proves compilation and pure-logic tests only. Everything that needs a
+  # live session is `ghost doctor --linux` on real hardware — see
+  # docs/linux-testing.md.
+  build-linux:
+    name: Build (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-linux-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-linux-
+
+      # The Linux dependency stack is pure Rust — x11rb speaks the X11 wire
+      # protocol over a socket instead of linking libX11, and the D-Bus/libei/
+      # Wayland crates are Rust implementations rather than `-sys` bindings — so
+      # nothing here needs a system header to *build*. The list is installed
+      # anyway, and kept deliberately, because it is the runtime dependency set a
+      # tester needs, and pinning it in CI means a future dependency swap that
+      # does introduce a C build script fails loudly here instead of on the
+      # tester's machine.
+      - name: Install X11/Wayland/D-Bus development libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libx11-dev libxtst-dev libxi-dev libxrandr-dev libxfixes-dev \
+            libdbus-1-dev libwayland-dev libxkbcommon-dev pkg-config
+
+      - name: Show toolchain
+        run: |
+          rustc -vV
+          pkg-config --modversion x11 xtst dbus-1 wayland-client
+
+      - name: Build the Linux backend
+        run: cargo build -p ghost-platform
+
+      - name: Headless unit tests
+        run: cargo test -p ghost-platform --features linux-headless-tests
+
+      - name: Clippy
+        run: cargo clippy -p ghost-platform --features linux-headless-tests --all-targets -- -D warnings
+
   check-linux:
     name: Check (Linux)
     runs-on: ubuntu-latest
