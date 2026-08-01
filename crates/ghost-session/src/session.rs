@@ -9,8 +9,8 @@ use ghost_cache::locator_cache::LocatorKey;
 use ghost_intent::compiler::{CompiledIntent, IntentCompiler, Op};
 use ghost_intent::error::IntentError;
 use ghost_intent::executor::{FsmExecutor, IntentResult, IntentState, OpsDispatcher};
-use ghost_core::capture::idle::IdleDetector;
-use ghost_core::{
+use crate::engine::capture::idle::IdleDetector;
+use crate::engine::{
     capture::{capture_screen, capture_region_raw, compute_verification},
     input::hotkey::{register_emergency_stop, is_stopped, reset_stop},
     input::keyboard::{key_down as core_key_down, key_up as core_key_up, name_to_vk, press_key},
@@ -36,6 +36,24 @@ use crate::{
 };
 #[cfg(feature = "yolo")]
 use crate::tiers::YoloTier;
+
+/// Did the pointer stay put across an action?
+///
+/// Both readings are `Option` because pointer position is not knowable on every
+/// platform: under Wayland neither the RemoteDesktop portal nor uinput will
+/// report it. `None` therefore means *unknown*, not *moved*.
+///
+/// Reporting `true` when the position is unknown is correct for the case this
+/// guards. Background dispatch on Linux is an AT-SPI action, which drives the
+/// control through its own toolkit and has no pointer involvement at all -- so
+/// there is nothing that could have moved it. On Windows, and on Linux under
+/// X11, both readings are real and compared exactly.
+fn cursor_unchanged(before: Option<(i32, i32)>, after: Option<(i32, i32)>) -> bool {
+    match (before, after) {
+        (Some(a), Some(b)) => a == b,
+        _ => true,
+    }
+}
 
 pub struct Region;
 
@@ -197,10 +215,7 @@ impl GhostSession {
     /// Build the locator cache key for a `By` variant, scoped to the current foreground HWND.
     /// MEDIUM-6: include hwnd so entries from different windows can't collide.
     fn by_to_cache_key(by: &By) -> Option<LocatorKey> {
-        let hwnd = unsafe {
-            let h = windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow();
-            if h.is_invalid() { 0isize } else { h.0 as isize }
-        };
+        let hwnd = crate::engine::system::foreground_window();
         match by {
             By::Name(n) => Some(LocatorKey::with_hwnd(hwnd, "*", n.as_str())),
             By::Role(r) => Some(LocatorKey::with_hwnd(hwnd, r.as_str(), "*")),
@@ -261,14 +276,14 @@ impl GhostSession {
                                     // MEDIUM-7: equality for cache validation — contains can match wrong element
                                     By::Name(n) => el.name().to_lowercase() == n.to_lowercase(),
                                     By::Role(r) => {
-                                        let role = ghost_core::uia::element::role_id_to_name(el.control_type());
+                                        let role = crate::engine::uia::element::role_id_to_name(el.control_type());
                                         // Must accept the same aliases the original walk accepted.
                                         // A WinUI text area cached for role=edit reports "document";
                                         // an exact-only check rejected it on EVERY revalidation, so
                                         // the entry was invalidated and re-walked on every call -
                                         // a cache that could never hit for WinUI apps.
                                         role == r.as_str()
-                                            || ghost_core::uia::tree::role_alias_matches(r.as_str(), role)
+                                            || crate::engine::uia::tree::role_alias_matches(r.as_str(), role)
                                     }
                                     By::Description(_) => false,
                                 };
@@ -383,7 +398,7 @@ impl GhostSession {
         if candidates.len() < CV_AUGMENT_THRESHOLD {
             let cv_rect = rect;
             let extra = tokio::task::spawn_blocking(move || -> Vec<(i32, i32, i32, i32)> {
-                match ghost_core::capture::capture_region_raw(Some(cv_rect)) {
+                match crate::engine::capture::capture_region_raw(Some(cv_rect)) {
                     Ok((rgba, w, h)) => {
                         let regions = ghost_ground::cv_detect::detect_regions(
                             &rgba, w, h, &ghost_ground::cv_detect::Opts::default(),
@@ -405,14 +420,14 @@ impl GhostSession {
         if candidates.is_empty() {
             return Ok(None);
         }
-        let marks: Vec<ghost_core::capture::Mark> = candidates.iter().enumerate().map(|(i, c)| {
-            ghost_core::capture::Mark { label: (i + 1) as u32, x: c.0 - rect.0, y: c.1 - rect.1 }
+        let marks: Vec<crate::engine::capture::Mark> = candidates.iter().enumerate().map(|(i, c)| {
+            crate::engine::capture::Mark { label: (i + 1) as u32, x: c.0 - rect.0, y: c.1 - rect.1 }
         }).collect();
         let jpeg = tokio::task::spawn_blocking(move || {
-            ghost_core::capture::capture_region_marked_jpeg(Some(rect), &marks, 1400, 82)
+            crate::engine::capture::capture_region_marked_jpeg(Some(rect), &marks, 1400, 82)
         })
         .await
-        .map_err(|e| GhostError::Core(ghost_core::error::CoreError::WorkerPanic(e.to_string())))?
+        .map_err(|e| GhostError::Core(crate::engine::error::CoreError::WorkerPanic(e.to_string())))?
         .map_err(GhostError::Core)?;
         Ok(Some((jpeg, candidates, labels)))
     }
@@ -478,10 +493,10 @@ impl GhostSession {
         } else {
             original
         };
-        let jpeg = ghost_core::capture::capture_screen_region(
+        let jpeg = crate::engine::capture::capture_screen_region(
             Some(rect),
             Some(max_dim),
-            ghost_core::capture::CaptureFormat::Jpeg(80),
+            crate::engine::capture::CaptureFormat::Jpeg(80),
         ).map_err(GhostError::Core)?;
 
         let crop = crate::vision::Crop {
@@ -530,7 +545,7 @@ impl GhostSession {
     pub async fn type_by_description(&self, description: &str, text: &str) -> Result<()> {
         let (x, y) = self.locate_by_description(description).await?;
         self.click_at(x, y).await?;
-        ghost_core::input::keyboard::type_text(text).map_err(GhostError::Core)
+        crate::engine::input::keyboard::type_text(text).map_err(GhostError::Core)
     }
 
     /// VLM-based structured field extraction for ghost_query.
@@ -550,10 +565,10 @@ impl GhostSession {
             return Ok(serde_json::Map::new());
         }
         let rect = region.or_else(|| self.foreground_window_rect());
-        let jpeg = ghost_core::capture::capture_screen_region(
+        let jpeg = crate::engine::capture::capture_screen_region(
             rect,
             Some(1024),
-            ghost_core::capture::CaptureFormat::Jpeg(80),
+            crate::engine::capture::CaptureFormat::Jpeg(80),
         ).map_err(GhostError::Core)?;
         crate::vision::vision_extract(fields, &jpeg).await
     }
@@ -570,14 +585,14 @@ impl GhostSession {
         let region = if foreground { self.foreground_window_rect() } else { None };
         let needle = needle.to_string();
         let task = tokio::task::spawn_blocking(move || {
-            ghost_core::ocr::find_text_local(&needle, region).map_err(GhostError::Core)
+            crate::engine::ocr::find_text_local(&needle, region).map_err(GhostError::Core)
         });
         // The WinRT OCR spin-wait has no internal timeout; bound it here so a hung
         // engine can't occupy a blocking-pool thread (and this call) forever.
         match timeout(Duration::from_millis(OCR_TIMEOUT_MS), task).await {
             Ok(joined) => joined
-                .map_err(|e| GhostError::Core(ghost_core::error::CoreError::WorkerPanic(e.to_string())))?,
-            Err(_elapsed) => Err(GhostError::Core(ghost_core::error::CoreError::JobTimeout)),
+                .map_err(|e| GhostError::Core(crate::engine::error::CoreError::WorkerPanic(e.to_string())))?,
+            Err(_elapsed) => Err(GhostError::Core(crate::engine::error::CoreError::JobTimeout)),
         }
     }
 
@@ -713,7 +728,7 @@ impl GhostSession {
         if is_stopped() {
             return Err(GhostError::Stopped);
         }
-        ghost_core::input::mouse::click(x, y).map_err(GhostError::Core)
+        crate::engine::input::mouse::click(x, y).map_err(GhostError::Core)
     }
 
     /// Capture the primary monitor as PNG bytes.
@@ -722,7 +737,7 @@ impl GhostSession {
     pub async fn screenshot(&self, _region: Region) -> Result<Vec<u8>> {
         tokio::task::spawn_blocking(|| capture_screen().map_err(GhostError::Core))
             .await
-            .map_err(|e| GhostError::Core(ghost_core::error::CoreError::WorkerPanic(e.to_string())))?
+            .map_err(|e| GhostError::Core(crate::engine::error::CoreError::WorkerPanic(e.to_string())))?
     }
 
     /// Capture a screen region with optional downscale and JPEG/PNG encoding.
@@ -739,31 +754,20 @@ impl GhostSession {
         jpeg_quality: Option<u8>,
     ) -> Result<Vec<u8>> {
         let format = match jpeg_quality {
-            Some(q) => ghost_core::capture::CaptureFormat::Jpeg(q),
-            None => ghost_core::capture::CaptureFormat::Png,
+            Some(q) => crate::engine::capture::CaptureFormat::Jpeg(q),
+            None => crate::engine::capture::CaptureFormat::Png,
         };
         tokio::task::spawn_blocking(move || {
-            ghost_core::capture::capture_screen_region(rect, max_dim, format).map_err(GhostError::Core)
+            crate::engine::capture::capture_screen_region(rect, max_dim, format).map_err(GhostError::Core)
         })
         .await
-        .map_err(|e| GhostError::Core(ghost_core::error::CoreError::WorkerPanic(e.to_string())))?
+        .map_err(|e| GhostError::Core(crate::engine::error::CoreError::WorkerPanic(e.to_string())))?
     }
 
     /// Bounding rect of the foreground window: (left, top, right, bottom) or None if no window focused.
     /// Useful as the rect arg to screenshot_region for tight vision crops.
     pub fn foreground_window_rect(&self) -> Option<(i32, i32, i32, i32)> {
-        unsafe {
-            use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowRect};
-            use windows::Win32::Foundation::RECT;
-            let hwnd = GetForegroundWindow();
-            if hwnd.is_invalid() { return None; }
-            let mut r = RECT::default();
-            if GetWindowRect(hwnd, &mut r).is_ok() {
-                Some((r.left, r.top, r.right, r.bottom))
-            } else {
-                None
-            }
-        }
+        crate::engine::system::foreground_window_rect()
     }
 
     /// Launch a process by name or path. Returns PID.
@@ -773,8 +777,8 @@ impl GhostSession {
 
     /// Trigger emergency stop: halts all automation, releases modifier keys.
     pub fn stop(&self) {
-        ghost_core::input::hotkey::trigger_stop();
-        ghost_core::input::hotkey::release_all_modifiers();
+        crate::engine::input::hotkey::trigger_stop();
+        crate::engine::input::hotkey::release_all_modifiers();
     }
 
     /// Reset the stop flag (allows automation to resume after a stop).
@@ -793,9 +797,9 @@ impl GhostSession {
             return press_key(vk).map_err(GhostError::Core);
         }
         if key.chars().count() == 1 {
-            return ghost_core::input::keyboard::type_text(key).map_err(GhostError::Core);
+            return crate::engine::input::keyboard::type_text(key).map_err(GhostError::Core);
         }
-        Err(GhostError::Core(ghost_core::error::CoreError::Win32 {
+        Err(GhostError::Core(crate::engine::error::CoreError::Win32 {
             code: 0, context: "unknown key name",
         }))
     }
@@ -806,12 +810,12 @@ impl GhostSession {
         let mut mod_vks = Vec::new();
         for m in modifiers {
             let vk = name_to_vk(m).ok_or(GhostError::Core(
-                ghost_core::error::CoreError::Win32 { code: 0, context: "unknown modifier name" }
+                crate::engine::error::CoreError::Win32 { code: 0, context: "unknown modifier name" }
             ))?;
             mod_vks.push(vk);
         }
         let key_vk = name_to_vk(key).ok_or(GhostError::Core(
-            ghost_core::error::CoreError::Win32 { code: 0, context: "unknown key name" }
+            crate::engine::error::CoreError::Win32 { code: 0, context: "unknown key name" }
         ))?;
         // Release held modifiers on EVERY exit path so a SendInput failure can
         // never leave Ctrl/Shift/Alt stuck down (a stuck modifier corrupts all
@@ -843,7 +847,7 @@ impl GhostSession {
     pub async fn key_down(&self, key: &str) -> Result<()> {
         if is_stopped() { return Err(GhostError::Stopped); }
         let vk = name_to_vk(key).ok_or(GhostError::Core(
-            ghost_core::error::CoreError::Win32 { code: 0, context: "unknown key name" }
+            crate::engine::error::CoreError::Win32 { code: 0, context: "unknown key name" }
         ))?;
         core_key_down(vk).map_err(GhostError::Core)
     }
@@ -852,7 +856,7 @@ impl GhostSession {
     pub async fn key_up(&self, key: &str) -> Result<()> {
         if is_stopped() { return Err(GhostError::Stopped); }
         let vk = name_to_vk(key).ok_or(GhostError::Core(
-            ghost_core::error::CoreError::Win32 { code: 0, context: "unknown key name" }
+            crate::engine::error::CoreError::Win32 { code: 0, context: "unknown key name" }
         ))?;
         core_key_up(vk).map_err(GhostError::Core)
     }
@@ -925,7 +929,7 @@ impl GhostSession {
         let n = name.to_string();
         tokio::task::spawn_blocking(move || core_focus_window(&n))
             .await
-            .map_err(|e| GhostError::Core(ghost_core::error::CoreError::WorkerPanic(e.to_string())))?
+            .map_err(|e| GhostError::Core(crate::engine::error::CoreError::WorkerPanic(e.to_string())))?
             .map_err(GhostError::Core)
     }
 
@@ -942,7 +946,7 @@ impl GhostSession {
     /// Change window state: "maximize", "minimize", "restore", or "close".
     pub async fn window_state(&self, name: &str, state: &str) -> Result<()> {
         let ws = WindowState::from_str(state).ok_or(GhostError::Core(
-            ghost_core::error::CoreError::Win32 { code: 0, context: "invalid window state" }
+            crate::engine::error::CoreError::Win32 { code: 0, context: "invalid window state" }
         ))?;
         set_window_state(name, ws).map_err(GhostError::Core)
     }
@@ -984,14 +988,14 @@ impl GhostSession {
     }
 
     /// Return structured list of interactive elements. window: optional partial window title to scope.
-    pub async fn describe_screen(&self, window: Option<&str>) -> Result<Vec<ghost_core::uia::ElementDescriptor>> {
+    pub async fn describe_screen(&self, window: Option<&str>) -> Result<Vec<crate::engine::uia::ElementDescriptor>> {
         self.tree.describe_screen(window).map_err(GhostError::Core)
     }
 
     /// Fast describe scoped to the foreground window subtree only.
     /// 5-50x faster than describe_screen(None); preferred default for agent loops.
     #[tracing::instrument(skip(self))]
-    pub async fn describe_screen_fast(&self) -> Result<Vec<ghost_core::uia::ElementDescriptor>> {
+    pub async fn describe_screen_fast(&self) -> Result<Vec<crate::engine::uia::ElementDescriptor>> {
         self.tree.describe_screen_fast().map_err(GhostError::Core)
     }
 
@@ -1050,7 +1054,7 @@ impl GhostSession {
         // error if the window is truly unreachable. Other errors (ProcessNotFound, etc.) still propagate.
         if let Err(e) = self.focus_window(window_name).await {
             match e {
-                GhostError::Core(ghost_core::error::CoreError::FocusFailed { .. }) => {
+                GhostError::Core(crate::engine::error::CoreError::FocusFailed { .. }) => {
                     tracing::warn!("focus not confirmed for '{}', proceeding", window_name);
                 }
                 other => return Err(other),
@@ -1058,7 +1062,7 @@ impl GhostSession {
         }
         // Ctrl+L focuses the address bar in Edge/Chrome/Firefox.
         self.hotkey(&["Ctrl"], "l").await?;
-        ghost_core::input::keyboard::type_text(url).map_err(GhostError::Core)?;
+        crate::engine::input::keyboard::type_text(url).map_err(GhostError::Core)?;
         self.press("Enter").await?;
         self.wait_for_idle(Some(window_name), 3, idle_timeout_ms).await
     }
@@ -1189,7 +1193,7 @@ impl GhostSession {
         for (by, text) in fields {
             let el = self.find(by.clone()).await?;
             el.click()?;
-            ghost_core::input::keyboard::type_text(text).map_err(GhostError::Core)?;
+            crate::engine::input::keyboard::type_text(text).map_err(GhostError::Core)?;
         }
         if let Some(sub) = submit {
             let el = self.find(sub).await?;
@@ -1207,8 +1211,8 @@ impl GhostSession {
         let target = windows.into_iter()
             .find(|w| w.name.contains(window_name))
             .ok_or_else(|| GhostError::ProcessNotFound { name: window_name.into() })?;
-        let hwnd = windows::Win32::Foundation::HWND(target.hwnd);
-        ghost_core::input::BackgroundClicker::click(hwnd, (client_x, client_y))
+        let hwnd = target.hwnd;
+        crate::engine::input::BackgroundClicker::click(hwnd, (client_x, client_y))
             .map_err(GhostError::Core)
     }
 
@@ -1239,10 +1243,10 @@ impl GhostSession {
     ) -> Result<Vec<crate::GhostElement>> {
         let hwnd = crate::tiers::foreground_hwnd();
         if hwnd == 0 {
-            return Err(GhostError::Core(ghost_core::error::CoreError::WindowGone));
+            return Err(GhostError::Core(crate::engine::error::CoreError::WindowGone));
         }
         let els = self.tree
-            .find_all_in_hwnd(windows::Win32::Foundation::HWND(hwnd as *mut _), name, role, cap)
+            .find_all_in_hwnd(hwnd, name, role, cap)
             .map_err(GhostError::Core)?;
         Ok(els.into_iter().map(crate::GhostElement::new).collect())
     }
@@ -1292,7 +1296,7 @@ impl GhostSession {
             Some((l, t, r, b)) => {
                 let (cx, cy) = ((l + r) / 2, (t + b) / 2);
                 tokio::task::spawn_blocking(move || {
-                    ghost_core::uia::tree::focus_window_under_point(cx, cy)
+                    crate::engine::uia::tree::focus_window_under_point(cx, cy)
                 })
                 .await
                 .ok()
@@ -1326,7 +1330,7 @@ impl GhostSession {
             attempts += 1;
 
             // MEDIUM-5: snapshot the foreground HWND before the action to detect focus changes.
-            let fg_before = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
+            let fg_before = crate::engine::system::foreground_window();
             // LOW-9/HIGH-2: capture the foreground region off the tokio thread.
             let capture_rect = self.foreground_window_rect();
             let before_capture = tokio::task::spawn_blocking(move || capture_region_raw(capture_rect))
@@ -1367,7 +1371,7 @@ impl GhostSession {
             if let Some((l, t, r, b)) = rect {
                 let (cx, cy) = ((l + r) / 2, (t + b) / 2);
                 let _ = tokio::task::spawn_blocking(move || {
-                    ghost_core::uia::tree::focus_window_under_point(cx, cy)
+                    crate::engine::uia::tree::focus_window_under_point(cx, cy)
                 }).await;
             }
             let _ = el.set_focus();
@@ -1389,11 +1393,11 @@ impl GhostSession {
         {
             if let Some(t) = text {
                 let _ = el.set_focus();
-                let fg_before = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
+                let fg_before = crate::engine::system::foreground_window();
                 let capture_rect = self.foreground_window_rect();
                 let before_capture = tokio::task::spawn_blocking(move || capture_region_raw(capture_rect))
                     .await.ok().and_then(|r| r.ok());
-                let _ = ghost_core::input::keyboard::clear_focused_field();
+                let _ = crate::engine::input::keyboard::clear_focused_field();
                 if self.paste_text(t).await.is_ok() {
                     used_paste = true;
                     verification = self.verify_screen_change(before_capture, fg_before).await;
@@ -1431,9 +1435,6 @@ impl GhostSession {
     /// The result reports `focus_preserved` and `cursor_preserved` so a caller
     /// can confirm the desktop was not disturbed.
     pub async fn act_background(&self, window: &str, by: By, action: &str, text: Option<&str>) -> Result<serde_json::Value> {
-        use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
-        use windows::Win32::Foundation::{HWND, POINT};
-        use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
 
         if is_stopped() { return Err(GhostError::Stopped); }
         if !matches!(action, "click" | "type" | "double_click" | "right_click" | "hover") {
@@ -1450,13 +1451,12 @@ impl GhostSession {
             .ok_or_else(|| GhostError::Vision(format!(
                 "ghost_act background: no visible window matching '{window}' (minimized windows can't be driven in background)"
             )))?;
-        let hwnd_raw = win.hwnd as isize;
-        let hwnd = HWND(win.hwnd);
+        let hwnd_raw = win.hwnd;
+        let hwnd = win.hwnd;
 
         // Snapshot desktop state so we can prove we did not disturb it.
-        let fg_before = unsafe { GetForegroundWindow() };
-        let mut cur_before = POINT::default();
-        let _ = unsafe { GetCursorPos(&mut cur_before) };
+        let fg_before = crate::engine::system::foreground_window();
+        let cur_before = crate::engine::system::cursor_pos();
 
         // Find the element WITHIN that window's subtree — no foreground, no set_focus.
         let el = match &by {
@@ -1483,19 +1483,14 @@ impl GhostSession {
 
         // Window screen origin — used to convert the element's screen rect into the
         // window-relative ROI for scoped click verification.
-        let win_origin = unsafe {
-            let mut wr = windows::Win32::Foundation::RECT::default();
-            if windows::Win32::UI::WindowsAndMessaging::GetWindowRect(hwnd, &mut wr).is_ok() {
-                Some((wr.left, wr.top))
-            } else { None }
-        };
+        let win_origin = crate::engine::system::window_rect(hwnd).map(|(l, t, _, _)| (l, t));
 
         // Verify a pixel effect by an occlusion-proof PrintWindow before/after
         // delta, SCOPED to the element's own rect so an unrelated redraw elsewhere
         // (caret blink, clock) can't false-positive. Captures the 'after' itself.
         // Returns None when it can't verify (no capture / all-black surface).
         let verify_pixels = |before: Option<(Vec<u8>, usize, usize)>| -> Option<bool> {
-            let after = ghost_core::capture::capture_window_printwindow(hwnd_raw).ok();
+            let after = crate::engine::capture::capture_window_printwindow(hwnd_raw).ok();
             let (b, bw, bh) = before?;
             let (a, aw, ah) = after?;
             if bw != aw || bh != ah || b.is_empty() { return None; }
@@ -1513,8 +1508,8 @@ impl GhostSession {
             match roi {
                 Some((rl, rt, rr, rb)) => {
                     let (cw, ch) = (rr - rl, rb - rt);
-                    let bc = ghost_core::capture::screen::crop_rgba(&b, bw, rl, rt, cw, ch);
-                    let ac = ghost_core::capture::screen::crop_rgba(&a, bw, rl, rt, cw, ch);
+                    let bc = crate::engine::capture::screen::crop_rgba(&b, bw, rl, rt, cw, ch);
+                    let ac = crate::engine::capture::screen::crop_rgba(&a, bw, rl, rt, cw, ch);
                     Some(compute_verification(&bc, &ac, cw, ch, true).changed)
                 }
                 None => Some(compute_verification(&b, &a, bw, bh, true).changed),
@@ -1540,7 +1535,7 @@ impl GhostSession {
                 if via_message {
                     // Real Win32 control: WM_SETTEXT. A failure here PROPAGATES —
                     // we do NOT silently fall back to the focus-stealing UIA path.
-                    ghost_core::input::BackgroundClicker::set_text(ctrl_hwnd, t).map_err(GhostError::Core)?;
+                    crate::engine::input::BackgroundClicker::set_text(ctrl_hwnd, t).map_err(GhostError::Core)?;
                 } else {
                     // Windowless control — UIA ValuePattern (may activate the window).
                     el.type_text_background(t)?;
@@ -1553,14 +1548,14 @@ impl GhostSession {
                 })
             }
             "click" => {
-                let before = ghost_core::capture::capture_window_printwindow(hwnd_raw).ok();
+                let before = crate::engine::capture::capture_window_printwindow(hwnd_raw).ok();
                 let mut fallback_uia = false;
                 if ctrl_hwnd != 0 {
                     if el.control_type() == UIA_BUTTON {
-                        ghost_core::input::BackgroundClicker::button_click(ctrl_hwnd).map_err(GhostError::Core)?;
+                        crate::engine::input::BackgroundClicker::button_click(ctrl_hwnd).map_err(GhostError::Core)?;
                     } else {
                         let (sx, sy) = screen_center;
-                        ghost_core::input::BackgroundClicker::click_screen(ctrl_hwnd, sx, sy).map_err(GhostError::Core)?;
+                        crate::engine::input::BackgroundClicker::click_screen(ctrl_hwnd, sx, sy).map_err(GhostError::Core)?;
                     }
                 } else {
                     fallback_uia = true;
@@ -1579,9 +1574,9 @@ impl GhostSession {
             }
             "double_click" => {
                 needs_hwnd("double_click")?;
-                let before = ghost_core::capture::capture_window_printwindow(hwnd_raw).ok();
+                let before = crate::engine::capture::capture_window_printwindow(hwnd_raw).ok();
                 let (sx, sy) = screen_center;
-                ghost_core::input::BackgroundClicker::double_click_screen(ctrl_hwnd, sx, sy).map_err(GhostError::Core)?;
+                crate::engine::input::BackgroundClicker::double_click_screen(ctrl_hwnd, sx, sy).map_err(GhostError::Core)?;
                 tokio::time::sleep(Duration::from_millis(80)).await;
                 let changed = verify_pixels(before);
                 let note = if changed == Some(false) || changed.is_none() {
@@ -1592,7 +1587,7 @@ impl GhostSession {
             "right_click" => {
                 needs_hwnd("right_click")?;
                 let (sx, sy) = screen_center;
-                ghost_core::input::BackgroundClicker::right_click_screen(ctrl_hwnd, sx, sy).map_err(GhostError::Core)?;
+                crate::engine::input::BackgroundClicker::right_click_screen(ctrl_hwnd, sx, sy).map_err(GhostError::Core)?;
                 // A context menu opens as a separate popup window outside this
                 // window's pixels — not verifiable via PrintWindow here.
                 (None, Some("background right_click posted (focus preserved); the context menu is a separate popup — screenshot/read to confirm"))
@@ -1600,18 +1595,17 @@ impl GhostSession {
             "hover" => {
                 needs_hwnd("hover")?;
                 let (sx, sy) = screen_center;
-                ghost_core::input::BackgroundClicker::hover_screen(ctrl_hwnd, sx, sy).map_err(GhostError::Core)?;
+                crate::engine::input::BackgroundClicker::hover_screen(ctrl_hwnd, sx, sy).map_err(GhostError::Core)?;
                 (None, Some("background hover posted (focus preserved); WM_MOUSEMOVE reaches the control but no OS cursor moves, so hover visuals may not render"))
             }
             _ => unreachable!(),
         };
 
         // Confirm we did not disturb the desktop.
-        let fg_after = unsafe { GetForegroundWindow() };
-        let mut cur_after = POINT::default();
-        let _ = unsafe { GetCursorPos(&mut cur_after) };
-        let focus_preserved = fg_before.0 == fg_after.0;
-        let cursor_preserved = cur_before.x == cur_after.x && cur_before.y == cur_after.y;
+        let fg_after = crate::engine::system::foreground_window();
+        let cur_after = crate::engine::system::cursor_pos();
+        let focus_preserved = fg_before == fg_after;
+        let cursor_preserved = cursor_unchanged(cur_before, cur_after);
 
         let rect_json = rect.map(|(l, t, r, b)| serde_json::json!({"left": l, "top": t, "right": r, "bottom": b}))
             .unwrap_or(serde_json::Value::Null);
@@ -1637,8 +1631,6 @@ impl GhostSession {
     /// "Tab", "F5", "a"). Modifier combos are rejected upstream (posting can't set
     /// the modifier state apps read). Returns {focus_preserved, cursor_preserved}.
     pub async fn key_background(&self, window: &str, key: &str) -> Result<serde_json::Value> {
-        use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetCursorPos};
-        use windows::Win32::Foundation::POINT;
 
         if is_stopped() { return Err(GhostError::Stopped); }
         let windows_list = core_list_windows().map_err(GhostError::Core)?;
@@ -1648,16 +1640,15 @@ impl GhostSession {
             .ok_or_else(|| GhostError::Vision(format!(
                 "ghost_key background: no visible window matching '{window}'"
             )))?;
-        let win_hwnd = win.hwnd as isize;
-        let target = ghost_core::input::BackgroundClicker::focused_control(win_hwnd);
+        let win_hwnd = win.hwnd;
+        let target = crate::engine::input::BackgroundClicker::focused_control(win_hwnd);
         // focused_control falls back to the top-level frame when nothing in the
         // window's thread holds focus — a key posted to the frame usually has no
         // text-editing effect, so surface it rather than a falsely-clean result.
         let no_focused_control = target == win_hwnd;
 
-        let fg_before = unsafe { GetForegroundWindow() };
-        let mut cur_before = POINT::default();
-        let _ = unsafe { GetCursorPos(&mut cur_before) };
+        let fg_before = crate::engine::system::foreground_window();
+        let cur_before = crate::engine::system::cursor_pos();
 
         // A single printable char goes as WM_CHAR (edits need WM_CHAR to insert
         // text — a posted WM_KEYDOWN alone won't, with no message pump to translate
@@ -1665,23 +1656,22 @@ impl GhostSession {
         let mut chars = key.chars();
         match (chars.next(), chars.next()) {
             (Some(c), None) => {
-                ghost_core::input::BackgroundClicker::send_char(target, c).map_err(GhostError::Core)?;
+                crate::engine::input::BackgroundClicker::send_char(target, c).map_err(GhostError::Core)?;
             }
             _ => {
-                let vk = ghost_core::input::keyboard::name_to_vk(key).ok_or_else(|| GhostError::Vision(format!(
+                let vk = crate::engine::input::keyboard::name_to_vk(key).ok_or_else(|| GhostError::Vision(format!(
                     "ghost_key background: unknown key '{key}' (single keys only; combos need foreground)"
                 )))?;
-                ghost_core::input::BackgroundClicker::send_key(target, vk.0).map_err(GhostError::Core)?;
+                crate::engine::input::BackgroundClicker::send_key(target, vk.0).map_err(GhostError::Core)?;
             }
         }
 
-        let fg_after = unsafe { GetForegroundWindow() };
-        let mut cur_after = POINT::default();
-        let _ = unsafe { GetCursorPos(&mut cur_after) };
+        let fg_after = crate::engine::system::foreground_window();
+        let cur_after = crate::engine::system::cursor_pos();
         Ok(serde_json::json!({
             "ok": true, "mode": "background", "key": key, "window": win.name,
-            "focus_preserved": fg_before.0 == fg_after.0,
-            "cursor_preserved": cur_before.x == cur_after.x && cur_before.y == cur_after.y,
+            "focus_preserved": fg_before == fg_after,
+            "cursor_preserved": cursor_unchanged(cur_before, cur_after),
             "verified": serde_json::Value::Null,
             "focused_control": !no_focused_control,
             "note": if no_focused_control {
@@ -1697,9 +1687,7 @@ impl GhostSession {
     /// the reliable, background-safe way to do the common Ctrl+ shortcuts without
     /// foreground/cursor change. Returns {focus_preserved, cursor_preserved}.
     pub async fn edit_command_background(&self, window: &str, cmd: &str) -> Result<serde_json::Value> {
-        use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetCursorPos};
-        use windows::Win32::Foundation::POINT;
-        use ghost_core::input::EditCommand;
+        use crate::engine::input::EditCommand;
 
         if is_stopped() { return Err(GhostError::Stopped); }
         let command = match cmd.to_lowercase().as_str() {
@@ -1719,23 +1707,21 @@ impl GhostSession {
             .ok_or_else(|| GhostError::Vision(format!(
                 "ghost_key background: no visible window matching '{window}'"
             )))?;
-        let win_hwnd = win.hwnd as isize;
-        let target = ghost_core::input::BackgroundClicker::focused_control(win_hwnd);
+        let win_hwnd = win.hwnd;
+        let target = crate::engine::input::BackgroundClicker::focused_control(win_hwnd);
         let no_focused_control = target == win_hwnd;
 
-        let fg_before = unsafe { GetForegroundWindow() };
-        let mut cur_before = POINT::default();
-        let _ = unsafe { GetCursorPos(&mut cur_before) };
+        let fg_before = crate::engine::system::foreground_window();
+        let cur_before = crate::engine::system::cursor_pos();
 
-        ghost_core::input::BackgroundClicker::edit_command(target, command).map_err(GhostError::Core)?;
+        crate::engine::input::BackgroundClicker::edit_command(target, command).map_err(GhostError::Core)?;
 
-        let fg_after = unsafe { GetForegroundWindow() };
-        let mut cur_after = POINT::default();
-        let _ = unsafe { GetCursorPos(&mut cur_after) };
+        let fg_after = crate::engine::system::foreground_window();
+        let cur_after = crate::engine::system::cursor_pos();
         Ok(serde_json::json!({
             "ok": true, "mode": "background", "command": cmd, "window": win.name,
-            "focus_preserved": fg_before.0 == fg_after.0,
-            "cursor_preserved": cur_before.x == cur_after.x && cur_before.y == cur_after.y,
+            "focus_preserved": fg_before == fg_after,
+            "cursor_preserved": cursor_unchanged(cur_before, cur_after),
             "verified": serde_json::Value::Null,
             "focused_control": !no_focused_control,
             "note": if no_focused_control {
@@ -1752,7 +1738,7 @@ impl GhostSession {
         // Bring the window under the target point to the foreground BEFORE any input,
         // so clicks/keystrokes land in the window that owns the coordinates.
         let focus_confirmed = tokio::task::spawn_blocking(move || {
-            ghost_core::uia::tree::focus_window_under_point(x, y)
+            crate::engine::uia::tree::focus_window_under_point(x, y)
         })
         .await
         .ok()
@@ -1768,11 +1754,11 @@ impl GhostSession {
         // Explorer file list must NOT fire Ctrl+A+Delete).
         let hit = self.tree.element_from_point(x, y).ok().flatten();
         let hit_is_editable = hit.as_ref()
-            .map(|e| ghost_core::uia::patterns::is_editable_role(e.control_type()))
+            .map(|e| crate::engine::uia::patterns::is_editable_role(e.control_type()))
             .unwrap_or(false);
         let hit_element = hit.map(|e| e.name());
 
-        let fg_before = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
+        let fg_before = crate::engine::system::foreground_window();
         let capture_rect = self.foreground_window_rect();
         let before_capture = tokio::task::spawn_blocking(move || capture_region_raw(capture_rect))
             .await
@@ -1789,9 +1775,9 @@ impl GhostSession {
                 // non-editable hit (a file row, a button, the desktop) Ctrl+A +
                 // Delete would select-all + delete, so skip the clear there.
                 if hit_is_editable {
-                    let _ = ghost_core::input::keyboard::clear_focused_field();
+                    let _ = crate::engine::input::keyboard::clear_focused_field();
                 }
-                ghost_core::input::keyboard::type_text(t).map_err(GhostError::Core)?;
+                crate::engine::input::keyboard::type_text(t).map_err(GhostError::Core)?;
             }
             "double_click" => self.double_click_at(x, y).await?,
             "right_click" => self.right_click_at(x, y).await?,
@@ -1816,8 +1802,8 @@ impl GhostSession {
     async fn verify_screen_change(
         &self,
         before_capture: Option<(Vec<u8>, usize, usize)>,
-        fg_before: windows::Win32::Foundation::HWND,
-    ) -> Option<ghost_core::capture::Verification> {
+        fg_before: isize,
+    ) -> Option<crate::engine::capture::Verification> {
         let before = before_capture?;
         let mut last = None;
         for delay in VERIFY_POLL_MS {
@@ -1832,8 +1818,8 @@ impl GhostSession {
                 let (ref b, bw, bh) = before;
                 if bw == aw && bh == ah {
                     // MEDIUM-5: fg_ok = same window stayed focused, not just any window.
-                    let fg_after = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
-                    let fg_ok = !fg_before.is_invalid() && fg_before == fg_after;
+                    let fg_after = crate::engine::system::foreground_window();
+                    let fg_ok = fg_before != 0 && fg_before == fg_after;
                     let v = compute_verification(b, &after, bw, bh, fg_ok);
                     let changed = v.changed;
                     last = Some(v);
@@ -1851,7 +1837,7 @@ impl GhostSession {
     fn act_result_json(
         name: serde_json::Value,
         rect_json: serde_json::Value,
-        verification: Option<ghost_core::capture::Verification>,
+        verification: Option<crate::engine::capture::Verification>,
         focus_confirmed: bool,
     ) -> serde_json::Value {
         let verified = verification.as_ref().map(|v| v.changed);
@@ -1972,7 +1958,7 @@ impl<'a> OpsDispatcher for SessionOpsDispatcher<'a> {
 #[cfg(test)]
 mod act_result_tests {
     use super::GhostSession;
-    use ghost_core::capture::Verification;
+    use crate::engine::capture::Verification;
     use serde_json::json;
 
     fn v(changed: bool, fg: bool) -> Verification {

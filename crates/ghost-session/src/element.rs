@@ -1,5 +1,5 @@
-use ghost_core::uia::{element::UiaElement, patterns};
-use ghost_core::input::hotkey::is_stopped;
+use crate::engine::uia::{element::UiaElement, patterns};
+use crate::engine::input::hotkey::is_stopped;
 use crate::error::{GhostError, Result};
 
 pub struct GhostElement {
@@ -29,7 +29,7 @@ impl GhostElement {
     /// True if the element is a text-editable control (edit/document/combobox) —
     /// safe to clear (Ctrl+A+Delete) and paste into.
     pub fn is_editable(&self) -> bool {
-        ghost_core::uia::patterns::is_editable_role(self.inner.control_type())
+        crate::engine::uia::patterns::is_editable_role(self.inner.control_type())
     }
 
     /// True if the element is scrolled/collapsed out of view (stale rect).

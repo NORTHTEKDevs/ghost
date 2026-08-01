@@ -19,7 +19,7 @@ pub enum GhostError {
     ProcessNotFound { name: String },
 
     #[error("Core error: {0}")]
-    Core(#[from] ghost_core::error::CoreError),
+    Core(#[from] crate::engine::error::CoreError),
 
     #[error("Cache error: {0}")]
     Cache(String),
