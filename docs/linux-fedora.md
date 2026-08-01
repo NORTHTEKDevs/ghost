@@ -11,10 +11,22 @@ verbs it exposes on Windows. `ghost-session` and `ghost-mcp` are shared code --
 the locator tiers, grounding cascade, act-then-verify loop and MCP protocol are
 the same on both platforms; only the engine underneath changes.
 
-**Status: builds and links; not yet run on a real desktop.**
-`capabilities_for(Linux).functional` stays `false` until the on-device checks in
-[section 3](#3-verify-on-device) pass on real hardware. That is Ghost's standing
-rule and it has not been bent here.
+**Status: verified on X11 + AT-SPI2 by automated live tests on real Linux.**
+
+`crates/ghost-linux/tests/live_atspi.rs` runs in CI against a real GTK
+application inside a synthesised desktop (Xvfb + D-Bus + `at-spi-bus-launcher`)
+and passes 10/10. It proves both halves of the wedge - text written through
+`EditableText` and read back from the application, and `Action.DoAction`
+dismissing a dialog with an *observable* effect, not merely an `Ok` - plus window
+enumeration with real PIDs, role and name lookup, `describe_screen` with real
+rectangles, screen capture, and XTEST pointer control.
+
+`capabilities_for(Linux).functional` is therefore `true`, and lists exactly the
+features that suite exercises. **Not** claimed, because nothing has verified them
+end to end: `KeyInput`, `EditShortcuts`, `VisionGrounding`, and everything on the
+**Wayland** path (RemoteDesktop portal input, Screenshot portal capture) - CI
+runs X11. Those are implemented and compile-verified, and the checklist in
+[section 3](#3-verify-on-device) is what signs them off on real hardware.
 
 ### How the platforms split
 

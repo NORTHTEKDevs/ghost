@@ -50,7 +50,7 @@ built to be automated.
 | Platform | Status | Engine |
 | --- | --- | --- |
 | **Windows** | ✅ full and verified | `ghost-core` — Win32 UI Automation, SendInput, posted window messages, DXGI/GDI capture |
-| **Linux** | ✅ implemented, awaiting on-device sign-off | `ghost-linux` — AT-SPI2 over D-Bus, XTEST / RemoteDesktop portal / uinput, X11 `GetImage` / Screenshot portal |
+| **Linux** | ✅ functional — X11 + AT-SPI2 verified by live CI tests | `ghost-linux` — AT-SPI2 over D-Bus, XTEST / RemoteDesktop portal / uinput, X11 `GetImage` / Screenshot portal |
 | **macOS** | 🚧 scaffold | Accessibility + CGEvent + ScreenCaptureKit — to be built on a Mac |
 
 `ghost-session` and `ghost-mcp` are shared: the locator tiers, grounding cascade,
@@ -62,6 +62,12 @@ focus is built on posted window messages. Linux has a cleaner analogue in
 AT-SPI2 actions: the application performs the operation through its own toolkit,
 so there is no pointer to move and no window to raise — and it behaves the same
 under X11 and Wayland. Synthetic input is only the fallback there.
+
+This is tested, not asserted: CI stands up a real desktop (Xvfb + D-Bus +
+at-spi-bus-launcher), drives a real GTK application, and requires that text
+written through AT-SPI reads back from the app and that invoking a button
+actually dismisses the dialog. Wayland portal input and capture are implemented
+but not yet verified on hardware.
 
 Linux setup, verification checklist and honest limitations:
 [`docs/linux-fedora.md`](docs/linux-fedora.md). Capability matrix across all

@@ -6,13 +6,15 @@ Ghost ships as three versions that share one contract (`crates/ghost-platform`):
 | --- | --- | --- |
 | **Windows** | ✅ full, verified | `ghost-core` / `ghost-session` — Win32 UI Automation, SendInput + posted window messages, DXGI/GDI capture |
 | **macOS** | 🚧 scaffold (not functional) | native backend on Accessibility + CGEvent + ScreenCaptureKit — to be built on a Mac |
-| **Linux** | ✅ implemented, awaiting on-device verification | `ghost-linux` — AT-SPI2 over D-Bus, XTEST / RemoteDesktop portal / uinput, X11 `GetImage` / Screenshot portal. See [linux-fedora.md](linux-fedora.md) |
+| **Linux** | ✅ functional; X11 + AT-SPI2 verified by live CI tests, Wayland paths unverified | `ghost-linux` — AT-SPI2 over D-Bus, XTEST / RemoteDesktop portal / uinput, X11 `GetImage` / Screenshot portal. See [linux-fedora.md](linux-fedora.md) |
 
-Windows is intentionally the most capable and is the only one verified today. The
-macOS and Linux backends are real, compiling scaffolds (`ghost-platform` builds for
-all three targets) with a precise implementation map — but their native engines
-must be written and **verified on those machines**. Nothing here claims to work on
-an OS it hasn't been tested on.
+Windows remains the most capable. Linux is functional: its engine (`ghost-linux`)
+is implemented and its X11 + AT-SPI2 paths are verified by a live CI suite that
+drives a real GTK application on a synthesised desktop — the Wayland portal paths
+are implemented but not yet verified on hardware, and are not claimed. macOS is
+still a compiling scaffold with a precise implementation map, and must be built
+and **verified on a Mac**. Nothing here claims to work on an OS it hasn't been
+tested on.
 
 ## The contract
 
@@ -36,12 +38,14 @@ is the single source of truth for what Ghost can do where. A backend flips
 | Edit shortcuts (Ctrl+C/V/…) | WM_COPY/CUT/PASTE/UNDO | AX + `NSPasteboard` / CGEvent | AT-SPI + clipboard (X11/Wayland) |
 | Vision grounding | `ghost-ground` (OS-agnostic) | reuse `ghost-ground` | reuse `ghost-ground` |
 
-**The honest caveat on the wedge:** Ghost's standout — background control without
-stealing focus — is built on Windows posted window messages, which have no exact
-equivalent on macOS/Linux. The AX/AT-SPI action APIs are the closest analogue but
-may activate/raise the target on some apps. So `BackgroundDispatch` should be
-treated as **unknown → measure** on macOS/Linux, and only claimed once tested. It
-may end up PARTIAL there. This is the main reason Windows stays the flagship.
+**The wedge, measured:** background control without stealing focus is built on
+posted window messages on Windows, which have no exact equivalent elsewhere. On
+Linux the AT-SPI action APIs turned out to be a *cleaner* analogue, not a weaker
+one — the application performs the operation through its own toolkit, so there is
+nothing to raise and no pointer to move. `BackgroundDispatch` is therefore
+claimed on Linux, on the strength of live tests that write text through
+`EditableText` and invoke a button through `Action.DoAction` with observable
+effects. On macOS it remains **unknown → measure**.
 
 ## How to finish a platform (on that OS)
 
@@ -62,8 +66,12 @@ libei/portals accordingly.
 
 ## Why not build the native backends here
 
-They were written where they can't be verified — this repo's development machine is
-Windows-only, with no macOS SDK and no Linux desktop session. Shipping native
-FFI that can't be compiled or run would be a guess, not an implementation. The
-scaffold + this map is the honest maximum until a Mac and a Linux box are in the
-loop.
+This applied to Linux until the engine was built, and still applies to macOS: the
+development machine is Windows-only, with no macOS SDK.
+
+Linux got past it without a Linux box because the whole engine is **pure Rust**
+(`atspi`/`zbus`, `x11rb`, `ashpd`, `evdev`), so it cross-compiles and type-checks
+from Windows, and because CI can synthesise a real desktop (Xvfb + D-Bus +
+`at-spi-bus-launcher`) and run live tests against a real GTK application. macOS
+has no equivalent escape hatch — its APIs are Objective-C FFI and its runners are
+not free to synthesise — so it stays a scaffold until a Mac is in the loop.
