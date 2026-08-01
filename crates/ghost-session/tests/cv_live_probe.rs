@@ -1,3 +1,7 @@
+//! Live Windows-app test: drives Notepad/Calculator/Explorer via the
+//! Windows engine, so it is gated to Windows.
+#![cfg(windows)]
+
 //! Live probe: run the CPU CV detector on a REAL captured desktop region (not a
 //! synthetic image) and report how many element-like regions it finds. Proves the
 //! detector produces sane output on actual UI pixels. Run:

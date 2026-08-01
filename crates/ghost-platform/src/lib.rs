@@ -185,11 +185,17 @@ pub fn capabilities_for(platform: Platform) -> Capabilities {
             supported: vec![],
             status: "scaffold — native backend (Accessibility/AXUIElement + CGEvent + ScreenCaptureKit) not yet implemented/verified",
         },
+        // `ghost-linux` is fully implemented and wired in: ghost-session,
+        // ghost-mcp, ghost-cli and ghost-http all build for
+        // x86_64-unknown-linux-gnu, and real ELF binaries link. What has NOT
+        // happened is a run against a live desktop. Ghost's standing rule is
+        // that `functional` flips only after on-device verification, so it stays
+        // false until the checks in docs/linux-fedora.md pass on real hardware.
         Platform::Linux => Capabilities {
             platform,
             functional: false,
             supported: vec![],
-            status: "scaffold — native backend (AT-SPI over D-Bus + XTest/libei + X11/portal capture) not yet implemented/verified",
+            status: "implemented and integrated (ghost-linux: AT-SPI2 + XTEST/portal/uinput + X11/portal capture); all binaries cross-build for linux-gnu; awaiting on-device verification",
         },
     }
 }
