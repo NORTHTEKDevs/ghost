@@ -1,5 +1,77 @@
 # Changelog
 
+## [0.17.0] - 2026-08-01 - Linux support (AT-SPI2)
+
+Ghost runs on Linux. `ghost`, `ghost-mcp` and `ghost-http` all build and run
+there, exposing the same 20 MCP verbs as on Windows.
+
+### Added
+
+- **`ghost-linux`** - the Linux engine. AT-SPI2 over D-Bus for the accessibility
+  tree and actions, XTEST / RemoteDesktop portal / uinput for synthetic input,
+  X11 `GetImage` / Screenshot portal for capture. Pure Rust throughout: no
+  `-devel` packages are needed to build.
+- **Shared session and MCP layers.** `ghost-session` and `ghost-mcp` are now one
+  codebase across platforms. `ghost_session::engine` is a `cfg` alias resolving
+  to `ghost-core` on Windows and `ghost-linux` on Linux; both expose the same
+  module tree and signatures.
+- **Background dispatch on Linux** via AT-SPI actions. The application performs
+  the operation through its own toolkit, so nothing is raised and no pointer
+  moves - a cleaner guarantee than posted window messages, and identical under
+  X11 and Wayland.
+- **`ghost_shell` on Linux** - bash by default (`sh`/`zsh`/`pwsh` accepted).
+  Persistent sessions keep variables, cwd and env across sends using the same
+  base64 + per-session-nonce framing as the PowerShell driver.
+- **`ghost doctor` Linux checks** - session type, AT-SPI bus reachability,
+  whether applications are exposing trees, the selected input backend, capture.
+- **`scripts/install.sh`** - builds, installs to `~/.local/bin`, enables toolkit
+  accessibility, registers the MCP server, and runs `ghost doctor`.
+- **`docs/linux-fedora.md`** - setup, on-device checklist, limitations,
+  troubleshooting.
+- **Live CI on real Linux.** A synthesised desktop (Xvfb + D-Bus +
+  at-spi-bus-launcher) runs 17 live tests against a real GTK application on both
+  ubuntu-latest and Fedora 41: 10 against the engine, 7 driving the real
+  `ghost-mcp` binary over JSON-RPC. CI also runs `ghost doctor`,
+  `ghost list-windows`, `ghost screenshot`, and executes `install.sh`.
+
+### Changed
+
+- Window handles are `isize` across the engine API on both platforms (`0` =
+  none): an `HWND` on Windows, an interned AT-SPI `(bus name, object path)` on
+  Linux. `WindowInfo.hwnd`, `find_*_in_hwnd`, `BackgroundClicker::click` and
+  `ensure_foreground` take `isize`.
+- `ghost_shell`'s MCP schema and description are platform-aware. An agent reads
+  the schema to decide what to send, so advertising `powershell|cmd` on Linux
+  made every call it composed wrong before it was sent.
+- `capabilities_for(Linux).functional` is `true`, listing only the six features
+  the live suite verifies. `KeyInput`, `EditShortcuts`, `VisionGrounding` and the
+  Wayland paths are implemented but not claimed.
+- Release builds now publish Linux **and** Windows archives with SHA256 sums.
+
+### Fixed
+
+- **Act-then-verify missed small changes.** One changed cell of the 32x32 grid
+  scores 0.00098, below the old 0.002 threshold, so a one-word edit verified as
+  "nothing happened". Now thresholded on changed-cell count.
+- **The MCP server refused to start** when the accessibility bus was unreachable
+  - an ordinary condition on Linux. The connection is now lazy: the server
+  starts, answers `tools/list`, and the first real call returns an actionable
+  error naming the fix.
+- **`ghost doctor` failed on an empty desktop.** Zero accessible windows is
+  ambiguous (accessibility off, or nothing open) and reporting FAIL sent users to
+  change a setting that was already correct. It now warns.
+- Editable fields are matched by the `EditableText` interface rather than the
+  role name, because toolkits disagree about whether a text entry is `entry` or
+  `text`.
+- `quinn-proto` bumped to 0.11.16, clearing a high-severity advisory (Ghost has
+  no reachable path to it, but the lockfile carried the vulnerable version).
+
+### Not yet verified
+
+The Wayland paths - RemoteDesktop portal input and Screenshot portal capture -
+are implemented and compile-verified but have not run on hardware; CI runs X11.
+See `docs/linux-fedora.md` section 3.
+
 ## [0.16.0] - 2026-07-19 — Shell control (terminal / PowerShell / CLIs)
 
 ### Added
