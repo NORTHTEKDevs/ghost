@@ -1,3 +1,7 @@
+//! Live Windows-app test: drives Notepad/Calculator/Explorer via the
+//! Windows engine, so it is gated to Windows.
+#![cfg(windows)]
+
 //! Integration test: automate Notepad
 //! Run with: cargo test -p ghost-session --test notepad -- --ignored --nocapture
 
