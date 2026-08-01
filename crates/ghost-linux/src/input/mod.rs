@@ -35,7 +35,9 @@ use crate::session::{session_kind, SessionKind};
 const KEY_HOLD: Duration = Duration::from_millis(12);
 
 pub enum Backend {
-    X11(x11::X11Backend),
+    // Boxed: X11Backend carries a connection and the whole keysym->keycode
+    // map, which would otherwise make every Backend value that large.
+    X11(Box<x11::X11Backend>),
     Portal(portal::PortalBackend),
     Uinput(uinput::UinputBackend),
 }
@@ -134,7 +136,7 @@ fn select_backend() -> Result<Backend> {
     if let Ok(forced) = std::env::var("GHOST_INPUT") {
         return match forced.trim().to_ascii_lowercase().as_str() {
             "uinput" => Ok(Backend::Uinput(uinput::UinputBackend::new()?)),
-            "x11" => Ok(Backend::X11(x11::X11Backend::new()?)),
+            "x11" => Ok(Backend::X11(Box::new(x11::X11Backend::new()?))),
             "portal" => Ok(Backend::Portal(portal::PortalBackend::new()?)),
             other => Err(CoreError::platform(format!(
                 "GHOST_INPUT={other:?} is not recognised (expected x11, portal or uinput)"
@@ -143,7 +145,7 @@ fn select_backend() -> Result<Backend> {
     }
 
     match session_kind() {
-        SessionKind::X11 => Ok(Backend::X11(x11::X11Backend::new()?)),
+        SessionKind::X11 => Ok(Backend::X11(Box::new(x11::X11Backend::new()?))),
         SessionKind::Wayland => Ok(Backend::Portal(portal::PortalBackend::new()?)),
         SessionKind::Headless => Err(CoreError::Unsupported(
             "no display session detected, so synthetic input is unavailable. AT-SPI actions still \

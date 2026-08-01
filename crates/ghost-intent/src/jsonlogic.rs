@@ -145,7 +145,8 @@ fn loose_eq(a: Value, b: Value) -> bool {
 fn to_f64(v: &Value) -> f64 {
     match v {
         Value::Number(n) => n.as_f64().unwrap_or(0.0),
-        Value::Bool(b) => if *b { 1.0 } else { 0.0 },
+        Value::Bool(true) => 1.0,
+        Value::Bool(false) => 0.0,
         Value::String(s) => s.parse().unwrap_or(0.0),
         _ => 0.0,
     }

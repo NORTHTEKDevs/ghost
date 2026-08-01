@@ -742,7 +742,7 @@ async fn handle_tool(
             Ok(json!({ "ok": true }))
         }
         "ghost_get_selection" => {
-            let by = parse_by(&p)?;
+            let by = parse_by(p)?;
             let text = session.get_selected_text(by).await.map_err(|e| e.to_string())?;
             Ok(json!({ "selection": text, "has_selection": !text.is_empty() }))
         }
@@ -1617,6 +1617,7 @@ impl ValueIntoArray for Value {
 ///   - `steps`: JSON array of {op, ...} objects (direct).
 ///   - `json_flow`: JSON-encoded string of the steps array.
 ///   - `script`: YAML-encoded string of the steps array (or JSON, tried second).
+///
 /// Executes steps sequentially with cascade + act-then-verify and real failure feedback.
 async fn handle_ghost_run(
     session: &GhostSession,

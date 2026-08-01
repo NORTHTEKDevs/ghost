@@ -456,12 +456,12 @@ pub fn capture_screen_downsample_raw(target_dim: usize) -> Result<Vec<u8>, CoreE
                 }
             }
             let dst = (by * dim + bx) * channels;
-            if n > 0 {
-                out[dst]     = (acc[0] / n) as u8;
-                out[dst + 1] = (acc[1] / n) as u8;
-                out[dst + 2] = (acc[2] / n) as u8;
-                out[dst + 3] = (acc[3] / n) as u8;
-            }
+            // checked_div keeps the empty-cell case explicit: a block with no
+            // sampled pixels averages to 0, it does not divide by zero.
+            out[dst] = acc[0].checked_div(n).unwrap_or(0) as u8;
+            out[dst + 1] = acc[1].checked_div(n).unwrap_or(0) as u8;
+            out[dst + 2] = acc[2].checked_div(n).unwrap_or(0) as u8;
+            out[dst + 3] = acc[3].checked_div(n).unwrap_or(0) as u8;
         }
     }
     Ok(out)

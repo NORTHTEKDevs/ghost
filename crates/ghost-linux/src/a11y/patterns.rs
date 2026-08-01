@@ -12,6 +12,7 @@
 //! no-focus-steal guarantee.
 
 use super::roles::role_id_to_name;
+#[cfg(target_os = "linux")]
 use crate::error::Result;
 
 #[cfg(target_os = "linux")]
