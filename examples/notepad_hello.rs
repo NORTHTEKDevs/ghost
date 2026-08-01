@@ -40,5 +40,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
 fn main() {
     #[cfg(windows)]
-    win::run();
+    if let Err(e) = win::run() {
+        eprintln!("error: {e}");
+        std::process::exit(1);
+    }
 }
