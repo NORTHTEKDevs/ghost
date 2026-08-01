@@ -222,16 +222,19 @@ fn capture_probe() -> Result<usize, String> {
 
 /// Interpreting how many accessible windows the desktop exposes.
 ///
-/// Zero is the signature of accessibility being switched off: the bus answers,
-/// but no application is publishing a tree. That is the single most common
-/// Linux setup failure, so it gets a specific, actionable message rather than a
-/// generic "no windows".
+/// Zero windows is **not** a failure. It is ambiguous, and the two readings are
+/// indistinguishable from here: accessibility may be off so applications publish
+/// nothing, or nothing may be open - entirely normal on a fresh session.
+///
+/// Reporting FAIL would tell a user with an empty desktop that their machine is
+/// broken and send them to change a setting that is already correct. So zero
+/// warns and explains both readings; only an unreachable bus is fatal.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub fn evaluate_a11y(window_count: usize) -> Status {
     if window_count > 0 {
         Status::Pass
     } else {
-        Status::Fail
+        Status::Warn
     }
 }
 
@@ -339,6 +342,23 @@ pub fn run_checks() -> Vec<Check> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn no_open_windows_warns_rather_than_fails() {
+        // A fresh desktop with nothing open is not a broken installation, and
+        // telling the user it is would send them to "fix" a correct setting.
+        assert_eq!(evaluate_a11y(0), Status::Warn);
+        assert_eq!(evaluate_a11y(1), Status::Pass);
+    }
+
+    #[test]
+    fn only_a_fail_is_fatal() {
+        // Guards the policy the check above depends on.
+        let warn = vec![Check::new("x", Status::Warn, "")];
+        let fail = vec![Check::new("x", Status::Fail, "")];
+        assert_eq!(exit_code(&warn), 0);
+        assert_eq!(exit_code(&fail), 1);
+    }
 
     #[test]
     fn windows_build_floor_is_19041() {
