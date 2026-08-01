@@ -80,8 +80,11 @@ const ENTRY_TTL: std::time::Duration = std::time::Duration::from_secs(30);
 /// the cap we sweep expired entries first, then evict the oldest if still full.
 const MAX_ENTRIES: usize = 4096;
 
+/// A cached screen rect (left, top, right, bottom) and when it was stored.
+type CachedRect = ((i32, i32, i32, i32), std::time::Instant);
+
 struct Inner {
-    map: HashMap<LocatorKey, ((i32, i32, i32, i32), std::time::Instant)>,
+    map: HashMap<LocatorKey, CachedRect>,
     stats: LocatorCacheStats,
 }
 
