@@ -1,0 +1,145 @@
+name: Linux
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Build and unit test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      # The Linux engine is pure Rust (atspi/zbus, x11rb, ashpd, evdev), so no
+      # -devel packages are needed to BUILD. These are runtime components the
+      # live suite needs.
+      - name: Install accessibility + display stack
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            at-spi2-core \
+            dbus-x11 \
+            xvfb \
+            zenity \
+            libgtk-3-0
+
+      - name: Build workspace
+        run: cargo build --workspace --all-targets
+
+      - name: Unit tests
+        run: cargo test --workspace
+
+      # The new crate is held to the strictest bar. The rest of the workspace is
+      # checked at the same scope the existing Windows job uses, so this PR does
+      # not turn pre-existing lint debt in unrelated crates into a build failure.
+      - name: Clippy (ghost-linux, strict)
+        run: cargo clippy -p ghost-linux --all-targets -- -D warnings
+
+      - name: Clippy (workspace)
+        run: cargo clippy --workspace -- -D warnings
+
+  live:
+    name: Live AT-SPI suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install accessibility + display stack
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            at-spi2-core \
+            dbus-x11 \
+            xvfb \
+            zenity \
+            libgtk-3-0 \
+            gsettings-desktop-schemas
+
+      - name: Build live tests
+        run: cargo test -p ghost-linux --test live_atspi --no-run
+
+      # A GitHub runner has no desktop, so we synthesise one:
+      #   Xvfb            -> an X11 display
+      #   dbus-run-session -> a session bus
+      #   at-spi-bus-launcher -> the accessibility bus GTK talks to
+      # GTK only publishes an accessible tree when accessibility is enabled,
+      # which is exactly the condition docs/linux-fedora.md tells users to set.
+      - name: Run live AT-SPI suite
+        env:
+          XDG_SESSION_TYPE: x11
+          GTK_MODULES: gail:atk-bridge
+          NO_AT_BRIDGE: "0"
+          RUST_BACKTRACE: "1"
+        run: |
+          cat > run-live.sh <<'EOF'
+          set -euo pipefail
+          gsettings set org.gnome.desktop.interface toolkit-accessibility true || true
+          /usr/libexec/at-spi-bus-launcher --launch-immediately &
+          sleep 3
+          /usr/libexec/at-spi2-registryd &
+          sleep 2
+          echo "--- a11y bus environment ---"
+          echo "AT_SPI_BUS_ADDRESS=${AT_SPI_BUS_ADDRESS:-<unset>}"
+          echo "DISPLAY=$DISPLAY"
+          cargo test -p ghost-linux --test live_atspi -- --ignored --test-threads=1 --nocapture
+          EOF
+          chmod +x run-live.sh
+          xvfb-run -a --server-args="-screen 0 1280x1024x24" \
+            dbus-run-session -- ./run-live.sh
+
+  cross-build:
+    name: Release binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Release build
+        run: cargo build --release --bin ghost --bin ghost-http --bin ghost-mcp
+
+      - name: Confirm binaries are Linux ELF
+        run: |
+          for b in ghost ghost-http ghost-mcp; do
+            file "target/release/$b"
+            file "target/release/$b" | grep -q "ELF 64-bit" || exit 1
+          done
+
+      - name: Smoke test the MCP server over stdio
+        run: |
+          printf '%s\n' \
+            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}' \
+            '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+            | timeout 30 ./target/release/ghost-mcp > mcp-out.json || true
+          echo "--- server response ---"
+          cat mcp-out.json
+          grep -q '"ghost_see"' mcp-out.json
+          grep -q '"ghost_act"' mcp-out.json
+          grep -q '"ghost_shell"' mcp-out.json
+
+      - name: Upload binary artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghost-linux-x86_64
+          path: |
+            target/release/ghost
+            target/release/ghost-http
+            target/release/ghost-mcp
