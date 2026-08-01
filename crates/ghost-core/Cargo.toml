@@ -10,8 +10,6 @@ repository = "https://github.com/NORTHTEKDevs/ghost"
 readme = "../../README.md"
 
 [dependencies]
-windows = { workspace = true }
-windows-core = "0.58"
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true }
@@ -27,3 +25,7 @@ criterion = { workspace = true }
 [[bench]]
 name = "convert"
 harness = false
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true }
+windows-core = "0.58"
