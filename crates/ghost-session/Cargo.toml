@@ -10,7 +10,6 @@ repository = "https://github.com/NORTHTEKDevs/ghost"
 readme = "../../README.md"
 
 [dependencies]
-ghost-core = { path = "../ghost-core" }
 ghost-cache = { path = "../ghost-cache" }
 ghost-intent = { path = "../ghost-intent" }
 ghost-ground = { path = "../ghost-ground" }
@@ -18,11 +17,17 @@ tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 async-trait = "0.1"
-windows = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 image = { workspace = true }
 reqwest = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+ghost-core = { path = "../ghost-core" }
+windows = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ghost-linux = { path = "../ghost-linux" }
 
 [dev-dependencies]
 ghost-intent = { path = "../ghost-intent" }

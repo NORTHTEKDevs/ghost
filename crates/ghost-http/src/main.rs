@@ -16,6 +16,16 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::sync::{mpsc, oneshot};
 
+/// The platform engine: `ghost-core` on Windows, `ghost-linux` on Linux.
+/// Both expose the same module tree, so call sites are identical.
+mod engine {
+    #[cfg(windows)]
+    pub use ghost_core::*;
+    #[cfg(target_os = "linux")]
+    pub use ghost_linux::*;
+}
+
+
 #[derive(Parser)]
 #[command(name = "ghost-http", version, about = "HTTP REST server for Ghost desktop automation")]
 struct Cli {
@@ -273,7 +283,7 @@ async fn h_tools() -> Json<Value> {
 #[tokio::main]
 async fn main() {
     // Physical-pixel coordinates. Must precede any window/DC use.
-    ghost_core::system::dpi::ensure_process_dpi_aware();
+    engine::system::dpi::ensure_process_dpi_aware();
     tracing_subscriber::fmt().with_writer(std::io::stderr).init();
     let cli = Cli::parse();
 

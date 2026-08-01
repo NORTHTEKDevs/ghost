@@ -6,6 +6,17 @@ use ghost_session::{GhostSession, Target, LocateMode};
 use std::io::{BufRead, Write};
 use std::sync::OnceLock;
 
+/// The platform engine: `ghost-core` on Windows, `ghost-linux` on Linux.
+/// Both expose the same module tree and signatures, so every call site below is
+/// identical on both platforms.
+mod engine {
+    #[cfg(windows)]
+    pub use ghost_core::*;
+    #[cfg(target_os = "linux")]
+    pub use ghost_linux::*;
+}
+
+
 // ---------------------------------------------------------------------------
 // T3.3 — progress notification emitter (progressToken-gated)
 // ---------------------------------------------------------------------------
@@ -96,7 +107,19 @@ fn foreground_info() -> Value {
             json!({ "hwnd": hwnd.0 as i64, "title": title })
         }
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "linux")]
+    {
+        // Same shape as the Windows branch. The handle is an interned AT-SPI
+        // address rather than an HWND, but it is stable and round-trips through
+        // the same session APIs.
+        let hwnd = ghost_linux::system::foreground_window();
+        let title = ghost_linux::a11y::tree::list_windows()
+            .ok()
+            .and_then(|ws| ws.into_iter().find(|w| w.hwnd == hwnd).map(|w| w.name))
+            .unwrap_or_default();
+        json!({ "hwnd": hwnd as i64, "title": title })
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     {
         json!({ "hwnd": 0, "title": "" })
     }
@@ -239,7 +262,7 @@ struct McpResponse {
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     // Physical-pixel coordinates. Must precede any window/DC use.
-    ghost_core::system::dpi::ensure_process_dpi_aware();
+    crate::engine::system::dpi::ensure_process_dpi_aware();
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .init();
@@ -289,11 +312,11 @@ async fn main() {
                 // Cheap substring prefilter: avoid a second full JSON parse of
                 // every (possibly huge) line just to detect stop requests.
                 if line.contains("ghost_stop") && is_stop_request(line) {
-                    ghost_core::input::hotkey::trigger_stop();
+                    crate::engine::input::hotkey::trigger_stop();
                     // Release any held modifiers IMMEDIATELY (not when the queued
                     // stop later dispatches) so a stuck Ctrl/Shift/Alt from an
                     // in-flight or held key_down can't corrupt further input.
-                    ghost_core::input::hotkey::release_all_modifiers();
+                    crate::engine::input::hotkey::release_all_modifiers();
                 }
                 // Bounded channel + blocking_send: a client that pipelines
                 // requests without reading responses blocks here (and then on
@@ -1213,13 +1236,13 @@ const DEFAULT_ELEMENT_LIMIT: usize = 150;
 /// Serialize an element list for describe_screen responses: drops degenerate
 /// rects (zero-area) and minimized-window garbage coords (-32000), applies the
 /// `limit` param, and reports how many elements were filtered/truncated.
-fn elements_response(elements: &[ghost_core::uia::ElementDescriptor], p: &Value) -> Value {
+fn elements_response(elements: &[crate::engine::uia::ElementDescriptor], p: &Value) -> Value {
     let limit = match p.get("limit").and_then(|v| v.as_u64()) {
         Some(0) => usize::MAX,
         Some(n) => n as usize,
         None => DEFAULT_ELEMENT_LIMIT,
     };
-    let usable: Vec<&ghost_core::uia::ElementDescriptor> = elements.iter()
+    let usable: Vec<&crate::engine::uia::ElementDescriptor> = elements.iter()
         .filter(|e| e.right > e.left && e.bottom > e.top && e.left > -30000 && e.top > -30000)
         .collect();
     let total = usable.len();
@@ -1260,14 +1283,14 @@ fn actions_for_role(role: &str) -> Vec<&'static str> {
 /// Enriched, agent-planning snapshot of a window's elements: stable `id`, `center`,
 /// `actionable`, and the `actions` each element accepts. `actionable_only` (param)
 /// filters to just the interactable elements to cut noise.
-fn snapshot_response(elements: &[ghost_core::uia::ElementDescriptor], p: &Value) -> Value {
+fn snapshot_response(elements: &[crate::engine::uia::ElementDescriptor], p: &Value) -> Value {
     let limit = match p.get("limit").and_then(|v| v.as_u64()) {
         Some(0) => usize::MAX,
         Some(n) => n as usize,
         None => DEFAULT_ELEMENT_LIMIT,
     };
     let actionable_only = p.get("actionable_only").and_then(|v| v.as_bool()).unwrap_or(false);
-    let usable: Vec<&ghost_core::uia::ElementDescriptor> = elements.iter()
+    let usable: Vec<&crate::engine::uia::ElementDescriptor> = elements.iter()
         .filter(|e| e.right > e.left && e.bottom > e.top && e.left > -30000 && e.top > -30000)
         .collect();
     let mut list: Vec<Value> = Vec::new();
@@ -2432,14 +2455,14 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn desc(name: &str, l: i32, t: i32, r: i32, b: i32) -> ghost_core::uia::ElementDescriptor {
-        ghost_core::uia::ElementDescriptor {
+    fn desc(name: &str, l: i32, t: i32, r: i32, b: i32) -> crate::engine::uia::ElementDescriptor {
+        crate::engine::uia::ElementDescriptor {
             name: name.into(), role: "button".into(), left: l, top: t, right: r, bottom: b, enabled: true,
         }
     }
 
-    fn desc_role(name: &str, role: &str) -> ghost_core::uia::ElementDescriptor {
-        ghost_core::uia::ElementDescriptor {
+    fn desc_role(name: &str, role: &str) -> crate::engine::uia::ElementDescriptor {
+        crate::engine::uia::ElementDescriptor {
             name: name.into(), role: role.into(), left: 0, top: 0, right: 20, bottom: 20, enabled: true,
         }
     }

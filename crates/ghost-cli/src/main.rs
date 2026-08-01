@@ -22,6 +22,15 @@ use ghost_session::{By, GhostSession, LocateMode, Target};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+/// The platform engine: `ghost-core` on Windows, `ghost-linux` on Linux.
+mod engine {
+    #[cfg(windows)]
+    pub use ghost_core::*;
+    #[cfg(target_os = "linux")]
+    pub use ghost_linux::*;
+}
+
+
 #[derive(Parser)]
 #[command(
     name = "ghost",
@@ -182,7 +191,7 @@ enum Command {
 #[tokio::main]
 async fn main() -> ExitCode {
     // Physical-pixel coordinates. Must precede any window/DC use.
-    ghost_core::system::dpi::ensure_process_dpi_aware();
+    crate::engine::system::dpi::ensure_process_dpi_aware();
     let cli = Cli::parse();
     if cli.verbose {
         tracing_subscriber::fmt().with_writer(std::io::stderr).init();
@@ -355,7 +364,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 "type" => {
                     let t = text_ref.ok_or("action=type requires --text-input")?;
                     session.click_at(cx, cy).await.map_err(|e| e.to_string())?;
-                    ghost_core::input::keyboard::type_text(t).map_err(|e| e.to_string())?;
+                    crate::engine::input::keyboard::type_text(t).map_err(|e| e.to_string())?;
                 }
                 "double_click" => { session.double_click_at(cx, cy).await.map_err(|e| e.to_string())?; }
                 "right_click" => { session.right_click_at(cx, cy).await.map_err(|e| e.to_string())?; }
@@ -422,17 +431,10 @@ async fn run(cli: Cli) -> Result<(), String> {
             let rect = if let Some(ref name) = window {
                 let windows = session.list_windows().await.map_err(|e| e.to_string())?;
                 match windows.into_iter().find(|w| w.name.contains(name.as_str())) {
-                    Some(w) => {
-                        use windows::Win32::Foundation::{HWND, RECT};
-                        use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
-                        let hwnd = HWND(w.hwnd);
-                        let mut r = RECT::default();
-                        if unsafe { GetWindowRect(hwnd, &mut r).is_ok() } {
-                            Some((r.left, r.top, r.right, r.bottom))
-                        } else {
-                            return Err(format!("could not get rect for window '{name}'"));
-                        }
-                    }
+                    Some(w) => match crate::engine::system::window_rect(w.hwnd) {
+                        Some(r) => Some(r),
+                        None => return Err(format!("could not get rect for window '{name}'")),
+                    },
                     None => return Err(format!("no window matching '{name}'")),
                 }
             } else {
