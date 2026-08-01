@@ -1,0 +1,33 @@
+# Normalise text in the repository; check out with each platform's convention.
+* text=auto
+
+# Shell scripts MUST be stored and checked out with LF, on every platform.
+# A CRLF shell script fails on Linux with `bad interpreter: bash^M`, which is
+# both fatal and mystifying. Committing one from Windows is easy to do by
+# accident, so it is pinned here rather than left to a contributor's config.
+*.sh text eol=lf
+
+# Same reasoning for anything a Linux runner or shell executes directly.
+*.bash text eol=lf
+Dockerfile text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Windows-side scripts stay CRLF.
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Rust sources and docs normalise to LF in the repository.
+*.rs text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+
+# Binary assets must never be line-ending converted.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.zip binary
+*.exe binary
