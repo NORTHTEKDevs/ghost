@@ -135,10 +135,10 @@ impl UiaTree {
     }
 
     /// Scoped name search: walks only the subtree rooted at `hwnd`.
-    pub fn find_by_name_in_hwnd(&self, hwnd: HWND, name: &str) -> Result<Option<UiaElement>, CoreError> {
+    pub fn find_by_name_in_hwnd(&self, hwnd: isize, name: &str) -> Result<Option<UiaElement>, CoreError> {
         let name_lower = name.to_lowercase();
         unsafe {
-            let root = self.automation.ElementFromHandle(hwnd)
+            let root = self.automation.ElementFromHandle(HWND(hwnd as *mut _))
                 .map_err(|e| CoreError::ComInit(e.to_string()))?;
             let walker = self.get_walker()?;
             let mut budget = SEARCH_NODE_BUDGET;
@@ -147,9 +147,9 @@ impl UiaTree {
     }
 
     /// Scoped role search: walks only the subtree rooted at `hwnd`.
-    pub fn find_by_role_in_hwnd(&self, hwnd: HWND, role: &str) -> Result<Option<UiaElement>, CoreError> {
+    pub fn find_by_role_in_hwnd(&self, hwnd: isize, role: &str) -> Result<Option<UiaElement>, CoreError> {
         unsafe {
-            let root = self.automation.ElementFromHandle(hwnd)
+            let root = self.automation.ElementFromHandle(HWND(hwnd as *mut _))
                 .map_err(|e| CoreError::ComInit(e.to_string()))?;
             let walker = self.get_walker()?;
             let mut budget = SEARCH_NODE_BUDGET;
@@ -166,7 +166,7 @@ impl UiaTree {
         unsafe {
             let fg = GetForegroundWindow();
             if !fg.is_invalid() {
-                if let Ok(Some(el)) = self.find_by_name_in_hwnd(fg, name) {
+                if let Ok(Some(el)) = self.find_by_name_in_hwnd(fg.0 as isize, name) {
                     return Ok(Some(el));
                 }
             }
@@ -179,7 +179,7 @@ impl UiaTree {
         unsafe {
             let fg = GetForegroundWindow();
             if !fg.is_invalid() {
-                if let Ok(Some(el)) = self.find_by_role_in_hwnd(fg, role) {
+                if let Ok(Some(el)) = self.find_by_role_in_hwnd(fg.0 as isize, role) {
                     return Ok(Some(el));
                 }
             }
@@ -328,7 +328,7 @@ impl UiaTree {
             // Element coords of a minimized window are garbage (-32000).
             return Err(CoreError::WindowMinimized { name: win.name });
         }
-        self.automation.ElementFromHandle(HWND(win.hwnd))
+        self.automation.ElementFromHandle(HWND(win.hwnd as *mut _))
             .map_err(|e| CoreError::ComInit(e.to_string()))
     }
 
@@ -352,7 +352,7 @@ impl UiaTree {
     /// count, nth-match selection) when several elements share a name/role.
     pub fn find_all_in_hwnd(
         &self,
-        hwnd: HWND,
+        hwnd: isize,
         name: Option<&str>,
         role: Option<&str>,
         cap: usize,
@@ -362,7 +362,7 @@ impl UiaTree {
         }
         let name_lower = name.map(|n| n.to_lowercase());
         unsafe {
-            let root = self.automation.ElementFromHandle(hwnd)
+            let root = self.automation.ElementFromHandle(HWND(hwnd as *mut _))
                 .map_err(|e| CoreError::ComInit(e.to_string()))?;
             let walker = self.get_walker()?;
             let mut out = Vec::new();
@@ -549,7 +549,7 @@ pub struct WindowInfo {
     pub name: String,
     pub pid: u32,
     pub focused: bool,
-    pub hwnd: *mut core::ffi::c_void,
+    pub hwnd: isize,
     /// "normal" | "minimized". Minimized (and Win11-cloaked-minimized) windows are
     /// included so agents don't lose track of windows they just interacted with.
     pub state: &'static str,
@@ -594,7 +594,7 @@ unsafe extern "system" fn enum_windows_proc(hwnd: HWND, lparam: LPARAM) -> BOOL 
     GetWindowThreadProcessId(hwnd, Some(&mut pid));
     let state = if iconic { "minimized" } else { "normal" };
     let list = &mut *(lparam.0 as *mut Vec<WindowInfo>);
-    list.push(WindowInfo { name, pid, focused, hwnd: hwnd.0, state });
+    list.push(WindowInfo { name, pid, focused, hwnd: hwnd.0 as isize, state });
     TRUE
 }
 
@@ -616,7 +616,8 @@ pub fn list_windows() -> Result<Vec<WindowInfo>, CoreError> {
 /// (a) GetForegroundWindow() called once, value reused — eliminates the double-call TOCTOU.
 /// (b) AttachThreadInput only called when thread IDs differ, and only detached for threads
 ///     that were actually attached — prevents the self-attach failure that ERROR_INVALID_PARAMETER.
-pub fn ensure_foreground(hwnd: HWND, timeout_ms: u64) -> Result<bool, CoreError> {
+pub fn ensure_foreground(hwnd_raw: isize, timeout_ms: u64) -> Result<bool, CoreError> {
+    let hwnd = HWND(hwnd_raw as *mut core::ffi::c_void);
     unsafe {
         // Single call to GetForegroundWindow — reuse throughout to avoid TOCTOU.
         let fg = GetForegroundWindow();
@@ -688,7 +689,7 @@ pub fn focus_window_under_point(x: i32, y: i32) -> Result<bool, CoreError> {
         // Walk to the top-level owner window.
         let root = GetAncestor(child, GA_ROOT);
         let hwnd = if root.is_invalid() { child } else { root };
-        ensure_foreground(hwnd, 600)
+        ensure_foreground(hwnd.0 as isize, 600)
     }
 }
 
@@ -698,8 +699,7 @@ pub fn focus_window(name: &str) -> Result<(), CoreError> {
     let win = windows.iter()
         .find(|w| w.name.to_lowercase().contains(&name_lower))
         .ok_or_else(|| CoreError::ProcessNotFound { name: name.to_string() })?;
-    let hwnd = HWND(win.hwnd);
-    let confirmed = ensure_foreground(hwnd, 600)?;
+    let confirmed = ensure_foreground(win.hwnd, 600)?;
     if !confirmed {
         return Err(CoreError::FocusFailed { window: name.to_string() });
     }
@@ -712,7 +712,7 @@ pub fn set_window_state(name: &str, state: WindowState) -> Result<(), CoreError>
     let win = windows.iter()
         .find(|w| w.name.to_lowercase().contains(&name_lower))
         .ok_or_else(|| CoreError::ProcessNotFound { name: name.to_string() })?;
-    let hwnd = HWND(win.hwnd);
+    let hwnd = HWND(win.hwnd as *mut _);
     unsafe {
         match state {
             WindowState::Maximize => { let _ = ShowWindow(hwnd, SW_MAXIMIZE); }
@@ -801,7 +801,7 @@ mod tests {
             // No foreground window (headless CI) — skip rather than fail.
             return;
         }
-        let result = ensure_foreground(hwnd, 0);
+        let result = ensure_foreground(hwnd.0 as isize, 0);
         assert!(result.is_ok(), "ensure_foreground must not panic or error: {:?}", result);
         assert_eq!(result.unwrap(), true, "already-foreground window should return Ok(true)");
     }

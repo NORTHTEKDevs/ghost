@@ -1,3 +1,6 @@
+//! Windows-only: `ghost-core` compiles to nothing off Windows.
+#![cfg(windows)]
+
 //! One-off measurement: GDI region capture vs DXGI region capture on the SAME
 //! primary rect, to decide whether the off-primary GDI path is a real latency
 //! penalty worth a per-output DXGI duplicator. Run:
