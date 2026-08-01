@@ -90,6 +90,9 @@ jobs:
           RUST_BACKTRACE: "1"
         run: |
           cat > run-live.sh <<'EOF'
+          #!/usr/bin/env bash
+          # Shebang matters: dbus-run-session exec's this directly, and without it
+          # the kernel falls back to sh (dash), where `set -o pipefail` is illegal.
           set -euo pipefail
           gsettings set org.gnome.desktop.interface toolkit-accessibility true || true
           /usr/libexec/at-spi-bus-launcher --launch-immediately &

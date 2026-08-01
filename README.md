@@ -47,18 +47,25 @@ built to be automated.
 
 ### Platforms
 
-Ghost targets three OSes through one shared contract (`crates/ghost-platform`):
+| Platform | Status | Engine |
+| --- | --- | --- |
+| **Windows** | ✅ full and verified | `ghost-core` — Win32 UI Automation, SendInput, posted window messages, DXGI/GDI capture |
+| **Linux** | ✅ implemented, awaiting on-device sign-off | `ghost-linux` — AT-SPI2 over D-Bus, XTEST / RemoteDesktop portal / uinput, X11 `GetImage` / Screenshot portal |
+| **macOS** | 🚧 scaffold | Accessibility + CGEvent + ScreenCaptureKit — to be built on a Mac |
 
-- **Windows** — full and verified. The flagship; every feature above works here.
-- **macOS / Linux** — architecture in place, native backends in progress (not yet
-  functional). The cross-platform crate compiles for all three; the macOS
-  (Accessibility/CGEvent) and Linux (AT-SPI/XTest) engines are scaffolded with a
-  precise implementation map and must be built and verified on those machines.
+`ghost-session` and `ghost-mcp` are shared: the locator tiers, grounding cascade,
+act-then-verify loop and all 20 MCP verbs are written once and run on both
+platforms. Only the engine underneath changes, behind a one-line `cfg` alias.
 
-See [`docs/cross-platform.md`](docs/cross-platform.md) for the capability matrix
-and the plan. Note: Ghost's background-without-focus-steal wedge relies on Windows
-window messages, which have no exact macOS/Linux equivalent — that capability is
-"measure before claiming" off Windows.
+**The wedge survives the port.** On Windows, driving an app without stealing
+focus is built on posted window messages. Linux has a cleaner analogue in
+AT-SPI2 actions: the application performs the operation through its own toolkit,
+so there is no pointer to move and no window to raise — and it behaves the same
+under X11 and Wayland. Synthetic input is only the fallback there.
+
+Linux setup, verification checklist and honest limitations:
+[`docs/linux-fedora.md`](docs/linux-fedora.md). Capability matrix across all
+three: [`docs/cross-platform.md`](docs/cross-platform.md).
 
 Ghost is a general-purpose automation tool. Use it on systems you own or are
 authorized to automate, and in line with the terms of the software you drive.
@@ -83,7 +90,19 @@ cargo build --release --bin ghost --bin ghost-http --bin ghost-mcp
 # binaries in target/release/
 ```
 
-Requirements: Windows 10 build 19041+ (and Rust stable only if building from source).
+Requirements: Windows 10 build 19041+, or Linux with `at-spi2-core` (and Rust
+stable only if building from source).
+
+**On Linux:**
+
+```bash
+sudo dnf install at-spi2-core xdg-desktop-portal xdg-desktop-portal-gnome
+gsettings set org.gnome.desktop.interface toolkit-accessibility true
+./scripts/install.sh          # build, install, register the MCP server, run doctor
+```
+
+No `-devel` packages are needed — the Linux engine is pure Rust. Full setup and
+troubleshooting: [`docs/linux-fedora.md`](docs/linux-fedora.md).
 
 **Check your machine first:**
 
@@ -91,9 +110,14 @@ Requirements: Windows 10 build 19041+ (and Rust stable only if building from sou
 ghost doctor
 ```
 
-Reports PASS/WARN/FAIL for the Windows build, interactive desktop, UI Automation, DPI awareness,
-monitor layout, screen capture, and optional vision credentials. Exit code 1 if anything is FAIL.
-Run this before opening an issue — it usually names the problem outright.
+Reports PASS/WARN/FAIL and exits 1 if anything is FAIL. Run it before opening an
+issue — it usually names the problem outright.
+
+- **Windows:** build version, interactive desktop, UI Automation, DPI awareness,
+  monitor layout, screen capture, optional vision credentials.
+- **Linux:** session type (X11/Wayland), AT-SPI bus reachability, whether
+  applications are actually exposing accessible trees, the selected input
+  backend, and screen capture.
 
 ## Quick Start — CLI
 
@@ -435,7 +459,9 @@ convert microbench: `cargo bench -p ghost-core --bench convert`. Older baselines
 
 ## Requirements
 
-- Windows 10 or later
+- **Windows** 10 build 19041 or later
+- **Linux** with `at-spi2-core` and a desktop session (X11 or Wayland);
+  `xdg-desktop-portal-gnome` additionally for Wayland input and capture
 - Rust stable (only for building from source)
 
 ## License
