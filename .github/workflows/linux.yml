@@ -151,7 +151,8 @@ jobs:
           dnf -y install \
             at-spi2-core at-spi2-atk \
             xorg-x11-server-Xvfb dbus-x11 zenity gtk3 \
-            gcc curl findutils procps-ng
+            gcc curl findutils procps-ng \
+            mesa-libGLES mesa-libEGL mesa-dri-drivers
 
       - name: Install Rust
         run: |
@@ -170,6 +171,13 @@ jobs:
           GTK_MODULES: gail:atk-bridge
           NO_AT_BRIDGE: "0"
           RUST_BACKTRACE: "1"
+          # Fedora's zenity is GTK4, which reaches for Vulkan/GL and aborts in a
+          # GPU-less container. Force the software renderer. This is a container
+          # concession only - a real Fedora desktop has working GL and needs
+          # none of it.
+          GSK_RENDERER: cairo
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          GDK_BACKEND: x11
         run: |
           cat > run-live.sh <<'EOF'
           #!/usr/bin/env bash
