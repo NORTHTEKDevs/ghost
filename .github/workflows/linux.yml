@@ -93,13 +93,28 @@ jobs:
           sleep 2
           echo "DISPLAY=$DISPLAY"
 
+          # Poll rather than sleep: GTK startup under Xvfb varies by an order of
+          # magnitude between a warm and a cold runner, and a fixed sleep makes
+          # this job flaky in exactly the way a user would never see.
+          wait_for_window() {
+            for _ in $(seq 1 60); do
+              if ./target/debug/ghost list-windows 2>/dev/null | grep -q "$1"; then
+                return 0
+              fi
+              sleep 0.5
+            done
+            echo "window '$1' never appeared; list-windows says:"
+            ./target/debug/ghost list-windows || true
+            return 1
+          }
+
           echo "::group::ghost doctor"
           # The first command a user runs. Exercised with an application open so
           # it takes the PASS path, not just the empty-desktop one, and its exit
           # status is enforced rather than ignored.
           zenity --forms --title=GhostDoctorProbe --text=probe --add-entry=Name &
           ZEN=$!
-          sleep 3
+          wait_for_window GhostDoctorProbe
           ./target/debug/ghost doctor
           echo "::endgroup::"
 
@@ -163,10 +178,22 @@ jobs:
           sleep 3
           /usr/libexec/at-spi2-registryd &
           sleep 2
+          wait_for_window() {
+            for _ in $(seq 1 60); do
+              if ./target/debug/ghost list-windows 2>/dev/null | grep -q "$1"; then
+                return 0
+              fi
+              sleep 0.5
+            done
+            echo "window '$1' never appeared; list-windows says:"
+            ./target/debug/ghost list-windows || true
+            return 1
+          }
+
           # Run doctor with an app open so it exercises the PASS path.
           zenity --forms --title=GhostDoctorProbe --text=probe --add-entry=Name &
           ZEN=$!
-          sleep 3
+          wait_for_window GhostDoctorProbe
           ./target/debug/ghost doctor
           ./target/debug/ghost list-windows | grep -q GhostDoctorProbe
           kill $ZEN 2>/dev/null || true

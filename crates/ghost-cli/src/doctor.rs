@@ -281,9 +281,9 @@ pub fn run_checks() -> Vec<Check> {
                         windows.iter().take(3).map(|w| w.name.as_str()).collect();
                     format!("applications are exposing trees (e.g. {})", sample.join(", "))
                 } else {
-                    "the bus answers but no application exposes a tree. Enable it with: \
-                     gsettings set org.gnome.desktop.interface toolkit-accessibility true \
-                     -- then RESTART the applications that were already running"
+                    "no application is currently exposing a tree. That is expected if nothing \
+                     is open. If applications ARE open, run: gsettings set \
+                     org.gnome.desktop.interface toolkit-accessibility true -- then RESTART them"
                         .to_string()
                 },
             ));
