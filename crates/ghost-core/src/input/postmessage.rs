@@ -70,7 +70,8 @@ pub struct BackgroundClicker;
 impl BackgroundClicker {
     /// Post a left-click pair to `hwnd` at client-relative `(x, y)`.
     /// Returns `CoreError::WindowGone` if `hwnd` is invalid by the time we check.
-    pub fn click(hwnd: HWND, client_xy: (i32, i32)) -> Result<(), CoreError> {
+    pub fn click(hwnd_raw: isize, client_xy: (i32, i32)) -> Result<(), CoreError> {
+        let hwnd = hwnd_of(hwnd_raw);
         unsafe {
             if !IsWindow(hwnd).as_bool() {
                 return Err(CoreError::WindowGone);
@@ -99,7 +100,7 @@ impl BackgroundClicker {
             }
             let mut pt = POINT { x: screen_x, y: screen_y };
             let _ = ScreenToClient(hwnd, &mut pt);
-            Self::click(hwnd, (pt.x, pt.y))
+            Self::click(hwnd_raw, (pt.x, pt.y))
         }
     }
 
@@ -331,7 +332,7 @@ mod tests {
 
     #[test]
     fn click_returns_error_when_hwnd_is_zero() {
-        let err = BackgroundClicker::click(HWND(std::ptr::null_mut()), (10, 10));
+        let err = BackgroundClicker::click(0, (10, 10));
         assert!(matches!(err, Err(CoreError::WindowGone)));
     }
 
