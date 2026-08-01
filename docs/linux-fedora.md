@@ -11,15 +11,26 @@ verbs it exposes on Windows. `ghost-session` and `ghost-mcp` are shared code --
 the locator tiers, grounding cascade, act-then-verify loop and MCP protocol are
 the same on both platforms; only the engine underneath changes.
 
-**Status: verified on X11 + AT-SPI2 by automated live tests on real Linux.**
+**Status: verified on X11 + AT-SPI2 by automated live tests, on Ubuntu and on
+Fedora 41.**
 
-`crates/ghost-linux/tests/live_atspi.rs` runs in CI against a real GTK
-application inside a synthesised desktop (Xvfb + D-Bus + `at-spi-bus-launcher`)
-and passes 10/10. It proves both halves of the wedge - text written through
-`EditableText` and read back from the application, and `Action.DoAction`
-dismissing a dialog with an *observable* effect, not merely an `Ok` - plus window
-enumeration with real PIDs, role and name lookup, `describe_screen` with real
-rectangles, screen capture, and XTEST pointer control.
+CI stands up a real desktop (Xvfb + D-Bus + `at-spi-bus-launcher`) and runs
+**17 live tests against a real GTK application**, on both distros:
+
+- `crates/ghost-linux/tests/live_atspi.rs` (10) — the engine. Both halves of the
+  wedge: text written through `EditableText` and read back from the application,
+  and `Action.DoAction` dismissing a dialog with an *observable* effect rather
+  than merely returning `Ok`. Plus window enumeration with real PIDs, role and
+  name lookup, `describe_screen` with real rectangles, capture, XTEST.
+- `crates/ghost-mcp/tests/live_mcp_linux.rs` (7) — the product. Spawns the real
+  `ghost-mcp` binary and speaks JSON-RPC to it exactly as Claude Code does:
+  `tools/list`, `ghost_window`, `ghost_see` returning real roles, `ghost_shell`
+  running a real command, and a persistent shell keeping a variable across sends.
+
+CI also runs what a user runs first — `ghost doctor` (exit status enforced),
+`ghost list-windows`, `ghost screenshot` — and executes `scripts/install.sh`
+end to end. The Fedora job installs exactly the packages listed below, so these
+instructions are themselves under test.
 
 `capabilities_for(Linux).functional` is therefore `true`, and lists exactly the
 features that suite exercises. **Not** claimed, because nothing has verified them
