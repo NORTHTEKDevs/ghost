@@ -9,6 +9,13 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+# A GitHub runner has no desktop, so the live jobs synthesise one:
+#   Xvfb                -> an X11 display
+#   dbus-run-session    -> a session bus
+#   at-spi-bus-launcher -> the accessibility bus GTK publishes to
+# GTK only exposes an accessible tree when accessibility is enabled, which is
+# exactly the condition docs/linux-fedora.md tells users to set.
+
 jobs:
   test:
     name: Build and unit test
@@ -24,17 +31,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       # The Linux engine is pure Rust (atspi/zbus, x11rb, ashpd, evdev), so no
-      # -devel packages are needed to BUILD. These are runtime components the
-      # live suite needs.
+      # -devel packages are needed to BUILD. These are runtime components.
       - name: Install accessibility + display stack
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            at-spi2-core \
-            dbus-x11 \
-            xvfb \
-            zenity \
-            libgtk-3-0
+            at-spi2-core dbus-x11 xvfb zenity libgtk-3-0
 
       - name: Build workspace
         run: cargo build --workspace --all-targets
@@ -52,37 +54,26 @@ jobs:
         run: cargo clippy --workspace -- -D warnings
 
   live:
-    name: Live AT-SPI suite
+    name: Live suite (engine + MCP + CLI)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
-
+      - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
       - name: Install accessibility + display stack
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            at-spi2-core \
-            dbus-x11 \
-            xvfb \
-            zenity \
-            libgtk-3-0 \
-            gsettings-desktop-schemas
+            at-spi2-core dbus-x11 xvfb zenity libgtk-3-0 gsettings-desktop-schemas
 
-      - name: Build live tests
-        run: cargo test -p ghost-linux --test live_atspi --no-run
+      - name: Build binaries and live tests
+        run: |
+          cargo build --bin ghost --bin ghost-mcp
+          cargo test -p ghost-linux --test live_atspi --no-run
+          cargo test -p ghost-mcp --test live_mcp_linux --no-run
 
-      # A GitHub runner has no desktop, so we synthesise one:
-      #   Xvfb            -> an X11 display
-      #   dbus-run-session -> a session bus
-      #   at-spi-bus-launcher -> the accessibility bus GTK talks to
-      # GTK only publishes an accessible tree when accessibility is enabled,
-      # which is exactly the condition docs/linux-fedora.md tells users to set.
-      - name: Run live AT-SPI suite
+      - name: Run live suite
         env:
           XDG_SESSION_TYPE: x11
           GTK_MODULES: gail:atk-bridge
@@ -94,21 +85,118 @@ jobs:
           # Shebang matters: dbus-run-session exec's this directly, and without it
           # the kernel falls back to sh (dash), where `set -o pipefail` is illegal.
           set -euo pipefail
+
           gsettings set org.gnome.desktop.interface toolkit-accessibility true || true
           /usr/libexec/at-spi-bus-launcher --launch-immediately &
           sleep 3
           /usr/libexec/at-spi2-registryd &
           sleep 2
-          echo "--- a11y bus environment ---"
-          echo "AT_SPI_BUS_ADDRESS=${AT_SPI_BUS_ADDRESS:-<unset>}"
           echo "DISPLAY=$DISPLAY"
+
+          echo "::group::ghost doctor"
+          # The first command a user runs. It must not panic, and it must report
+          # a healthy bus here - so its exit status is enforced, not ignored.
+          ./target/debug/ghost doctor
+          echo "::endgroup::"
+
+          echo "::group::CLI smoke"
+          ./target/debug/ghost list-windows
+          ./target/debug/ghost screenshot --out /tmp/ghost-ci.png
+          test -s /tmp/ghost-ci.png
+          echo "::endgroup::"
+
+          echo "::group::engine live suite"
           cargo test -p ghost-linux --test live_atspi -- --ignored --test-threads=1 --nocapture
+          echo "::endgroup::"
+
+          echo "::group::MCP end-to-end suite"
+          cargo test -p ghost-mcp --test live_mcp_linux -- --ignored --test-threads=1 --nocapture
+          echo "::endgroup::"
           EOF
           chmod +x run-live.sh
           xvfb-run -a --server-args="-screen 0 1280x1024x24" \
             dbus-run-session -- ./run-live.sh
 
-  cross-build:
+  fedora:
+    name: Fedora (target distro)
+    runs-on: ubuntu-latest
+    container: fedora:41
+    steps:
+      - uses: actions/checkout@v4
+
+      # Exactly the packages docs/linux-fedora.md tells a user to install, so
+      # this job fails if those instructions are ever wrong or incomplete.
+      - name: Install Fedora runtime packages
+        run: |
+          dnf -y install \
+            at-spi2-core at-spi2-atk \
+            xorg-x11-server-Xvfb dbus-x11 zenity gtk3 \
+            gcc curl findutils procps-ng
+
+      - name: Install Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Build
+        run: cargo build --bin ghost --bin ghost-mcp
+
+      - name: Unit tests
+        run: cargo test -p ghost-linux
+
+      - name: Live suite on Fedora
+        env:
+          XDG_SESSION_TYPE: x11
+          GTK_MODULES: gail:atk-bridge
+          NO_AT_BRIDGE: "0"
+          RUST_BACKTRACE: "1"
+        run: |
+          cat > run-live.sh <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          /usr/libexec/at-spi-bus-launcher --launch-immediately &
+          sleep 3
+          /usr/libexec/at-spi2-registryd &
+          sleep 2
+          ./target/debug/ghost doctor
+          cargo test -p ghost-linux --test live_atspi -- --ignored --test-threads=1 --nocapture
+          cargo test -p ghost-mcp --test live_mcp_linux -- --ignored --test-threads=1 --nocapture
+          EOF
+          chmod +x run-live.sh
+          xvfb-run -a --server-args="-screen 0 1280x1024x24" \
+            dbus-run-session -- ./run-live.sh
+
+  installer:
+    name: Installer script
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install runtime deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            at-spi2-core dbus-x11 xvfb shellcheck
+
+      - name: Lint the installer
+        run: shellcheck scripts/install.sh
+
+      # The installer is what a user actually runs first. Executing it here
+      # catches a bad path, a missing chmod, or CRLF line endings before they do.
+      - name: Run the installer
+        run: |
+          test -x scripts/install.sh || { echo "install.sh is not executable in git"; exit 1; }
+          xvfb-run -a dbus-run-session -- ./scripts/install.sh --no-register || true
+          # doctor legitimately reports FAIL with no a11y bus here; what matters
+          # is that the script ran and installed all three binaries.
+          test -x "$HOME/.local/bin/ghost"
+          test -x "$HOME/.local/bin/ghost-mcp"
+          test -x "$HOME/.local/bin/ghost-http"
+          echo "installer placed all three binaries"
+
+  release:
     name: Release binaries
     runs-on: ubuntu-latest
     steps:

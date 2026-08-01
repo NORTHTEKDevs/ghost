@@ -95,6 +95,63 @@ impl ProgressEmitter {
 
 /// Cheap foreground window info: {hwnd (isize), title (String)}.
 /// Returns zeros / empty string on any Win32 failure (non-fatal).
+/// The `ghost_shell` description an agent reads.
+///
+/// This is agent-facing text, so it has to be right per platform: an agent that
+/// reads "shell=powershell (default) | pwsh | cmd" on a Fedora box will never
+/// ask for bash, and will build Windows-shaped command lines that fail.
+/// Agent-facing note for `ghost_window op=state`.
+///
+/// Linux has no portable way to minimise/maximise/restore a window: AT-SPI
+/// exposes no such action and Ghost speaks no window-manager protocol. Saying so
+/// in the schema stops an agent burning turns on a call that will always report
+/// Unsupported.
+fn window_state_description() -> &'static str {
+    #[cfg(target_os = "linux")]
+    {
+        "op=state. On Linux only 'close' is available (via the window's own accessible action);          maximize/minimize/restore report Unsupported."
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        "op=state"
+    }
+}
+
+fn shell_verb_description() -> &'static str {
+    #[cfg(target_os = "linux")]
+    {
+        "Run shell commands and drive persistent shells. THE way to run builds, git, CLIs,          scripts, or open apps from a command line, and to edit files on machines with no file          tools. op=run (default): one-shot - spawn shell, run 'cmd', return {output, exit_code,          timed_out}. shell=bash (default) | sh | zsh | pwsh. op=open: start a persistent bash          whose variables/cwd/env survive across commands (returns an 'id'). op=send: run 'cmd' in          session 'id' (state persists). op=read: drain the rest of a command that hit its timeout          (busy=true). op=list: show sessions. op=kill: end a session. Output is merged          stdout+stderr, tail-capped at 24000 chars. Emergency-stop (ghost_stop) kills a runaway          command. To START A NEW CLAUDE CODE SESSION: op=run cmd='gnome-terminal -- claude' (or          your terminal of choice), then drive the terminal window with ghost_see / ghost_act /          ghost_key. Disabled entirely when GHOST_SHELL=off."
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        "Run terminal / PowerShell commands and drive persistent shells. THE way to run builds,          git, CLIs, scripts, or open apps from a command line, and to edit files on machines with          no file tools. op=run (default): one-shot - spawn shell, run 'cmd', return {output,          exit_code, timed_out}. shell=powershell (default) | pwsh | cmd. op=open: start a          persistent PowerShell whose variables/cwd/env survive across commands (returns an 'id').          op=send: run 'cmd' in session 'id' (state persists). op=read: drain the rest of a command          that hit its timeout (busy=true). op=list: show sessions. op=kill: end a session. Output          is merged stdout+stderr, tail-capped at 24000 chars. Emergency-stop (ghost_stop /          Ctrl+Alt+G) kills a runaway command. To START A NEW CLAUDE CODE SESSION: op=run          cmd='Start-Process wt -ArgumentList \"pwsh\",\"-NoExit\",\"-Command\",\"claude\"', then drive          the terminal window with ghost_see / ghost_act / ghost_key. Disabled entirely when          GHOST_SHELL=off."
+    }
+}
+
+/// Shells the running platform actually accepts, so the enum an agent sees
+/// matches what `build_oneshot` will take.
+fn shell_verb_enum() -> Vec<&'static str> {
+    #[cfg(target_os = "linux")]
+    {
+        vec!["bash", "sh", "zsh", "pwsh"]
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        vec!["powershell", "pwsh", "cmd"]
+    }
+}
+
+fn shell_verb_shell_description() -> &'static str {
+    #[cfg(target_os = "linux")]
+    {
+        "op=run shell (default bash). Persistent sessions are bash only."
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        "op=run shell (default powershell). Persistent sessions are PowerShell only."
+    }
+}
+
 fn foreground_info() -> Value {
     #[cfg(target_os = "windows")]
     {
@@ -2043,16 +2100,16 @@ fn lean_tools_schema() -> Value {
           "inputSchema": { "type": "object", "properties": {
               "op": { "type": "string", "enum": ["list","focus","state","launch"], "description": "Operation (default list)" },
               "name": { "type": "string", "description": "Window title (op=focus|state). Also accepted as alias for 'exe' on op=launch." },
-              "state": { "type": "string", "enum": ["maximize","minimize","restore","close"], "description": "op=state" },
+              "state": { "type": "string", "enum": ["maximize","minimize","restore","close"], "description": window_state_description() },
               "exe": { "type": "string", "description": "Executable path (op=launch)" }
           }}},
         // --- Shell control ---
         { "name": "ghost_shell",
-          "description": "Run terminal / PowerShell commands and drive persistent shells. THE way to run builds, git, CLIs, scripts, or open apps from a command line, and to edit files on machines with no file tools. op=run (default): one-shot — spawn shell, run 'cmd', return {output, exit_code, timed_out}. shell=powershell (default) | pwsh | cmd. op=open: start a persistent PowerShell whose variables/cwd/env survive across commands (returns an 'id'). op=send: run 'cmd' in session 'id' (state persists). op=read: drain the rest of a command that hit its timeout (busy=true). op=list: show sessions. op=kill: end a session. Output is merged stdout+stderr, tail-capped at 24000 chars. Emergency-stop (ghost_stop / Ctrl+Alt+G) kills a runaway command. To START A NEW CLAUDE CODE SESSION: op=run cmd='Start-Process wt -ArgumentList \"pwsh\",\"-NoExit\",\"-Command\",\"claude\"', then drive the terminal window with ghost_see / ghost_act / ghost_key. Disabled entirely when GHOST_SHELL=off.",
+          "description": shell_verb_description(),
           "inputSchema": { "type": "object", "properties": {
               "op": { "type": "string", "enum": ["run","open","send","read","list","kill"], "description": "Operation (default run)" },
               "cmd": { "type": "string", "description": "Command text (op=run|send)" },
-              "shell": { "type": "string", "enum": ["powershell","pwsh","cmd"], "description": "op=run shell (default powershell). Persistent sessions are PowerShell only." },
+              "shell": { "type": "string", "enum": shell_verb_enum(), "description": shell_verb_shell_description() },
               "id": { "type": "string", "description": "Session id (op=send|read|kill required; op=open optional custom name, else auto s1,s2,...)" },
               "cwd": { "type": "string", "description": "Working directory (op=run|open)" },
               "timeout_ms": { "type": "integer", "description": "Per-command timeout, default 30000, max 600000. On timeout op=run kills the process; op=send leaves it running (drain via op=read)." }
