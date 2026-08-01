@@ -94,15 +94,20 @@ jobs:
           echo "DISPLAY=$DISPLAY"
 
           echo "::group::ghost doctor"
-          # The first command a user runs. It must not panic, and it must report
-          # a healthy bus here - so its exit status is enforced, not ignored.
+          # The first command a user runs. Exercised with an application open so
+          # it takes the PASS path, not just the empty-desktop one, and its exit
+          # status is enforced rather than ignored.
+          zenity --forms --title=GhostDoctorProbe --text=probe --add-entry=Name &
+          ZEN=$!
+          sleep 3
           ./target/debug/ghost doctor
           echo "::endgroup::"
 
           echo "::group::CLI smoke"
-          ./target/debug/ghost list-windows
+          ./target/debug/ghost list-windows | grep -q GhostDoctorProbe
           ./target/debug/ghost screenshot --out /tmp/ghost-ci.png
           test -s /tmp/ghost-ci.png
+          kill $ZEN 2>/dev/null || true
           echo "::endgroup::"
 
           echo "::group::engine live suite"
@@ -158,7 +163,13 @@ jobs:
           sleep 3
           /usr/libexec/at-spi2-registryd &
           sleep 2
+          # Run doctor with an app open so it exercises the PASS path.
+          zenity --forms --title=GhostDoctorProbe --text=probe --add-entry=Name &
+          ZEN=$!
+          sleep 3
           ./target/debug/ghost doctor
+          ./target/debug/ghost list-windows | grep -q GhostDoctorProbe
+          kill $ZEN 2>/dev/null || true
           cargo test -p ghost-linux --test live_atspi -- --ignored --test-threads=1 --nocapture
           cargo test -p ghost-mcp --test live_mcp_linux -- --ignored --test-threads=1 --nocapture
           EOF
