@@ -16,8 +16,8 @@ use atspi::State;
 
 use super::element::{A11yElement, ElementDescriptor, UiaElement};
 use super::handles::{self, ObjAddr};
-use super::ops::{self, Snapshot};
-use super::roles::{is_interactive_role, role_id_to_name};
+use super::ops::{self, effective_role, Snapshot};
+use super::roles::is_interactive_role;
 use crate::bridge::{A11yBridge, Ctx};
 use crate::error::{CoreError, Result};
 
@@ -325,8 +325,12 @@ fn name_matches(snap: &Snapshot, want: &str) -> bool {
 }
 
 fn role_matches(snap: &Snapshot, want: &str) -> bool {
-    let actual = role_id_to_name(snap.role_id);
-    actual == want || role_alias_matches(want, actual)
+    let actual = effective_role(snap);
+    if actual == want || role_alias_matches(want, actual) {
+        return true;
+    }
+    // Last resort for `edit`: trust the interface over any role name at all.
+    want == "edit" && snap.has_editable_text
 }
 
 async fn list_windows_async(ctx: &Ctx) -> Result<Vec<WindowInfo>> {
@@ -435,11 +439,13 @@ async fn collect_descriptors(
         visited += 1;
 
         if let Ok(snap) = ops::snapshot(ctx, &addr).await {
-            let role = role_id_to_name(snap.role_id);
+            let role = effective_role(&snap);
             let rect = snap.rect.unwrap_or_default();
             // Only report things an agent could plausibly act on, and only when
-            // they have a real on-screen rectangle.
-            if is_interactive_role(role) && snap.showing && !rect.is_empty() {
+            // they have a real on-screen rectangle. Anything editable counts as
+            // actionable regardless of the role name its toolkit chose.
+            let actionable = is_interactive_role(role) || snap.has_editable_text;
+            if actionable && snap.showing && !rect.is_empty() {
                 out.push(ElementDescriptor {
                     name: snap.name.clone(),
                     role: role.to_string(),
@@ -478,7 +484,7 @@ async fn collect_text_async(
         visited += 1;
 
         if let Ok(snap) = ops::snapshot(ctx, &addr).await {
-            let role = role_id_to_name(snap.role_id);
+            let role = effective_role(&snap);
             let piece = if matches!(role, "edit" | "document") {
                 ops::read_text(ctx, &addr).await.unwrap_or_default()
             } else if !snap.name.is_empty() {
@@ -678,6 +684,32 @@ mod tests {
         assert!(role_matches(&doc, "edit"));
         assert!(role_matches(&doc, "document"));
         assert!(!role_matches(&doc, "button"));
+    }
+
+    #[test]
+    fn an_editable_field_reported_as_text_still_matches_edit() {
+        // Measured on GTK 3: `zenity --forms` exposes its entry as AT-SPI
+        // `text`, not `entry`. Matching on the role name alone missed it.
+        let mut s = snap("", 50020, true, true); // 50020 = text
+        s.has_editable_text = true;
+        assert!(role_matches(&s, "edit"));
+        assert_eq!(effective_role(&s), "edit");
+    }
+
+    #[test]
+    fn a_read_only_label_is_not_an_edit() {
+        // The interface is the discriminator: a plain label is also `text`, but
+        // it is not editable and must not be returned for role="edit".
+        let s = snap("Name:", 50020, true, true);
+        assert!(!role_matches(&s, "edit"));
+        assert_eq!(effective_role(&s), "text");
+    }
+
+    #[test]
+    fn normalisation_does_not_rewrite_other_roles() {
+        let mut s = snap("Save", 50000, true, true); // button
+        s.has_editable_text = true;
+        assert_eq!(effective_role(&s), "button", "only generic `text` is normalised");
     }
 
     #[test]

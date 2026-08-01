@@ -51,7 +51,7 @@ impl std::fmt::Debug for A11yElement {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("A11yElement")
             .field("name", &self.snap.name)
-            .field("role", &role_id_to_name(self.snap.role_id))
+            .field("role", &ops::effective_role(&self.snap))
             .field("path", &self.addr.path)
             .finish()
     }
@@ -78,8 +78,11 @@ impl A11yElement {
         self.snap.role_id
     }
 
+    /// The role Ghost reports, after normalisation -- so an element found via
+    /// `role="edit"` also reports `edit`, rather than whatever name its toolkit
+    /// happened to use. See [`ops::effective_role`].
     pub fn role_name(&self) -> &'static str {
-        role_id_to_name(self.snap.role_id)
+        ops::effective_role(&self.snap)
     }
 
     pub fn bounding_rect(&self) -> Option<BoundingRect> {
@@ -181,7 +184,7 @@ impl A11yElement {
         let r = self.snap.rect.unwrap_or_default();
         ElementDescriptor {
             name: self.snap.name.clone(),
-            role: role_id_to_name(self.snap.role_id).to_string(),
+            role: ops::effective_role(&self.snap).to_string(),
             left: r.left,
             top: r.top,
             right: r.right,

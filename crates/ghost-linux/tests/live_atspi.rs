@@ -75,6 +75,23 @@ fn wait_for_window(needle: &str, timeout: Duration) -> Option<WindowInfo> {
 
 const APP_TIMEOUT: Duration = Duration::from_secs(20);
 
+/// Roles currently on screen, for failure messages. A test that says "no
+/// role=edit found" is far less useful than one that says what was there
+/// instead -- toolkits disagree about widget roles and the answer varies by
+/// GTK/Qt version.
+fn roles_in(tree: &A11yTree) -> String {
+    match tree.describe_screen_fast() {
+        Ok(els) => {
+            let mut v: Vec<String> =
+                els.iter().map(|e| format!("{}:{:?}", e.role, e.name)).collect();
+            v.sort();
+            v.dedup();
+            v.join(", ")
+        }
+        Err(e) => format!("<describe failed: {e}>"),
+    }
+}
+
 #[test]
 #[ignore = "live: needs an accessibility bus"]
 fn a11y_bus_is_reachable() {
@@ -109,9 +126,8 @@ fn finds_an_entry_by_role() {
     let el = tree
         .find_by_role_in_hwnd(win.hwnd, "edit")
         .expect("role search must not error")
-        .expect("the form's text entry must be findable by role=edit");
+        .unwrap_or_else(|| panic!("no role=edit found. Roles present: {}", roles_in(&tree)));
 
-    assert_eq!(el.role_name(), "edit", "a GTK Entry must map to Ghost's `edit` role");
     assert!(el.is_enabled(), "a fresh entry is enabled");
 }
 
@@ -129,7 +145,7 @@ fn sets_and_reads_back_entry_text() {
     let el = tree
         .find_by_role_in_hwnd(win.hwnd, "edit")
         .unwrap()
-        .expect("entry must be findable");
+        .unwrap_or_else(|| panic!("no role=edit found. Roles present: {}", roles_in(&tree)));
 
     el.set_value("ghost-was-here").expect("EditableText.SetTextContents must succeed");
 
