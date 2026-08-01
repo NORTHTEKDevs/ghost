@@ -46,6 +46,7 @@ pub fn exit_code(checks: &[Check]) -> u8 {
 
 /// Windows 10 build 19041 (2004) is the floor: below it the UIA and DXGI
 /// behaviour Ghost relies on differs enough that we will not claim support.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn evaluate_windows_build(build: u32) -> Status {
     if build >= 19041 { Status::Pass } else { Status::Fail }
 }
@@ -53,6 +54,7 @@ pub fn evaluate_windows_build(build: u32) -> Status {
 /// A DPI scale other than 100% is fine, but only when the process is DPI-aware.
 /// If it is not, every screen coordinate is silently scaled and clicks land
 /// off-target - the classic "works on my machine" bug.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn evaluate_dpi(aware: bool, scale_percent: u32) -> Status {
     match (aware, scale_percent) {
         (true, _) => Status::Pass,
@@ -218,9 +220,119 @@ fn capture_probe() -> Result<usize, String> {
         .map_err(|e| e.to_string())
 }
 
-#[cfg(not(windows))]
+/// Interpreting how many accessible windows the desktop exposes.
+///
+/// Zero is the signature of accessibility being switched off: the bus answers,
+/// but no application is publishing a tree. That is the single most common
+/// Linux setup failure, so it gets a specific, actionable message rather than a
+/// generic "no windows".
+pub fn evaluate_a11y(window_count: usize) -> Status {
+    if window_count > 0 {
+        Status::Pass
+    } else {
+        Status::Fail
+    }
+}
+
+#[cfg(target_os = "linux")]
 pub fn run_checks() -> Vec<Check> {
-    vec![Check::new("platform", Status::Fail, "Ghost's engine is Windows-only")]
+    use crate::engine::session::{session_kind, SessionKind};
+
+    let mut out = Vec::new();
+
+    let kind = session_kind();
+    out.push(Check::new(
+        "session",
+        match kind {
+            SessionKind::X11 | SessionKind::Wayland => Status::Pass,
+            SessionKind::Headless => Status::Warn,
+        },
+        match kind {
+            SessionKind::X11 => "X11 - XTEST input and GetImage capture available".to_string(),
+            SessionKind::Wayland => {
+                "Wayland - input via RemoteDesktop portal, capture via Screenshot portal".to_string()
+            }
+            SessionKind::Headless => {
+                "no display session detected (XDG_SESSION_TYPE unset). AT-SPI may still work; \
+                 synthetic input needs GHOST_INPUT=uinput"
+                    .to_string()
+            }
+        },
+    ));
+
+    // The accessibility bus. Failing here means every element operation fails.
+    match crate::engine::a11y::tree::list_windows() {
+        Ok(windows) => {
+            let n = windows.len();
+            out.push(Check::new(
+                "at-spi bus",
+                Status::Pass,
+                format!("connected; {n} window(s) visible"),
+            ));
+            out.push(Check::new(
+                "accessibility",
+                evaluate_a11y(n),
+                if n > 0 {
+                    let sample: Vec<&str> =
+                        windows.iter().take(3).map(|w| w.name.as_str()).collect();
+                    format!("applications are exposing trees (e.g. {})", sample.join(", "))
+                } else {
+                    "the bus answers but no application exposes a tree. Enable it with: \
+                     gsettings set org.gnome.desktop.interface toolkit-accessibility true \
+                     -- then RESTART the applications that were already running"
+                        .to_string()
+                },
+            ));
+        }
+        Err(e) => out.push(Check::new(
+            "at-spi bus",
+            Status::Fail,
+            format!(
+                "{e}. Install at-spi2-core and enable accessibility: \
+                 gsettings set org.gnome.desktop.interface toolkit-accessibility true"
+            ),
+        )),
+    }
+
+    // Synthetic input is a fallback, not the primary path, so a failure here is
+    // a warning: AT-SPI actions still drive most applications.
+    match crate::engine::input::backend() {
+        Ok(b) => out.push(Check::new(
+            "input backend",
+            Status::Pass,
+            format!("{} (override with GHOST_INPUT=x11|portal|uinput)", b.name()),
+        )),
+        Err(e) => out.push(Check::new(
+            "input backend",
+            Status::Warn,
+            format!("{e}. AT-SPI actions still work; only coordinate input is affected"),
+        )),
+    }
+
+    match capture_probe() {
+        Ok(bytes) => out.push(Check::new("capture", Status::Pass, format!("{bytes} bytes"))),
+        Err(e) => out.push(Check::new(
+            "capture",
+            Status::Warn,
+            format!("{e}. On Wayland the Screenshot portal needs xdg-desktop-portal-gnome"),
+        )),
+    }
+
+    out
+}
+
+#[cfg(target_os = "linux")]
+fn capture_probe() -> Result<usize, String> {
+    crate::engine::capture::capture_screen().map(|b| b.len()).map_err(|e| e.to_string())
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+pub fn run_checks() -> Vec<Check> {
+    vec![Check::new(
+        "platform",
+        Status::Fail,
+        "Ghost's engine supports Windows and Linux; macOS is not implemented",
+    )]
 }
 
 #[cfg(test)]
