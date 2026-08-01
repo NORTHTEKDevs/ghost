@@ -174,17 +174,32 @@ fn shell_verb_advertises_linux_shells() {
     let mut mcp = McpServer::start();
     mcp.initialize();
 
-    let text = mcp.request("tools/list", json!({})).to_string();
-    let shell_decl = text
-        .split("ghost_shell")
-        .nth(1)
-        .expect("ghost_shell must be present");
-    let window = &shell_decl[..shell_decl.len().min(2500)];
+    // Parse rather than string-search: verb descriptions cross-reference each
+    // other, so scanning for the name lands in some other tool's prose.
+    let resp = mcp.request("tools/list", json!({}));
+    let tools = resp["result"]["tools"].as_array().expect("tools/list must return an array");
+    let shell = tools
+        .iter()
+        .find(|t| t["name"] == "ghost_shell")
+        .expect("ghost_shell must be advertised");
 
-    assert!(window.contains("bash"), "the shell enum must offer bash on Linux");
+    let shells: Vec<&str> = shell["inputSchema"]["properties"]["shell"]["enum"]
+        .as_array()
+        .expect("the shell property must declare an enum")
+        .iter()
+        .filter_map(|v| v.as_str())
+        .collect();
+
+    assert!(shells.contains(&"bash"), "the shell enum must offer bash on Linux, got {shells:?}");
     assert!(
-        !window.contains("powershell"),
-        "the shell enum must not offer powershell on Linux"
+        !shells.iter().any(|s| s.contains("powershell")),
+        "the shell enum must not offer powershell on Linux, got {shells:?}"
+    );
+
+    let desc = shell["description"].as_str().unwrap_or_default();
+    assert!(
+        !desc.contains("PowerShell"),
+        "the Linux description must not tell an agent to write PowerShell"
     );
 }
 
