@@ -180,6 +180,46 @@ fn finds_a_button_by_name() {
 
 #[test]
 #[ignore = "live: needs an accessibility bus"]
+fn invoking_a_button_through_atspi_has_a_real_effect() {
+    // The other half of the wedge. `sets_and_reads_back_entry_text` proves the
+    // write path; this proves the *action* path -- Action.DoAction, with no
+    // synthetic click and no pointer movement.
+    //
+    // The effect is observable rather than assumed: dismissing the dialog ends
+    // the process, so the window must disappear from the accessibility tree. A
+    // test that only asserted "do_action returned Ok" would pass even if the
+    // application ignored it entirely.
+    let _app = launch_gtk_app("GhostInvokeProbe");
+    let win = wait_for_window("GhostInvokeProbe", APP_TIMEOUT).expect("window must appear");
+
+    let tree = A11yTree::new().unwrap();
+    let cancel = tree
+        .find_by_name_in_hwnd(win.hwnd, "Cancel")
+        .unwrap()
+        .unwrap_or_else(|| panic!("no Cancel button. Roles present: {}", roles_in(&tree)));
+
+    cancel.invoke().expect("Action.DoAction must succeed on a GTK button");
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut still_there = true;
+    while Instant::now() < deadline {
+        let present = list_windows()
+            .map(|ws| ws.iter().any(|w| w.name.contains("GhostInvokeProbe")))
+            .unwrap_or(false);
+        if !present {
+            still_there = false;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    assert!(
+        !still_there,
+        "invoking Cancel must actually dismiss the dialog, not just return Ok"
+    );
+}
+
+#[test]
+#[ignore = "live: needs an accessibility bus"]
 fn describe_screen_returns_actionable_elements() {
     let _app = launch_gtk_app("GhostDescribeProbe");
     let win = wait_for_window("GhostDescribeProbe", APP_TIMEOUT).expect("window must appear");
