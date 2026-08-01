@@ -16,7 +16,7 @@ use atspi::proxy::value::ValueProxy;
 use atspi::{CoordType, Interface, Role, ScrollType, State};
 
 use super::handles::ObjAddr;
-use super::roles::atspi_role_to_id;
+use super::roles::{atspi_role_to_id, role_id_to_name};
 use crate::bridge::Ctx;
 use crate::error::{CoreError, Result};
 
@@ -165,6 +165,26 @@ pub async fn snapshot(ctx: &Ctx, addr: &ObjAddr) -> Result<Snapshot> {
         has_action: ifaces.contains(Interface::Action),
         has_editable_text: ifaces.contains(Interface::EditableText),
     })
+}
+
+/// The role Ghost reports for an element.
+///
+/// Toolkits disagree about what a single-line text field is: depending on the
+/// GTK/Qt version an editable entry reports AT-SPI `entry`, `text`, or a plain
+/// panel-ish role. Measured on GTK 3 under CI, `zenity --forms` exposes its
+/// entry as `text`, which would otherwise be invisible to `role="edit"`.
+///
+/// The reliable discriminator is not the role name but the **EditableText
+/// interface**: an object that implements it is, by definition, something an
+/// agent can type into. So anything editable that would otherwise be reported
+/// as generic `text` is normalised to `edit` -- the same name the Windows engine
+/// uses for the same thing, which is what keeps the MCP surface consistent.
+pub fn effective_role(snap: &Snapshot) -> &'static str {
+    let actual = role_id_to_name(snap.role_id);
+    if snap.has_editable_text && actual == "text" {
+        return "edit";
+    }
+    actual
 }
 
 /// Invoke the element's best action. This is Ghost's background dispatch on
