@@ -15,7 +15,7 @@ use ghost_ground::engine::{
 use ghost_ground::types::{Grounded, Target, Tier};
 
 use ghost_cache::{LocatorCache, locator_cache::LocatorKey};
-use ghost_core::uia::tree::UiaTree;
+use crate::engine::uia::tree::UiaTree;
 
 // ---------------------------------------------------------------------------
 // CacheTier
@@ -72,12 +72,12 @@ impl<'s> GroundingTier for CacheTier<'s> {
             let matches = match target {
                 Target::Name(n) => el.name().to_lowercase() == n.to_lowercase(),
                 Target::Role(r) => {
-                    let role = ghost_core::uia::element::role_id_to_name(el.control_type());
+                    let role = crate::engine::uia::element::role_id_to_name(el.control_type());
                     // Same alias acceptance as the locator-cache validation in
                     // session.rs - otherwise this tier can never hit for WinUI
                     // text surfaces, which report "document" for role=edit.
                     role == r.as_str()
-                        || ghost_core::uia::tree::role_alias_matches(r.as_str(), role)
+                        || crate::engine::uia::tree::role_alias_matches(r.as_str(), role)
                 }
                 _ => false,
             };
@@ -299,7 +299,7 @@ impl<'s> ghost_ground::engine::GroundingTier for YoloTier<'s> {
             // Capture foreground window region.
             let rect = self.session.foreground_window_rect();
             let rgba_result = tokio::task::spawn_blocking(move || {
-                ghost_core::capture::capture_region_raw(rect)
+                crate::engine::capture::capture_region_raw(rect)
             })
             .await;
 
@@ -331,14 +331,11 @@ impl<'s> ghost_ground::engine::GroundingTier for YoloTier<'s> {
 }
 
 // ---------------------------------------------------------------------------
-// Helper: get current foreground HWND as isize (0 = none)
+// Helper: handle of the current foreground/active window (0 = none)
 // ---------------------------------------------------------------------------
 
 pub fn foreground_hwnd() -> isize {
-    unsafe {
-        let h = windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow();
-        if h.is_invalid() { 0 } else { h.0 as isize }
-    }
+    crate::engine::system::foreground_window()
 }
 
 // ---------------------------------------------------------------------------

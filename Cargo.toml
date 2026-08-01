@@ -9,6 +9,7 @@ members = [
     "crates/ghost-http",
     "crates/ghost-ground",
     "crates/ghost-platform",
+    "crates/ghost-linux",
 ]
 resolver = "2"
 
