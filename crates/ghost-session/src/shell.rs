@@ -84,6 +84,7 @@ fn b64_encode(input: &[u8]) -> String {
 }
 
 /// PowerShell `-EncodedCommand` payload: base64 of the UTF-16LE script bytes.
+/// Used by the `pwsh` one-shot arm, which is reachable on Linux too.
 fn ps_encoded_command(script: &str) -> String {
     let mut utf16le = Vec::with_capacity(script.len() * 2);
     for u in script.encode_utf16() {
@@ -94,6 +95,7 @@ fn ps_encoded_command(script: &str) -> String {
 
 /// The persistent-session driver loop. Reads framed commands, runs them,
 /// prints a nonce-stamped sentinel after each.
+#[cfg(not(target_os = "linux"))]
 const DRIVER_SCRIPT: &str = r#"
 $ErrorActionPreference='Continue'
 [Console]::OutputEncoding=[System.Text.Encoding]::UTF8
@@ -113,6 +115,37 @@ while($true){
   [Console]::Out.Flush()
 }
 "#;
+
+/// The same persistent-session protocol as `DRIVER_SCRIPT`, for POSIX shells.
+///
+/// Reads `<nonce> <base64-command>` lines, evaluates the command with stdout and
+/// stderr merged, then writes the sentinel plus the exit code. Base64 framing is
+/// what makes this injection-safe: the command text never has to survive shell
+/// quoting on the way in.
+#[cfg(target_os = "linux")]
+const BASH_DRIVER_SCRIPT: &str = r#"
+while IFS= read -r line; do
+  [ -z "$line" ] && continue
+  nonce="${line%% *}"
+  b64="${line#* }"
+  cmd="$(printf '%s' "$b64" | base64 -d 2>/dev/null)"
+  eval "$cmd" 2>&1
+  code=$?
+  echo "__GHOST_DONE_${nonce}__ $code"
+done
+"#;
+
+/// The shell used when the caller does not name one.
+pub(crate) fn default_shell() -> &'static str {
+    #[cfg(target_os = "linux")]
+    {
+        "bash"
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        "powershell"
+    }
+}
 
 fn clamp_timeout(ms: Option<u64>) -> Duration {
     Duration::from_millis(ms.unwrap_or(DEFAULT_TIMEOUT_MS).min(MAX_TIMEOUT_MS))
@@ -156,7 +189,7 @@ impl GhostSession {
             .get("cmd")
             .and_then(|v| v.as_str())
             .ok_or_else(|| GhostError::Config("ghost_shell op=run: missing 'cmd'".into()))?;
-        let shell = args.get("shell").and_then(|v| v.as_str()).unwrap_or("powershell");
+        let shell = args.get("shell").and_then(|v| v.as_str()).unwrap_or(default_shell());
         let cwd = args.get("cwd").and_then(|v| v.as_str());
         let dur = clamp_timeout(args.get("timeout_ms").and_then(|v| v.as_u64()));
 
@@ -236,10 +269,19 @@ impl GhostSession {
             )));
         }
 
-        let mut command = Command::new("powershell");
-        command
-            .args(["-NoProfile", "-NoLogo", "-NonInteractive", "-EncodedCommand"])
-            .arg(ps_encoded_command(DRIVER_SCRIPT));
+        #[cfg(target_os = "linux")]
+        let mut command = {
+            let mut c = Command::new("bash");
+            c.args(["--noprofile", "--norc", "-c", BASH_DRIVER_SCRIPT]);
+            c
+        };
+        #[cfg(not(target_os = "linux"))]
+        let mut command = {
+            let mut c = Command::new("powershell");
+            c.args(["-NoProfile", "-NoLogo", "-NonInteractive", "-EncodedCommand"])
+                .arg(ps_encoded_command(DRIVER_SCRIPT));
+            c
+        };
         if let Some(dir) = cwd {
             command.current_dir(dir);
         }
@@ -435,7 +477,7 @@ async fn read_until_sentinel(sess: &mut ShellSession, nonce: u64, dur: Duration)
     let mut output = String::new();
 
     loop {
-        if ghost_core::input::hotkey::is_stopped() {
+        if crate::engine::input::hotkey::is_stopped() {
             return ReadOutcome::Stopped;
         }
         let now = Instant::now();
@@ -462,7 +504,7 @@ async fn read_until_sentinel(sess: &mut ShellSession, nonce: u64, dur: Duration)
 /// Resolve on the next stop-flag rising edge. Polls the atomic on POLL_MS.
 async fn wait_for_stop() {
     loop {
-        if ghost_core::input::hotkey::is_stopped() {
+        if crate::engine::input::hotkey::is_stopped() {
             return;
         }
         tokio::time::sleep(Duration::from_millis(POLL_MS)).await;
@@ -510,7 +552,15 @@ fn xml_unescape(s: &str) -> String {
 
 /// Build a one-shot command for the requested shell.
 fn build_oneshot(shell: &str, cmd: &str) -> Result<Command> {
+    #[allow(unused_mut)]
     let mut c = match shell {
+        // POSIX shells. `-c` takes the script as one argument, so no quoting of
+        // the user's command is needed or performed.
+        "bash" | "sh" | "zsh" => {
+            let mut c = Command::new(shell);
+            c.args(["-c", cmd]);
+            c
+        }
         "powershell" => {
             let mut c = Command::new("powershell");
             c.args(["-NoProfile", "-NoLogo", "-NonInteractive", "-EncodedCommand"])
@@ -529,8 +579,13 @@ fn build_oneshot(shell: &str, cmd: &str) -> Result<Command> {
             c
         }
         other => {
+            let supported = if cfg!(target_os = "linux") {
+                "bash|sh|zsh|pwsh"
+            } else {
+                "powershell|pwsh|cmd"
+            };
             return Err(GhostError::Config(format!(
-                "ghost_shell: unknown shell '{other}'; use powershell|pwsh|cmd"
+                "ghost_shell: unknown shell '{other}'; use {supported}"
             )))
         }
     };
