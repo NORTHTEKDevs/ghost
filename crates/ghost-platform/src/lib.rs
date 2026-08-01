@@ -2,19 +2,23 @@
 //!
 //! Ghost ships as three versions that share one interface:
 //! - **Windows** — full, verified (the engine in `ghost-core`/`ghost-session`).
+//! - **Linux** — functional (`ghost-linux`): AT-SPI2 over D-Bus, XTEST /
+//!   RemoteDesktop portal / uinput, X11 `GetImage` / Screenshot portal. Its
+//!   X11 + AT-SPI2 paths are verified by a live CI suite against a real GTK
+//!   application; the Wayland portal paths are implemented but not yet
+//!   verified, and are not claimed.
 //! - **macOS** — scaffolded; native backend built on Accessibility + CGEvent +
 //!   ScreenCaptureKit (to be implemented and verified on a Mac).
-//! - **Linux** — scaffolded; native backend built on AT-SPI (D-Bus) + XTest/libei
-//!   + X11/portal capture (to be implemented and verified on Linux).
 //!
 //! This crate defines the shared vocabulary (types), the [`Feature`]/[`Capabilities`]
 //! model that says what Ghost can do on each OS *today*, and the [`Backend`] trait
 //! each OS implements. It is pure Rust with no platform FFI, so it compiles for
 //! every target; the OS-specific engines live behind `cfg` and target-gated deps.
 //!
-//! Honesty: only the Windows backend is functional and verified. macOS/Linux
-//! backends report `is_functional() == false` until their native code is built and
-//! tested on-device — see `docs/cross-platform.md` for the implementation map.
+//! Honesty: a backend reports `is_functional() == true` only after its native
+//! code has been exercised on that OS, and `supported` lists only the features
+//! something actually verified. macOS reports false. See
+//! `docs/cross-platform.md` for the implementation map.
 
 use serde::{Deserialize, Serialize};
 
@@ -133,8 +137,8 @@ pub fn current() -> Box<dyn Backend> {
 
 
 /// Declared capabilities per platform — the single source of truth for the
-/// three-version status. Windows is full + functional; macOS/Linux are scaffolds
-/// (functional = false) until their native backends are built and verified.
+/// three-version status. A platform lists a `Feature` only when something has
+/// actually verified it there, which is why Linux claims six of nine.
 pub fn capabilities_for(platform: Platform) -> Capabilities {
     match platform {
         Platform::Windows => Capabilities {
@@ -149,17 +153,32 @@ pub fn capabilities_for(platform: Platform) -> Capabilities {
             supported: vec![],
             status: "scaffold — native backend (Accessibility/AXUIElement + CGEvent + ScreenCaptureKit) not yet implemented/verified",
         },
-        // `ghost-linux` is fully implemented and wired in: ghost-session,
-        // ghost-mcp, ghost-cli and ghost-http all build for
-        // x86_64-unknown-linux-gnu, and real ELF binaries link. What has NOT
-        // happened is a run against a live desktop. Ghost's standing rule is
-        // that `functional` flips only after on-device verification, so it stays
-        // false until the checks in docs/linux-fedora.md pass on real hardware.
+        // Verified on real Linux, not asserted: the live AT-SPI suite
+        // (crates/ghost-linux/tests/live_atspi.rs) runs in CI against a real GTK
+        // application under Xvfb + D-Bus + at-spi-bus-launcher, and passes.
+        // It proves both halves of the wedge - text written through
+        // EditableText and read back from the application, and Action.DoAction
+        // dismissing a dialog with an observable effect - plus window
+        // enumeration, role/name lookup, describe_screen, capture and XTEST.
+        //
+        // The listed features are exactly the ones that suite exercises.
+        // KeyInput, EditShortcuts and VisionGrounding are implemented but are
+        // NOT claimed, because nothing has verified them end to end on Linux.
+        // The Wayland paths (RemoteDesktop portal input, Screenshot portal
+        // capture) are likewise unverified - CI runs X11. See
+        // docs/linux-fedora.md.
         Platform::Linux => Capabilities {
             platform,
-            functional: false,
-            supported: vec![],
-            status: "implemented and integrated (ghost-linux: AT-SPI2 + XTEST/portal/uinput + X11/portal capture); all binaries cross-build for linux-gnu; awaiting on-device verification",
+            functional: true,
+            supported: vec![
+                Feature::ElementDiscovery,
+                Feature::Act,
+                Feature::PerActionVerify,
+                Feature::BackgroundDispatch,
+                Feature::StructuredSnapshot,
+                Feature::Screenshot,
+            ],
+            status: "functional and verified on X11 + AT-SPI2 by the live CI suite (ghost-linux); Wayland portal input/capture implemented but not yet verified on hardware",
         },
     }
 }
@@ -193,10 +212,38 @@ mod tests {
     }
 
     #[test]
-    fn scaffold_platforms_report_not_functional() {
-        for p in [Platform::MacOS, Platform::Linux] {
-            let caps = capabilities_for(p);
-            assert!(!caps.functional, "{:?} must not claim functional yet", p);
-        }
+    fn macos_is_still_a_scaffold() {
+        // No Mac has been in the loop, so nothing may be claimed for it.
+        let caps = capabilities_for(Platform::MacOS);
+        assert!(!caps.functional);
+        assert!(caps.supported.is_empty());
+    }
+
+    #[test]
+    fn linux_claims_only_what_the_live_suite_verifies() {
+        // The live AT-SPI suite proves discovery, act, verify, background
+        // dispatch, snapshot and capture on X11. Key input, edit shortcuts and
+        // vision grounding are implemented but unverified there, so claiming
+        // them would be exactly the kind of unearned "it works" this model
+        // exists to prevent.
+        let caps = capabilities_for(Platform::Linux);
+        assert!(caps.functional);
+        assert!(caps.supports(Feature::ElementDiscovery));
+        assert!(caps.supports(Feature::Act));
+        assert!(caps.supports(Feature::PerActionVerify));
+        assert!(caps.supports(Feature::BackgroundDispatch));
+        assert!(caps.supports(Feature::StructuredSnapshot));
+        assert!(caps.supports(Feature::Screenshot));
+
+        assert!(!caps.supports(Feature::KeyInput), "not verified end to end on Linux");
+        assert!(!caps.supports(Feature::EditShortcuts), "not verified end to end on Linux");
+        assert!(!caps.supports(Feature::VisionGrounding), "not verified end to end on Linux");
+    }
+
+    #[test]
+    fn windows_remains_the_most_capable_platform() {
+        let win = capabilities_for(Platform::Windows);
+        let lin = capabilities_for(Platform::Linux);
+        assert!(win.supported.len() > lin.supported.len());
     }
 }

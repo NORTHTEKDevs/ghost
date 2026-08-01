@@ -1,31 +1,42 @@
-//! Linux backend — SCAFFOLD (not yet functional).
+//! Linux backend — implemented.
 //!
-//! Compiles as an inert placeholder so the three-version architecture is real and
-//! `ghost-platform` builds on Linux. The native engine must be implemented and
-//! VERIFIED on a Linux desktop before flipping `functional` to true in
-//! `capabilities_for(Platform::Linux)`.
+//! The engine lives in the `ghost-linux` crate; this is the `ghost-platform`
+//! descriptor for it. `ghost-session` and `ghost-mcp` reach the engine through
+//! `ghost_session::engine`, a `cfg` alias that resolves to `ghost-core` on
+//! Windows and `ghost-linux` here, so the shared layers are identical on both.
 //!
-//! # Implementation map (what each capability needs on Linux)
-//! - Element discovery / roles / states: **AT-SPI2** over D-Bus (the `atspi`
-//!   crate). Roles via `Accessible.GetRole`, states (enabled/sensitive) via
-//!   `Accessible.GetState`, geometry via `Component.GetExtents`. Requires the
-//!   accessibility bus to be enabled and toolkits (GTK/Qt) exposing a11y.
-//! - Act (click/press): AT-SPI `Action.DoAction` (e.g. the "click"/"press"
-//!   action). For value fields, `EditableText.SetTextContents` (background-safe).
-//! - Background dispatch (no focus steal): AT-SPI actions generally don't require
-//!   raising the window, so this may work well — but MEASURE it. There is no exact
-//!   analogue of Windows posted messages; some apps still raise on action.
-//! - Screenshot / window capture: **X11** `XGetImage` / XShm, or on **Wayland**
-//!   the `org.freedesktop.portal.Screenshot` XDG portal (Wayland forbids raw
-//!   screen reads — capture is portal-gated and may prompt).
-//! - Key/mouse input: **XTest** (`XTestFakeKeyEvent`) on X11; on Wayland use
-//!   `libei` / the RemoteDesktop portal (`uinput` as a fallback with permissions).
-//! - Vision grounding: reuse `ghost-ground` (already OS-agnostic).
+//! # What the engine does
+//! - **Element discovery / roles / states:** AT-SPI2 over D-Bus (`atspi`).
+//!   `Accessible.GetRole`, `GetState`, `Component.GetExtents`. AT-SPI roles are
+//!   mapped onto the same numeric id space the Windows engine uses, so role
+//!   names cannot drift between platforms. An editable field is identified by
+//!   the `EditableText` **interface** rather than its role name, because
+//!   toolkits disagree about whether an entry is `entry` or `text`.
+//! - **Act:** `Action.DoAction`, with the action chosen by name rather than
+//!   assuming index 0. Text goes through `EditableText.SetTextContents`, numeric
+//!   widgets through `Value.SetCurrentValue`.
+//! - **Background dispatch:** this is the notable result. AT-SPI actions make
+//!   the application perform the operation through its own toolkit, so there is
+//!   no pointer to move and no window to raise — a *cleaner* guarantee than the
+//!   posted window messages Windows relies on, and identical under X11 and
+//!   Wayland. Measured, not assumed: the live suite writes text and invokes a
+//!   button with observable effects and no synthetic input.
+//! - **Capture:** X11 `GetImage`; on Wayland the one-shot `Screenshot` portal.
+//!   ScreenCast + PipeWire was deliberately avoided — Ghost captures stills, not
+//!   video, so it would add C linkage and DMA-BUF handling for nothing.
+//! - **Synthetic input (fallback only):** XTEST on X11, the RemoteDesktop portal
+//!   on Wayland (with a persisted, rotated restore token so consent is asked
+//!   once), and `uinput` for unattended machines via `GHOST_INPUT=uinput`.
 //!
-//! Wayland vs X11 is the key fork: input injection and capture differ sharply.
-//! Suggested crates: `atspi`, `x11rb` / `xcb`, `ashpd` (XDG portals), `input`/
-//! `libei` bindings. Build+test target: `x86_64-unknown-linux-gnu` on a desktop
-//! session. See `docs/cross-platform.md`.
+//! # What is not claimed
+//! `KeyInput`, `EditShortcuts` and `VisionGrounding` are implemented but absent
+//! from `capabilities_for(Platform::Linux).supported`, because nothing has
+//! verified them end to end on Linux. The Wayland portal paths are likewise
+//! unverified — CI runs X11. See `docs/linux-fedora.md` for the on-device
+//! checklist that signs them off.
+//!
+//! The whole engine is pure Rust (`atspi`/`zbus`, `x11rb`, `ashpd`, `evdev`), so
+//! it needs no `-devel` packages and cross-compiles from other hosts.
 
 use crate::{capabilities_for, Backend, Capabilities, Platform};
 
@@ -36,6 +47,6 @@ impl Backend for LinuxBackend {
         Platform::Linux
     }
     fn capabilities(&self) -> Capabilities {
-        capabilities_for(Platform::Linux) // functional: false until built on-device
+        capabilities_for(Platform::Linux)
     }
 }
