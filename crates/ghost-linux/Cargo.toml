@@ -1,0 +1,52 @@
+[package]
+name = "ghost-linux"
+version = "0.16.0"
+edition = "2021"
+license = "MIT"
+description = "Ghost's Linux automation engine: AT-SPI2 accessibility, X11/Wayland input, and screen capture"
+keywords = ["automation", "linux", "atspi", "wayland", "accessibility"]
+categories = ["os::linux-apis"]
+
+# The platform-independent modules (roles, handles, keysyms, verification)
+# compile on every host so their parity tests run in Windows CI too. They need
+# only this.
+[dependencies]
+thiserror = { workspace = true }
+serde = { workspace = true }
+
+# Everything that talks to a Linux API is target-gated, so on Windows/macOS this
+# crate builds almost instantly and pulls none of the Linux dependency tree.
+[target.'cfg(target_os = "linux")'.dependencies]
+tokio = { workspace = true }
+tracing = { workspace = true }
+image = { workspace = true }
+serde_json = { workspace = true }
+
+# AT-SPI2 over D-Bus. Pure Rust (zbus) - no at-spi2-core-devel needed to build.
+atspi = { version = "0.30", features = ["tokio"] }
+zbus = { version = "5", default-features = false, features = ["tokio"] }
+
+# XDG desktop portals: RemoteDesktop (input) + Screenshot (capture) on Wayland.
+# default-features = false avoids pulling GTK/GDK; each portal is its own feature.
+# `remote_desktop` imports `screencast::Stream`, so screencast is mandatory, not
+# optional. It is also genuinely needed: NotifyPointerMotionAbsolute addresses a
+# ScreenCast stream, so absolute pointer coordinates on Wayland are impossible
+# without one. Ghost creates the stream for its node id only and never connects
+# it to PipeWire, which is what keeps this crate free of C linkage.
+ashpd = { version = "0.13", default-features = false, features = [
+    "tokio",
+    "remote_desktop",
+    "screencast",
+    "screenshot",
+] }
+
+# X11: XTEST synthetic input + GetImage capture. Pure Rust, no libX11 linkage.
+x11rb = { version = "0.14", features = ["xtest"] }
+
+# Clipboard on both X11 and Wayland.
+arboard = { version = "3.6", default-features = false, features = [
+    "wayland-data-control",
+] }
+
+# uinput fallback for unattended/CI boxes (GHOST_INPUT=uinput).
+evdev = "0.13"
