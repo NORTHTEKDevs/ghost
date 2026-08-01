@@ -131,6 +131,39 @@ pub fn current() -> Box<dyn Backend> {
     { compile_error!("Ghost supports Windows, macOS, and Linux only") }
 }
 
+
+/// Declared capabilities per platform — the single source of truth for the
+/// three-version status. Windows is full + functional; macOS/Linux are scaffolds
+/// (functional = false) until their native backends are built and verified.
+pub fn capabilities_for(platform: Platform) -> Capabilities {
+    match platform {
+        Platform::Windows => Capabilities {
+            platform,
+            functional: true,
+            supported: all_features(),
+            status: "full and verified (ghost-core/ghost-session over Win32 UIA + window messages)",
+        },
+        Platform::MacOS => Capabilities {
+            platform,
+            functional: false,
+            supported: vec![],
+            status: "scaffold — native backend (Accessibility/AXUIElement + CGEvent + ScreenCaptureKit) not yet implemented/verified",
+        },
+        // `ghost-linux` is fully implemented and wired in: ghost-session,
+        // ghost-mcp, ghost-cli and ghost-http all build for
+        // x86_64-unknown-linux-gnu, and real ELF binaries link. What has NOT
+        // happened is a run against a live desktop. Ghost's standing rule is
+        // that `functional` flips only after on-device verification, so it stays
+        // false until the checks in docs/linux-fedora.md pass on real hardware.
+        Platform::Linux => Capabilities {
+            platform,
+            functional: false,
+            supported: vec![],
+            status: "implemented and integrated (ghost-linux: AT-SPI2 + XTEST/portal/uinput + X11/portal capture); all binaries cross-build for linux-gnu; awaiting on-device verification",
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -165,37 +198,5 @@ mod tests {
             let caps = capabilities_for(p);
             assert!(!caps.functional, "{:?} must not claim functional yet", p);
         }
-    }
-}
-
-/// Declared capabilities per platform — the single source of truth for the
-/// three-version status. Windows is full + functional; macOS/Linux are scaffolds
-/// (functional = false) until their native backends are built and verified.
-pub fn capabilities_for(platform: Platform) -> Capabilities {
-    match platform {
-        Platform::Windows => Capabilities {
-            platform,
-            functional: true,
-            supported: all_features(),
-            status: "full and verified (ghost-core/ghost-session over Win32 UIA + window messages)",
-        },
-        Platform::MacOS => Capabilities {
-            platform,
-            functional: false,
-            supported: vec![],
-            status: "scaffold — native backend (Accessibility/AXUIElement + CGEvent + ScreenCaptureKit) not yet implemented/verified",
-        },
-        // `ghost-linux` is fully implemented and wired in: ghost-session,
-        // ghost-mcp, ghost-cli and ghost-http all build for
-        // x86_64-unknown-linux-gnu, and real ELF binaries link. What has NOT
-        // happened is a run against a live desktop. Ghost's standing rule is
-        // that `functional` flips only after on-device verification, so it stays
-        // false until the checks in docs/linux-fedora.md pass on real hardware.
-        Platform::Linux => Capabilities {
-            platform,
-            functional: false,
-            supported: vec![],
-            status: "implemented and integrated (ghost-linux: AT-SPI2 + XTEST/portal/uinput + X11/portal capture); all binaries cross-build for linux-gnu; awaiting on-device verification",
-        },
     }
 }

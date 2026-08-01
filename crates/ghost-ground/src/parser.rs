@@ -309,7 +309,7 @@ mod tests {
     }
 
     fn not_found(text: &str) -> bool {
-        parse_vlm_response(text).map_or(false, |r| r.not_found)
+        parse_vlm_response(text).is_some_and(|r| r.not_found)
     }
 
     // --- JSON formats ---

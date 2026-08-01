@@ -15,7 +15,7 @@ pub fn get_clipboard() -> Result<String, CoreError> {
             .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "OpenClipboard" })?;
         let result = match GetClipboardData(CF_UNICODETEXT) {
             Ok(handle) => {
-                let hglob = HGLOBAL(handle.0 as *mut std::ffi::c_void);
+                let hglob = HGLOBAL(handle.0);
                 if hglob.0.is_null() {
                     String::new()
                 } else {

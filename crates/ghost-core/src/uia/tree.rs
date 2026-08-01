@@ -372,6 +372,7 @@ impl UiaTree {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     unsafe fn collect_matching(
         &self,
         element: &IUIAutomationElement,
@@ -563,6 +564,9 @@ pub enum WindowState {
 }
 
 impl WindowState {
+    // Inherent `from_str`, not the FromStr trait: the Linux engine mirrors this
+    // exact name so shared code calls it identically on both platforms.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "maximize" => Some(Self::Maximize),

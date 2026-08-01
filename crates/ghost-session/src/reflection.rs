@@ -50,6 +50,9 @@ impl ReflectionBuffer {
     }
 
     /// Create a buffer with [`Self::DEFAULT_CAPACITY`].
+    // Inherent `default` predates the Default impl below and is part of the
+    // crate's existing API; both exist and agree.
+    #[allow(clippy::should_implement_trait)]
     pub fn default() -> Self {
         Self::new(Self::DEFAULT_CAPACITY)
     }

@@ -45,11 +45,11 @@ pub fn downsample_grid(pixels: &[u8], width: usize, height: usize, dim: usize) -
                     }
                 }
             }
-            if n > 0 {
-                let dst = (by * dim + bx) * 4;
-                for c in 0..4 {
-                    out[dst + c] = (rgba[c] / n) as u8;
-                }
+            let dst = (by * dim + bx) * 4;
+            for c in 0..4 {
+                // checked_div keeps the empty-cell case explicit: a block with
+                // no sampled pixels averages to 0, it does not divide by zero.
+                out[dst + c] = rgba[c].checked_div(n).unwrap_or(0) as u8;
             }
         }
     }

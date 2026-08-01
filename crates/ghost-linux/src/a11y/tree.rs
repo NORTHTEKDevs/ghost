@@ -523,6 +523,9 @@ pub enum WindowState {
 }
 
 impl WindowState {
+    // Inherent `from_str` (not the FromStr trait) mirrors ghost-core's API
+    // exactly; shared code calls it by this name on both platforms.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "maximize" => Some(Self::Maximize),

@@ -41,14 +41,14 @@ impl UinputBackend {
         axes.insert(RelativeAxisCode::REL_WHEEL);
 
         let dev = VirtualDevice::builder()
-            .map_err(|e| uinput_err(e))?
+            .map_err(uinput_err)?
             .name("ghost-virtual-input")
             .with_keys(&keys)
-            .map_err(|e| uinput_err(e))?
+            .map_err(uinput_err)?
             .with_relative_axes(&axes)
-            .map_err(|e| uinput_err(e))?
+            .map_err(uinput_err)?
             .build()
-            .map_err(|e| uinput_err(e))?;
+            .map_err(uinput_err)?;
 
         Ok(Self { dev: Mutex::new(dev) })
     }

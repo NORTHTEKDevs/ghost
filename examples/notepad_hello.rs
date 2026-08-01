@@ -1,3 +1,9 @@
+//! Windows-only example: drives Notepad through the Windows engine.
+//! `ghost-core` compiles to nothing off Windows, so the body is gated and a
+//! stub `main` keeps the target buildable everywhere.
+
+#[cfg(windows)]
+mod win {
 //! Example: Open Notepad and type a message
 //! Run: cargo run --example notepad_hello
 
@@ -5,7 +11,7 @@ use ghost_session::{GhostSession, By, session::Region};
 use std::time::Duration;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     println!("Ghost - Desktop Automation Example");
     println!("Press Ctrl+Alt+G at any time to stop automation");
 
@@ -28,4 +34,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ghost_core::process::kill(pid)?;
 
     Ok(())
+}
+
+}
+
+fn main() {
+    #[cfg(windows)]
+    win::run();
 }

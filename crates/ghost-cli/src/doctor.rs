@@ -226,6 +226,7 @@ fn capture_probe() -> Result<usize, String> {
 /// but no application is publishing a tree. That is the single most common
 /// Linux setup failure, so it gets a specific, actionable message rather than a
 /// generic "no windows".
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub fn evaluate_a11y(window_count: usize) -> Status {
     if window_count > 0 {
         Status::Pass
