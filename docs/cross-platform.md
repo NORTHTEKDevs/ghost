@@ -6,7 +6,7 @@ Ghost ships as three versions that share one contract (`crates/ghost-platform`):
 | --- | --- | --- |
 | **Windows** | ✅ full, verified | `ghost-core` / `ghost-session` — Win32 UI Automation, SendInput + posted window messages, DXGI/GDI capture |
 | **macOS** | 🚧 scaffold (not functional) | native backend on Accessibility + CGEvent + ScreenCaptureKit — to be built on a Mac |
-| **Linux** | 🚧 scaffold (not functional) | native backend on AT-SPI (D-Bus) + XTest/libei + X11/portal capture — to be built on Linux |
+| **Linux** | ✅ implemented, awaiting on-device verification | `ghost-linux` — AT-SPI2 over D-Bus, XTEST / RemoteDesktop portal / uinput, X11 `GetImage` / Screenshot portal. See [linux-fedora.md](linux-fedora.md) |
 
 Windows is intentionally the most capable and is the only one verified today. The
 macOS and Linux backends are real, compiling scaffolds (`ghost-platform` builds for
