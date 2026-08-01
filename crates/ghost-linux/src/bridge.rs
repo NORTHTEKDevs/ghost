@@ -43,7 +43,30 @@ impl Ctx {
     }
 }
 
-type Job = Box<dyn for<'a> FnOnce(&'a Ctx) -> Pin<Box<dyn Future<Output = ()> + 'a>> + Send>;
+/// A unit of work for the accessibility thread.
+///
+/// Carries two closures because the connection is established lazily: `run` is
+/// used once a connection exists, and `fail` reports why one could not be made.
+/// Both own a clone of the same reply channel, so the caller always gets an
+/// answer rather than a dropped sender and an opaque "disconnected".
+/// The work half: borrows the live connection and drives one operation.
+type RunFn = Box<dyn for<'a> FnOnce(&'a Ctx) -> Pin<Box<dyn Future<Output = ()> + 'a>> + Send>;
+/// The failure half: reports why no connection could be made.
+type FailFn = Box<dyn FnOnce(CoreError) + Send>;
+
+struct Job {
+    run: RunFn,
+    fail: FailFn,
+}
+
+fn bus_error(e: impl std::fmt::Display) -> CoreError {
+    CoreError::platform(format!(
+        "cannot reach the AT-SPI accessibility bus ({e}). Enable it with: \
+         gsettings set org.gnome.desktop.interface toolkit-accessibility true \
+         -- and ensure at-spi2-core is installed and a desktop session is running. \
+         Applications must be restarted after enabling it."
+    ))
+}
 
 /// Handle to the dedicated AT-SPI thread.
 pub struct A11yBridge {
@@ -51,11 +74,17 @@ pub struct A11yBridge {
 }
 
 impl A11yBridge {
-    /// Start the worker thread and connect to the accessibility bus.
+    /// Start the worker thread.
     ///
-    /// Fails fast with a diagnosable error if the a11y bus is unreachable --
-    /// which on a stock Fedora box almost always means accessibility is off.
-    /// `ghost doctor` turns that into an actionable message.
+    /// The accessibility bus is connected **lazily, on first use**, and this
+    /// call does not fail when the bus is unreachable. That matters: the MCP
+    /// server must start and answer `tools/list` on a machine where
+    /// accessibility happens to be off, so the user sees an actionable error
+    /// from the first real call instead of a server that refuses to boot with
+    /// no explanation. `ghost doctor` reports the same condition directly.
+    ///
+    /// A failed connection is not cached, so enabling accessibility takes
+    /// effect on the next call without restarting Ghost.
     pub fn new() -> Result<Self> {
         let (tx, mut rx) = unbounded_channel::<Job>();
         let (ready_tx, ready_rx) = sync_channel::<Result<()>>(1);
@@ -75,26 +104,26 @@ impl A11yBridge {
                         return;
                     }
                 };
+                // The thread and its runtime are up; that is all `new` promises.
+                let _ = ready_tx.send(Ok(()));
 
                 rt.block_on(async move {
-                    let conn = match AccessibilityConnection::new().await {
-                        Ok(c) => c,
-                        Err(e) => {
-                            let _ = ready_tx.send(Err(CoreError::platform(format!(
-                                "cannot reach the AT-SPI accessibility bus ({e}). \
-                                 Enable it with: gsettings set org.gnome.desktop.interface \
-                                 toolkit-accessibility true  -- and ensure at-spi2-core is installed \
-                                 and a desktop session is running."
-                            ))));
-                            return;
-                        }
-                    };
-
-                    let ctx = Ctx { conn };
-                    let _ = ready_tx.send(Ok(()));
+                    let mut ctx: Option<Ctx> = None;
 
                     while let Some(job) = rx.recv().await {
-                        job(&ctx).await;
+                        if ctx.is_none() {
+                            match AccessibilityConnection::new().await {
+                                Ok(conn) => ctx = Some(Ctx { conn }),
+                                Err(e) => {
+                                    (job.fail)(bus_error(e));
+                                    continue;
+                                }
+                            }
+                        }
+                        // Safe: just populated above, and never cleared.
+                        if let Some(c) = ctx.as_ref() {
+                            (job.run)(c).await;
+                        }
                     }
                 });
             })
@@ -118,19 +147,27 @@ impl A11yBridge {
         R: Send + 'static,
     {
         let (rtx, rrx) = sync_channel::<Result<R>>(1);
+        // Both arms of the job answer on the same channel, so the caller gets a
+        // real error whether the work ran or the bus was unreachable.
+        let fail_tx = rtx.clone();
 
-        let job: Job = Box::new(move |ctx| {
-            Box::pin(async move {
-                // The job's own Result is flattened here, so callers get a
-                // single `Result<R>` rather than `Result<Result<R>>`.
-                let outcome = match tokio::time::timeout(timeout, f(ctx)).await {
-                    Ok(v) => v,
-                    Err(_) => Err(CoreError::JobTimeout),
-                };
-                // Receiver may have already given up; that is not an error.
-                let _ = rtx.send(outcome);
-            })
-        });
+        let job = Job {
+            run: Box::new(move |ctx| {
+                Box::pin(async move {
+                    // The job's own Result is flattened here, so callers get a
+                    // single `Result<R>` rather than `Result<Result<R>>`.
+                    let outcome = match tokio::time::timeout(timeout, f(ctx)).await {
+                        Ok(v) => v,
+                        Err(_) => Err(CoreError::JobTimeout),
+                    };
+                    // Receiver may have already given up; that is not an error.
+                    let _ = rtx.send(outcome);
+                })
+            }),
+            fail: Box::new(move |e| {
+                let _ = fail_tx.send(Err(e));
+            }),
+        };
 
         self.tx
             .send(job)
