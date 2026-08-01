@@ -8,8 +8,12 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+# Both platforms build in parallel, then a single job publishes one release
+# containing both archives. Splitting the publish out means a Linux build
+# failure cannot leave a half-populated release behind.
+
 jobs:
-  build:
+  windows:
     name: Build Windows binaries
     runs-on: windows-latest
     steps:
@@ -18,15 +22,7 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-release-
+      - uses: Swatinem/rust-cache@v2
 
       - name: Build release binaries
         run: cargo build --release --bin ghost --bin ghost-http --bin ghost-mcp
@@ -42,21 +38,119 @@ jobs:
           Copy-Item CHANGELOG.md dist/ -ErrorAction SilentlyContinue
           Copy-Item LICENSE dist/ -ErrorAction SilentlyContinue
           Compress-Archive -Path dist/* -DestinationPath ghost-windows-x64.zip
+          (Get-FileHash ghost-windows-x64.zip -Algorithm SHA256).Hash.ToLower() `
+            + "  ghost-windows-x64.zip" | Out-File -Encoding ascii ghost-windows-x64.zip.sha256
 
-      - name: Upload archive
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: ghost-windows-x64
-          path: ghost-windows-x64.zip
+          path: |
+            ghost-windows-x64.zip
+            ghost-windows-x64.zip.sha256
+
+  linux:
+    name: Build Linux binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # The engine is pure Rust, so nothing is needed to BUILD. at-spi2-core is
+      # installed only so the smoke test below can start the server.
+      - name: Install runtime deps for the smoke test
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends at-spi2-core
+
+      - name: Build release binaries
+        run: cargo build --release --bin ghost --bin ghost-http --bin ghost-mcp
+
+      # Never publish a binary that cannot answer its own protocol. Same check
+      # the Linux CI runs, repeated against the exact artifact that ships.
+      - name: Smoke test the MCP server
+        run: |
+          printf '%s\n' \
+            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}' \
+            '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+            | timeout 30 ./target/release/ghost-mcp > mcp-out.json || true
+          grep -q '"ghost_see"' mcp-out.json
+          grep -q '"ghost_shell"' mcp-out.json
+          file target/release/ghost-mcp | grep -q "ELF 64-bit"
+
+      - name: Stage artifacts
+        run: |
+          mkdir -p dist
+          cp target/release/ghost target/release/ghost-http target/release/ghost-mcp dist/
+          cp README.md dist/
+          cp CHANGELOG.md dist/ 2>/dev/null || true
+          cp LICENSE dist/ 2>/dev/null || true
+          cp docs/linux-fedora.md dist/LINUX-SETUP.md
+          cp scripts/install.sh dist/
+          chmod +x dist/install.sh dist/ghost dist/ghost-http dist/ghost-mcp
+          tar -czf ghost-linux-x86_64.tar.gz -C dist .
+          sha256sum ghost-linux-x86_64.tar.gz > ghost-linux-x86_64.tar.gz.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ghost-linux-x86_64
+          path: |
+            ghost-linux-x86_64.tar.gz
+            ghost-linux-x86_64.tar.gz.sha256
+
+  publish:
+    name: Publish release
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p release
+          find artifacts -type f \( -name '*.zip' -o -name '*.tar.gz' -o -name '*.sha256' \) \
+            -exec cp {} release/ \;
+          ls -la release
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            ghost-windows-x64.zip
-            target/release/ghost.exe
-            target/release/ghost-http.exe
-            target/release/ghost-mcp.exe
+          files: release/*
           generate_release_notes: true
+          body: |
+            ## Install
+
+            **Linux** (x86_64) — needs `at-spi2-core` and a desktop session:
+
+            ```bash
+            tar -xzf ghost-linux-x86_64.tar.gz
+            sudo dnf install at-spi2-core at-spi2-atk        # or apt install
+            gsettings set org.gnome.desktop.interface toolkit-accessibility true
+            ./ghost doctor                                   # verify the machine
+            ```
+
+            Restart any applications that were already open after enabling
+            accessibility — they only publish an accessible tree at startup.
+            Full setup and troubleshooting: `LINUX-SETUP.md` in the archive.
+
+            Register the MCP server:
+
+            ```bash
+            claude mcp add ghost --scope user -- "$PWD/ghost-mcp"
+            ```
+
+            **Windows** (x64): unzip and run `ghost.exe doctor`. The binaries are
+            not code-signed, so SmartScreen will warn on first run.
+
+            Verify a download with the matching `.sha256` file.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
