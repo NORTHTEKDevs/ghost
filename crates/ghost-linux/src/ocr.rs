@@ -15,8 +15,9 @@
 //! This exists for the same case it does on Windows: canvas-drawn or
 //! remote-desktop content that exposes no accessible text at all.
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use crate::capture::screen::{capture_region_raw, encode_rgba, CaptureFormat};
 use crate::error::{CoreError, Result};
@@ -79,11 +80,12 @@ pub fn find_all(needle: &str, region: Option<(i32, i32, i32, i32)>) -> Result<Ve
     let (ox, oy) = region.map(|(l, t, _, _)| (l, t)).unwrap_or((0, 0));
 
     let tsv = run_tesseract(&png)?;
-    let needle_lc = needle.to_ascii_lowercase();
+    // Full Unicode folding: OCR routinely returns accented and non-Latin text.
+    let needle_lc = needle.to_lowercase();
 
     let mut hits: Vec<TextHit> = parse_tsv(&tsv, ox, oy)
         .into_iter()
-        .filter(|hit| hit.text.to_ascii_lowercase().contains(&needle_lc))
+        .filter(|hit| hit.text.to_lowercase().contains(&needle_lc))
         .collect();
 
     // Best confidence first, so `find_text_local` returns the strongest match.
@@ -91,7 +93,23 @@ pub fn find_all(needle: &str, region: Option<(i32, i32, i32, i32)>) -> Result<Ve
     Ok(hits)
 }
 
+/// How long Tesseract gets before it is killed.
+///
+/// This MUST stay at or below `ghost-session`'s `OCR_TIMEOUT_MS`, which bounds
+/// the whole call. That outer bound is a `tokio::time::timeout` around a
+/// `spawn_blocking` handle, and that only stops *awaiting* the closure -- it
+/// cannot cancel it. Without a deadline down here the OS thread stays parked in
+/// `wait()` forever, so a caller that retries after each timeout (an ordinary
+/// automation pattern) leaks one blocking-pool thread and one tesseract process
+/// per attempt, until the pool starves and every other tool stalls behind it.
+const TESSERACT_DEADLINE: Duration = Duration::from_millis(3000);
+
 /// Run Tesseract over a PNG on stdin, asking for TSV so we get per-word boxes.
+///
+/// stdin is fed from a separate thread. Writing the whole image before starting
+/// to read stdout is the classic pipe deadlock: a multi-megabyte screen capture
+/// can fill tesseract's stdout buffer while we are still blocked writing its
+/// stdin, and then both sides wait on the other forever.
 fn run_tesseract(png: &[u8]) -> Result<String> {
     let mut child = Command::new("tesseract")
         .args(["stdin", "stdout", "--psm", "11", "tsv"])
@@ -101,21 +119,60 @@ fn run_tesseract(png: &[u8]) -> Result<String> {
         .spawn()
         .map_err(|e| CoreError::platform(format!("running tesseract: {e}")))?;
 
-    child
-        .stdin
-        .take()
-        .ok_or_else(|| CoreError::platform("tesseract stdin unavailable"))?
-        .write_all(png)
-        .map_err(|e| CoreError::platform(format!("writing image to tesseract: {e}")))?;
+    let mut stdin =
+        child.stdin.take().ok_or_else(|| CoreError::platform("tesseract stdin unavailable"))?;
+    let image = png.to_vec();
+    // A write error is the child's business: if it dies early the write fails
+    // with EPIPE, and the exit status below is the honest report of what
+    // happened.
+    let writer = std::thread::spawn(move || {
+        let _ = stdin.write_all(&image);
+        // Dropping stdin closes the pipe, which is how tesseract knows the
+        // image has ended.
+    });
 
-    let out = child
-        .wait_with_output()
-        .map_err(|e| CoreError::platform(format!("waiting for tesseract: {e}")))?;
+    let mut stdout =
+        child.stdout.take().ok_or_else(|| CoreError::platform("tesseract stdout unavailable"))?;
+    let reader = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = stdout.read_to_end(&mut buf);
+        buf
+    });
 
-    if !out.status.success() {
-        return Err(CoreError::platform("tesseract exited with an error"));
+    let deadline = Instant::now() + TESSERACT_DEADLINE;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(s)) => break Some(s),
+            Ok(None) => {}
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(CoreError::platform(format!("waiting for tesseract: {e}")));
+            }
+        }
+        if Instant::now() >= deadline {
+            // kill THEN wait: killing alone leaves a zombie, because Rust does
+            // not reap a child on drop.
+            let _ = child.kill();
+            let _ = child.wait();
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+
+    // Both threads unblock once the child's pipes close, which killing it does.
+    let out = reader.join().unwrap_or_default();
+    let _ = writer.join();
+
+    match status {
+        None => Err(CoreError::platform(format!(
+            "tesseract did not finish within {}ms and was terminated. Try a smaller region, or \
+             prefer ghost_find/ghost_see, which read real text from the accessibility tree",
+            TESSERACT_DEADLINE.as_millis()
+        ))),
+        Some(s) if !s.success() => Err(CoreError::platform("tesseract exited with an error")),
+        Some(_) => Ok(String::from_utf8_lossy(&out).into_owned()),
     }
-    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
 /// Parse Tesseract's TSV into screen-space hits.

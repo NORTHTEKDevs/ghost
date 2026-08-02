@@ -109,8 +109,21 @@ impl PortalBackend {
         self.scroll_axis(clicks, false)
     }
 
+    /// Scroll, in Ghost's sign convention: **positive is up / right**.
+    ///
+    /// The sign is inverted on the way out because the three backends disagree.
+    /// X11 encodes "up" as button 4 and evdev's `REL_WHEEL` treats positive as
+    /// up, but the RemoteDesktop portal follows the Wayland `wl_pointer` axis
+    /// convention, where a **positive value scrolls down**. Passing Ghost's sign
+    /// through unchanged would make `ghost_scroll direction=up` scroll up on X11
+    /// and down on Wayland — the same call producing opposite results depending
+    /// on the session, with nothing to indicate it.
+    ///
+    /// Inferred from the Wayland/portal specification, not yet confirmed on
+    /// hardware (CI runs X11), so scroll direction is on the on-device checklist
+    /// in docs/linux-fedora.md.
     pub fn scroll_axis(&self, clicks: i32, horizontal: bool) -> Result<()> {
-        self.send(|tx| Cmd::Scroll(clicks, horizontal, tx))
+        self.send(|tx| Cmd::Scroll(-clicks, horizontal, tx))
     }
 }
 
@@ -265,12 +278,49 @@ fn load_token() -> Option<String> {
     }
 }
 
+/// Persist the restore token, owner-only.
+///
+/// This token is a **bearer credential**: presenting it re-establishes a
+/// RemoteDesktop/ScreenCast session silently, with no consent prompt. Anyone who
+/// can read it can potentially resume remote control of the user's desktop.
+///
+/// `std::fs::write` creates with mode `0o666 & !umask`, which under the standard
+/// Fedora umask of 022 lands on disk as `0644` -- world-readable. On a shared or
+/// service-account machine (exactly the unattended setup the docs describe) any
+/// other local account could read it. The mode is therefore set explicitly on
+/// both the file and its directory, and re-asserted on every write so a
+/// pre-existing loose file is tightened rather than inherited.
 fn save_token(token: &str) {
     let Some(p) = token_path() else { return };
-    if let Some(dir) = p.parent() {
-        let _ = std::fs::create_dir_all(dir);
+
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+
+        if let Some(dir) = p.parent() {
+            let _ = std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir);
+        }
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&p)
+        {
+            let _ = f.write_all(token.as_bytes());
+            // Re-assert: `mode()` only applies when the file is created.
+            let _ = f.set_permissions(std::fs::Permissions::from_mode(0o600));
+        }
     }
-    let _ = std::fs::write(p, token);
+
+    #[cfg(not(unix))]
+    {
+        if let Some(dir) = p.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(p, token);
+    }
 }
 
 #[cfg(test)]

@@ -146,7 +146,15 @@ pub async fn snapshot(ctx: &Ctx, addr: &ObjAddr) -> Result<Snapshot> {
     let rect = if ifaces.contains(Interface::Component) {
         match component(ctx, addr).await {
             Ok(c) => match c.get_extents(CoordType::Screen).await {
-                Ok((x, y, w, h)) => Some(Rect { left: x, top: y, right: x + w, bottom: y + h }),
+                // saturating: extents are app-supplied, and a hostile or buggy
+                // value would otherwise overflow into a corrupted rect that
+                // Ghost would report -- and click on -- as if it were valid.
+                Ok((x, y, w, h)) => Some(Rect {
+                    left: x,
+                    top: y,
+                    right: x.saturating_add(w),
+                    bottom: y.saturating_add(h),
+                }),
                 Err(_) => None,
             },
             Err(_) => None,
@@ -192,7 +200,11 @@ pub fn effective_role(snap: &Snapshot) -> &'static str {
 /// without moving the pointer and without taking foreground.
 pub async fn do_best_action(ctx: &Ctx, addr: &ObjAddr) -> Result<bool> {
     let act = action(ctx, addr).await?;
-    let n = act.n_actions().await.unwrap_or(0);
+    // Capped: `n_actions` is self-reported by the target application. A buggy or
+    // hostile one returning a huge count would drive a multi-gigabyte allocation
+    // and a D-Bus flood. No real widget has more than a handful of actions.
+    const MAX_ACTIONS: i32 = 32;
+    let n = act.n_actions().await.unwrap_or(0).min(MAX_ACTIONS);
     if n <= 0 {
         return Err(CoreError::NotActionable(format!("{} exposes no actions", addr.path)));
     }
@@ -381,7 +393,14 @@ pub async fn edit_command(ctx: &Ctx, addr: &ObjAddr, cmd: EditKind) -> Result<()
 
     match cmd {
         EditKind::Paste => {
-            let at = text.caret_offset().await.unwrap_or(0);
+            // NOT unwrap_or(0): a failed caret read is not "the caret is at the
+            // start". Guessing 0 pastes at the beginning of the field and looks
+            // like success, which is worse than refusing.
+            let at = text.caret_offset().await.map_err(|e| {
+                CoreError::Platform(format!(
+                    "could not read the caret position, so paste has no known insertion point: {e}"
+                ))
+            })?;
             ed.paste_text(at)
                 .await
                 .map_err(|e| CoreError::Platform(format!("paste_text: {e}")))?;
@@ -399,6 +418,22 @@ pub async fn edit_command(ctx: &Ctx, addr: &ObjAddr, cmd: EditKind) -> Result<()
                     .await
                     .map_err(|e| CoreError::Platform(format!("copy_text: {e}")))?;
             } else {
+                // Cut is destructive and AT-SPI offers no atomic "cut the
+                // selection" verb, only offsets. Widgets that reformat as you
+                // type can shift them between the read and the act, and
+                // cut_text would then delete whatever had moved into that
+                // range. Re-read and refuse on a shift rather than delete the
+                // wrong text.
+                match selection_range(&text).await {
+                    Some(now) if now == (start, end) => {}
+                    _ => {
+                        return Err(CoreError::NotActionable(
+                            "the selection moved while cutting, so that range is no longer the \
+                             selected text; select again and retry"
+                                .into(),
+                        ))
+                    }
+                }
                 ed.cut_text(start, end)
                     .await
                     .map_err(|e| CoreError::Platform(format!("cut_text: {e}")))?;
@@ -447,6 +482,11 @@ pub async fn focused_descendant(ctx: &Ctx, root: &ObjAddr) -> Result<Option<ObjA
 
     let mut queue = std::collections::VecDeque::new();
     queue.push_back(root.clone());
+    // Every other walk carries a seen-set; this one was missed. Without it a
+    // cyclic tree burns the whole budget on the loop and reports "nothing is
+    // focused" with full confidence when the focused element is elsewhere.
+    let mut seen: std::collections::HashSet<ObjAddr> = std::collections::HashSet::new();
+    seen.insert(root.clone());
     let mut visited = 0usize;
 
     while let Some(addr) = queue.pop_front() {
@@ -464,7 +504,9 @@ pub async fn focused_descendant(ctx: &Ctx, root: &ObjAddr) -> Result<Option<ObjA
         }
         if let Ok(kids) = children(ctx, &addr).await {
             for k in kids {
-                queue.push_back(k);
+                if seen.insert(k.clone()) {
+                    queue.push_back(k);
+                }
             }
         }
     }

@@ -67,6 +67,17 @@ pub fn capture_screen_region_fast(rect: (i32, i32, i32, i32)) -> Result<(Vec<u8>
             "capture_screen_region_fast: degenerate rect".into(),
         ));
     }
+    // X11 sends coordinates as i16 and extents as u16. Casting an out-of-range
+    // value wraps silently, and the server will happily return a real,
+    // plausible-looking image of the WRONG part of the screen -- worse than an
+    // error, because nothing indicates it. Reject before the cast. The bound is
+    // i16::MAX, the largest coordinate the protocol can express.
+    const MAX_COORD: i32 = i16::MAX as i32;
+    if l < 0 || t < 0 || r > MAX_COORD || b > MAX_COORD {
+        return Err(CoreError::Platform(format!(
+            "capture region ({l},{t})-({r},{b}) is outside the range X11 can express              (0..{MAX_COORD}); coordinates would wrap and capture the wrong area"
+        )));
+    }
     match session_kind() {
         SessionKind::X11 => x11_capture(Some((l, t, (r - l) as u32, (b - t) as u32))),
         SessionKind::Wayland => {

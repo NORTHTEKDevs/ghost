@@ -171,7 +171,12 @@ impl Ewmh {
                 EventMask::SUBSTRUCTURE_NOTIFY | EventMask::SUBSTRUCTURE_REDIRECT,
                 ev,
             )
-            .map_err(|e| CoreError::platform(format!("send_event: {e}")))?;
+            .map_err(|e| CoreError::platform(format!("send_event: {e}")))?
+            // .check(): without it a protocol-level rejection -- the window
+            // vanished between resolution and send -- is swallowed and
+            // reported to the agent as a successful window operation.
+            .check()
+            .map_err(|e| CoreError::platform(format!("window manager rejected the request: {e}")))?;
         self.conn.flush().map_err(|e| CoreError::platform(format!("x11 flush: {e}")))?;
         Ok(())
     }
@@ -198,9 +203,13 @@ fn find_window(e: &Ewmh, a: &Atoms, pid: u32, title: Option<&str>) -> Result<Opt
     // already scoped to the right process, so a generic title like "Untitled"
     // cannot pull in a different application's window.
     if let Some(want) = title {
-        let want = want.to_ascii_lowercase();
+        // to_lowercase, not to_ascii_lowercase: the haystack below is folded
+        // with full Unicode rules, so ASCII-folding the needle here means
+        // "CAFÉ" is compared as "cafÉ" against "café" and never matches its own
+        // window.
+        let want = want.to_lowercase();
         if let Some(w) = by_pid.iter().copied().find(|w| {
-            e.window_title(a, *w).map(|t| t.to_ascii_lowercase().contains(&want)).unwrap_or(false)
+            e.window_title(a, *w).map(|t| t.to_lowercase().contains(&want)).unwrap_or(false)
         }) {
             return Ok(Some(w));
         }
@@ -287,6 +296,36 @@ pub fn is_minimized(pid: u32, title: Option<&str>) -> Option<bool> {
         .ok()?;
     let states: Vec<u32> = r.value32()?.collect();
     Some(states.contains(&a.net_wm_state_hidden))
+}
+
+/// ICCCM iconic state for every window the window manager manages, as
+/// `(pid, title, minimized)`.
+///
+/// `ghost_window list` reported minimised state from AT-SPI's `State::Iconified`,
+/// which -- as this module's own header says -- is not a state AT-SPI models
+/// reliably. `WM_STATE` is the authoritative answer, so the list is
+/// cross-checked against this. One connection and one pass covers every window,
+/// rather than the per-window `is_minimized` round trip.
+///
+/// Returns an empty vector on any failure: a missing cross-check falls back to
+/// the AT-SPI reading, which is the previous behaviour.
+pub fn iconic_states() -> Vec<(u32, Option<String>, bool)> {
+    let Ok(e) = Ewmh::open() else { return Vec::new() };
+    let Ok(a) = e.atoms() else { return Vec::new() };
+    let Ok(clients) = e.client_list(&a) else { return Vec::new() };
+
+    let mut out = Vec::with_capacity(clients.len());
+    for w in clients {
+        let Some(pid) = e.window_pid(&a, w) else { continue };
+        let Ok(Ok(r)) = e.conn.get_property(false, w, a.wm_state, a.wm_state, 0, 2).map(|c| c.reply())
+        else {
+            continue;
+        };
+        let vals: Vec<u32> = r.value32().map(|v| v.collect()).unwrap_or_default();
+        let Some(&state) = vals.first() else { continue };
+        out.push((pid, e.window_title(&a, w), state == ICONIC_STATE));
+    }
+    out
 }
 
 /// The X11 window id backing an accessible window, if there is one.

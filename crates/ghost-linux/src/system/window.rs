@@ -40,8 +40,13 @@ pub fn window_rect(hwnd: isize) -> Option<(i32, i32, i32, i32)> {
 /// window-manager control and occluded capture both need a real X11 window, and
 /// PID + title is what identifies it.
 pub fn window_identity(handle: isize) -> Option<(u32, Option<String>)> {
+    // Bounded for the same reason `foreground_info_fast` is: this sits on the
+    // occluded-capture path, which is how an agent verifies a background
+    // action, and the full 20s walk budget would let one slow application add
+    // twenty seconds to every screenshot.
+    const BUDGET: std::time::Duration = std::time::Duration::from_secs(3);
     let tree = A11yTree::new().ok()?;
-    let w = tree.list_windows().ok()?.into_iter().find(|w| w.hwnd == handle)?;
+    let w = tree.list_windows_within(BUDGET).ok()?.into_iter().find(|w| w.hwnd == handle)?;
     Some((w.pid, Some(w.name)))
 }
 

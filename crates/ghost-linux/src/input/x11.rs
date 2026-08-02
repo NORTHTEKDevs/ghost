@@ -84,7 +84,9 @@ impl X11Backend {
             (true, false) => 6,
             (true, true) => 7,
         };
-        for _ in 0..clicks.abs() {
+        // unsigned_abs: i32::MIN.abs() panics in debug and wraps negative in
+        // release, turning a scroll into a silent no-op.
+        for _ in 0..clicks.unsigned_abs() {
             self.button(button, true)?;
             self.button(button, false)?;
         }

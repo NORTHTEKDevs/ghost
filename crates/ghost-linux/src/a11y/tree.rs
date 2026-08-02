@@ -287,11 +287,11 @@ impl A11yTree {
             let fg = self.foreground_window();
             return self.roots_for(if fg == 0 { None } else { Some(fg) });
         };
-        let want_lc = want.to_ascii_lowercase();
+        let want_lc = want.to_lowercase();
         let wins = self.list_windows()?;
         let matched: Vec<(isize, ObjAddr)> = wins
             .into_iter()
-            .filter(|w| w.name.to_ascii_lowercase().contains(&want_lc))
+            .filter(|w| w.name.to_lowercase().contains(&want_lc))
             .filter_map(|w| handles::resolve(w.hwnd).map(|a| (w.hwnd, a)))
             .collect();
         if matched.is_empty() {
@@ -307,8 +307,8 @@ const EXACT_SCORE: i32 = 100;
 fn score_match(snap: &Snapshot, name: Option<&str>, _role: Option<&str>) -> i32 {
     let mut score = 0;
     if let Some(want) = name {
-        let got = snap.name.to_ascii_lowercase();
-        let want = want.to_ascii_lowercase();
+        let got = snap.name.to_lowercase();
+        let want = want.to_lowercase();
         if got == want {
             score += 60;
         } else if got.starts_with(&want) {
@@ -328,9 +328,16 @@ fn score_match(snap: &Snapshot, name: Option<&str>, _role: Option<&str>) -> i32 
     score
 }
 
+/// Case-insensitive name match.
+///
+/// Uses full Unicode case folding, not `to_ascii_lowercase`. ASCII folding
+/// leaves accented and non-Latin text untouched, so searching for "café" would
+/// never match a button labelled "CAFÉ" -- and the failure looks exactly like
+/// "the element isn't there". That is an everyday occurrence on any non-English
+/// desktop, not a corner case.
 fn name_matches(snap: &Snapshot, want: &str) -> bool {
-    let got = snap.name.to_ascii_lowercase();
-    let want = want.to_ascii_lowercase();
+    let got = snap.name.to_lowercase();
+    let want = want.to_lowercase();
     got == want || got.contains(&want)
 }
 
@@ -354,6 +361,11 @@ async fn list_windows_async(ctx: &Ctx) -> Result<Vec<WindowInfo>> {
         .get_children()
         .await
         .map_err(|e| CoreError::platform(format!("registry children: {e}")))?;
+
+    // One pass over the window manager's client list, reused for every window
+    // below. Empty when the WM does not speak EWMH or the session is not X11,
+    // in which case the AT-SPI reading stands.
+    let iconic = crate::wm::iconic_states();
 
     let mut out = Vec::new();
     for app_ref in apps.iter() {
@@ -380,6 +392,9 @@ async fn list_windows_async(ctx: &Ctx) -> Result<Vec<WindowInfo>> {
             let title = acc.name().await.unwrap_or_default();
             let name = if title.is_empty() { app_name.clone() } else { title };
 
+            let minimized = wm_minimized(&iconic, pid, &name)
+                .unwrap_or_else(|| states.contains(State::Iconified));
+
             out.push(WindowInfo {
                 name,
                 pid,
@@ -387,11 +402,39 @@ async fn list_windows_async(ctx: &Ctx) -> Result<Vec<WindowInfo>> {
                 hwnd: handles::intern(&win),
                 // Minimised windows are kept, matching the Windows engine, so an
                 // agent does not lose a window it just interacted with.
-                state: if states.contains(State::Iconified) { "minimized" } else { "normal" },
+                state: if minimized { "minimized" } else { "normal" },
             });
         }
     }
     Ok(out)
+}
+
+/// The window manager's iconic state for one accessible window, if it can be
+/// matched confidently.
+///
+/// Matching is title-first within the owning process, then process-only when
+/// that process manages exactly one window. Anything more ambiguous returns
+/// `None` so the caller keeps the AT-SPI reading rather than attaching another
+/// window's state to this one -- a confident wrong answer is worse than the
+/// unreliable one it replaces.
+fn wm_minimized(iconic: &[(u32, Option<String>, bool)], pid: u32, name: &str) -> Option<bool> {
+    let mine: Vec<&(u32, Option<String>, bool)> =
+        iconic.iter().filter(|(p, _, _)| *p == pid).collect();
+    if mine.is_empty() {
+        return None;
+    }
+    if mine.len() == 1 {
+        return Some(mine[0].2);
+    }
+    let want = name.to_lowercase();
+    let matched: Vec<&&(u32, Option<String>, bool)> = mine
+        .iter()
+        .filter(|(_, t, _)| t.as_deref().map(|t| t.to_lowercase() == want).unwrap_or(false))
+        .collect();
+    match matched.as_slice() {
+        [one] => Some(one.2),
+        _ => None,
+    }
 }
 
 /// Breadth-first match collection, node-budgeted.
@@ -577,11 +620,11 @@ pub fn list_windows() -> Result<Vec<WindowInfo>> {
 /// Raise and focus a window by (partial, case-insensitive) name.
 pub fn focus_window(name: &str) -> Result<()> {
     let tree = A11yTree::new()?;
-    let want = name.to_ascii_lowercase();
+    let want = name.to_lowercase();
     let win = tree
         .list_windows()?
         .into_iter()
-        .find(|w| w.name.to_ascii_lowercase().contains(&want))
+        .find(|w| w.name.to_lowercase().contains(&want))
         .ok_or_else(|| CoreError::ProcessNotFound { name: name.to_string() })?;
 
     // Raise the window first. `Component.GrabFocus` moves accessibility focus
@@ -618,11 +661,11 @@ pub fn focus_window(name: &str) -> Result<()> {
 /// `Unsupported` rather than silently doing nothing.
 pub fn set_window_state(name: &str, state: WindowState) -> Result<()> {
     let tree = A11yTree::new()?;
-    let want = name.to_ascii_lowercase();
+    let want = name.to_lowercase();
     let win = tree
         .list_windows()?
         .into_iter()
-        .find(|w| w.name.to_ascii_lowercase().contains(&want))
+        .find(|w| w.name.to_lowercase().contains(&want))
         .ok_or_else(|| CoreError::ProcessNotFound { name: name.to_string() })?;
 
     if state == WindowState::Close {
@@ -716,6 +759,41 @@ mod tests {
         // find() stops walking further windows once a match scores this high.
         // If scoring ever drops below it, searches silently get slower.
         assert!(score_match(&snap("Save", 50000, true, true), Some("Save"), None) >= EXACT_SCORE);
+    }
+
+    #[test]
+    fn wm_state_resolves_by_title_when_a_process_owns_several_windows() {
+        let iconic = vec![
+            (42, Some("Document one".into()), false),
+            (42, Some("Document two".into()), true),
+            (99, Some("Other app".into()), true),
+        ];
+        assert_eq!(wm_minimized(&iconic, 42, "Document two"), Some(true));
+        assert_eq!(wm_minimized(&iconic, 42, "Document one"), Some(false));
+        // One window for the process: no title needed.
+        assert_eq!(wm_minimized(&iconic, 99, "anything at all"), Some(true));
+    }
+
+    #[test]
+    fn wm_state_declines_rather_than_guessing() {
+        let iconic = vec![
+            (42, Some("Document one".into()), false),
+            (42, Some("Document two".into()), true),
+        ];
+        // Ambiguous: two windows, neither title matches. Better to fall back to
+        // the AT-SPI reading than to attach the wrong window's state.
+        assert_eq!(wm_minimized(&iconic, 42, "Untitled"), None);
+        // Process is not managed by the window manager at all.
+        assert_eq!(wm_minimized(&iconic, 7, "Document one"), None);
+        assert_eq!(wm_minimized(&[], 42, "Document one"), None);
+    }
+
+    #[test]
+    fn name_matching_folds_non_ascii_case() {
+        // ASCII-only folding silently breaks every non-English desktop.
+        assert!(name_matches(&snap("CAFÉ", 50000, true, true), "café"));
+        assert!(name_matches(&snap("Ünderscore", 50000, true, true), "ünderscore"));
+        assert!(name_matches(&snap("ПРИВЕТ", 50000, true, true), "привет"));
     }
 
     #[test]
