@@ -41,7 +41,9 @@ ashpd = { version = "0.13", default-features = false, features = [
 ] }
 
 # X11: XTEST synthetic input + GetImage capture. Pure Rust, no libX11 linkage.
-x11rb = { version = "0.14", features = ["xtest"] }
+# composite: lets us read a window's backing pixmap, so an occluded
+# window can still be captured (the PrintWindow analogue).
+x11rb = { version = "0.14", features = ["xtest", "composite"] }
 
 # Clipboard on both X11 and Wayland.
 arboard = { version = "3.6", default-features = false, features = [

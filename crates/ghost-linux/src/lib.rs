@@ -61,6 +61,8 @@ pub mod ocr;
 pub mod process;
 #[cfg(target_os = "linux")]
 pub mod system;
+#[cfg(target_os = "linux")]
+pub mod wm;
 
 /// `ghost-core` names its accessibility module `uia` (Windows UI Automation).
 /// Ghost's shared layers refer to it by that name, so alias it here. On Linux

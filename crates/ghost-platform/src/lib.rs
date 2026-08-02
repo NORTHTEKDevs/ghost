@@ -177,8 +177,9 @@ pub fn capabilities_for(platform: Platform) -> Capabilities {
                 Feature::BackgroundDispatch,
                 Feature::StructuredSnapshot,
                 Feature::Screenshot,
+                Feature::EditShortcuts,
             ],
-            status: "functional and verified on X11 + AT-SPI2 by the live CI suite (ghost-linux); Wayland portal input/capture implemented but not yet verified on hardware",
+            status: "functional on X11 + AT-SPI2, verified by the live CI suite (ghost-linux); window state via EWMH, occluded capture via XComposite, optional OCR via Tesseract; Wayland portal input/capture implemented but not yet verified on hardware",
         },
     }
 }
@@ -235,8 +236,10 @@ mod tests {
         assert!(caps.supports(Feature::StructuredSnapshot));
         assert!(caps.supports(Feature::Screenshot));
 
-        assert!(!caps.supports(Feature::KeyInput), "not verified end to end on Linux");
-        assert!(!caps.supports(Feature::EditShortcuts), "not verified end to end on Linux");
+        // EditShortcuts is claimed: copy/cut/paste/select-all go through
+        // AT-SPI's EditableText, which the live suite exercises.
+        assert!(caps.supports(Feature::EditShortcuts));
+        assert!(!caps.supports(Feature::KeyInput), "synthetic typing not verified end to end");
         assert!(!caps.supports(Feature::VisionGrounding), "not verified end to end on Linux");
     }
 

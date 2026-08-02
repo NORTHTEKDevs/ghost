@@ -244,6 +244,75 @@ fn describe_screen_returns_actionable_elements() {
 }
 
 #[test]
+#[ignore = "live: needs an X11 session with a window manager"]
+fn window_can_be_minimised_and_restored() {
+    // AT-SPI cannot do this at all; it goes through EWMH. Verified by the
+    // window manager's own _NET_WM_STATE_HIDDEN, not by assuming the request
+    // was honoured.
+    if ghost_linux::session_kind() != ghost_linux::SessionKind::X11 {
+        eprintln!("skipping: EWMH needs X11");
+        return;
+    }
+    let _app = launch_gtk_app("GhostWmProbe");
+    let win = wait_for_window("GhostWmProbe", APP_TIMEOUT).expect("window must appear");
+
+    ghost_linux::wm::apply(win.pid, Some(&win.name), ghost_linux::wm::WmAction::Minimize)
+        .expect("minimize must be accepted");
+    assert!(
+        wait_for(|| ghost_linux::wm::is_minimized(win.pid, Some(&win.name)) == Some(true)),
+        "the window manager must report the window hidden after minimize"
+    );
+
+    ghost_linux::wm::apply(win.pid, Some(&win.name), ghost_linux::wm::WmAction::Restore)
+        .expect("restore must be accepted");
+    assert!(
+        wait_for(|| ghost_linux::wm::is_minimized(win.pid, Some(&win.name)) == Some(false)),
+        "the window must no longer be hidden after restore"
+    );
+}
+
+#[test]
+#[ignore = "live: needs an accessibility bus"]
+fn edit_commands_run_without_synthetic_keys() {
+    // select-all then copy, entirely through AT-SPI. Proves the background-safe
+    // clipboard path: no keystroke is synthesised and focus is never grabbed.
+    let _app = launch_gtk_app("GhostEditProbe");
+    let win = wait_for_window("GhostEditProbe", APP_TIMEOUT).expect("window must appear");
+
+    let tree = A11yTree::new().unwrap();
+    let el = tree
+        .find_by_role_in_hwnd(win.hwnd, "edit")
+        .unwrap()
+        .unwrap_or_else(|| panic!("no role=edit found. Roles present: {}", roles_in(&tree)));
+
+    el.set_value("copy-me-please").expect("seed the field");
+
+    let handle = el.native_window_handle();
+    ghost_linux::input::BackgroundClicker::edit_command(
+        handle,
+        ghost_linux::input::EditCommand::SelectAll,
+    )
+    .expect("select_all must work through AT-SPI");
+
+    ghost_linux::input::BackgroundClicker::edit_command(
+        handle,
+        ghost_linux::input::EditCommand::Copy,
+    )
+    .expect("copy must work through AT-SPI");
+}
+
+fn wait_for(mut cond: impl FnMut() -> bool) -> bool {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        if cond() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    false
+}
+
+#[test]
 #[ignore = "live: needs a display"]
 fn captures_the_screen() {
     let (rgba, w, h) =

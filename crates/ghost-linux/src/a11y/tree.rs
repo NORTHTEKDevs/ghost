@@ -584,11 +584,19 @@ pub fn focus_window(name: &str) -> Result<()> {
         .find(|w| w.name.to_ascii_lowercase().contains(&want))
         .ok_or_else(|| CoreError::ProcessNotFound { name: name.to_string() })?;
 
+    // Raise the window first. `Component.GrabFocus` moves accessibility focus
+    // within a window but does not ask the window manager to bring that window
+    // forward, which is what a caller means by "focus this window" and what the
+    // Windows engine's ensure_foreground does.
+    let raised = crate::wm::apply(win.pid, Some(&win.name), crate::wm::WmAction::Activate).is_ok();
+
     let addr = handles::resolve(win.hwnd).ok_or(CoreError::WindowGone)?;
     let bridge = tree.bridge();
-    let ok = bridge
-        .run_default(move |ctx| Box::pin(async move { ops::grab_focus(ctx, &addr).await }))?;
-    if ok {
+    let focused = bridge
+        .run_default(move |ctx| Box::pin(async move { ops::grab_focus(ctx, &addr).await }))
+        .unwrap_or(false);
+
+    if raised || focused {
         Ok(())
     } else {
         Err(CoreError::FocusFailed { window: name.to_string() })
@@ -597,21 +605,18 @@ pub fn focus_window(name: &str) -> Result<()> {
 
 /// Window state changes.
 ///
-/// AT-SPI exposes no minimise/maximise/close action, and neither X11 nor Wayland
-/// offers a portable way to do it without a window-manager protocol Ghost does
-/// not speak. Rather than silently no-op -- which would make an agent believe a
-/// window was minimised when it was not -- this reports the limitation. `Close`
-/// is attempted through the window's own accessible action, which many toolkits
-/// do expose.
+/// AT-SPI has no notion of minimise/maximise/restore -- it describes content,
+/// not window management -- so this goes through EWMH instead: a ClientMessage
+/// to the X11 root window, the same mechanism `wmctrl` and every taskbar use.
+/// That gives Linux the same four states the Windows engine supports.
+///
+/// `Close` prefers the window's own accessible action when it has one, because
+/// that lets the application run its normal close path (save prompts and all)
+/// rather than being asked to close by the window manager.
+///
+/// Under a native Wayland session there is no EWMH, so this reports
+/// `Unsupported` rather than silently doing nothing.
 pub fn set_window_state(name: &str, state: WindowState) -> Result<()> {
-    if !matches!(state, WindowState::Close) {
-        return Err(CoreError::Unsupported(format!(
-            "window {state:?} is not available on Linux: AT-SPI exposes no such action and Ghost \
-             does not speak a window-manager protocol. Use your desktop's own shortcut, or drive \
-             the window's controls directly"
-        )));
-    }
-
     let tree = A11yTree::new()?;
     let want = name.to_ascii_lowercase();
     let win = tree
@@ -619,10 +624,27 @@ pub fn set_window_state(name: &str, state: WindowState) -> Result<()> {
         .into_iter()
         .find(|w| w.name.to_ascii_lowercase().contains(&want))
         .ok_or_else(|| CoreError::ProcessNotFound { name: name.to_string() })?;
-    let addr = handles::resolve(win.hwnd).ok_or(CoreError::WindowGone)?;
-    tree.bridge()
-        .run_default(move |ctx| Box::pin(async move { ops::do_best_action(ctx, &addr).await }))?;
-    Ok(())
+
+    if state == WindowState::Close {
+        if let Some(addr) = handles::resolve(win.hwnd) {
+            let a = addr.clone();
+            if tree
+                .bridge()
+                .run_default(move |ctx| Box::pin(async move { ops::do_best_action(ctx, &a).await }))
+                .is_ok()
+            {
+                return Ok(());
+            }
+        }
+    }
+
+    let action = match state {
+        WindowState::Maximize => crate::wm::WmAction::Maximize,
+        WindowState::Minimize => crate::wm::WmAction::Minimize,
+        WindowState::Restore => crate::wm::WmAction::Restore,
+        WindowState::Close => crate::wm::WmAction::Close,
+    };
+    crate::wm::apply(win.pid, Some(&win.name), action)
 }
 
 /// Mirrors `ghost_core::uia::tree::ensure_foreground`.
