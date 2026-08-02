@@ -1,5 +1,77 @@
 # Changelog
 
+## [0.18.1] - 2026-08-02 - the fixes a fifth review round found
+
+Supersedes 0.18.0 for Linux users. Take this one: 0.18.0 shipped a resource
+leak that can stall the whole MCP server, and a world-readable credential.
+
+### Fixed
+
+- **`find_text_local` leaked a thread and a process on every OCR timeout.**
+  Tesseract was bounded only by a `tokio::time::timeout` wrapped around a
+  `spawn_blocking` handle, which stops *awaiting* the closure but cannot
+  cancel it, so the OS thread stayed parked in `wait()` and the tesseract
+  process was never reaped. A caller retrying after each timeout - an ordinary
+  automation pattern - starved Tokio's blocking pool until every other tool
+  stalled behind it. The deadline now lives inside the blocking closure, which
+  kills and then reaps the child.
+- **The same call could deadlock.** The whole PNG was written to tesseract's
+  stdin before anything read its stdout, so a large capture could fill the
+  64KB pipe buffer with both sides waiting on the other. stdin is now fed from
+  a separate thread.
+- **The Wayland restore token was world-readable.** It was written with
+  `std::fs::write`, which lands on disk as 0644 under the default umask. That
+  token is a bearer credential: presenting it resumes remote desktop control
+  with no consent prompt. It is now 0600 inside a 0700 directory, re-asserted
+  on every write so a pre-existing loose file is tightened rather than trusted.
+- **`ghost_shell` completion markers could be forged by command output.** The
+  sentinel was a predictable counter, so a command printing
+  `__GHOST_DONE_1__ 0` - from a log line, a downloaded file, a `cat` of an
+  untrusted path - would make Ghost report someone else's exit code and
+  desynchronise the session permanently. The nonce now carries an unguessable
+  per-session secret. Both drivers echo the field verbatim, so neither changed.
+- **Out-of-range capture regions returned an image of the wrong screen area.**
+  X11 encodes coordinates as i16; a larger value wrapped silently and the
+  server returned a real, plausible-looking image of somewhere else. Rejected
+  before the cast.
+- **`ghost_window list` could report a minimised window as normal.** It read
+  AT-SPI's `Iconified`, which is not a state AT-SPI models reliably. Now
+  cross-checked against ICCCM `WM_STATE`, and only where the window matches
+  unambiguously - an unmatched window keeps the old reading rather than
+  borrowing another window's state.
+- **Paste guessed an insertion point.** A failed caret read defaulted to
+  offset 0, pasting at the start of the field and reporting success. It now
+  fails.
+- **Cut could delete the wrong text.** AT-SPI offers no atomic "cut the
+  selection" verb, only offsets, and a widget that reformats as you type can
+  shift them between the read and the act. The selection is re-verified first.
+- **`focused_descendant` had no cycle guard**, the only tree walk without one,
+  so a cyclic accessibility tree reported "nothing is focused" with full
+  confidence.
+- **A window manager's rejection of a window operation was reported as
+  success.** The ClientMessage cookie is now checked.
+- **Non-ASCII titles never matched themselves** in window resolution: the
+  needle was ASCII-folded against a fully-folded haystack.
+- **The emergency-stop hotkey could not re-arm.** If the X11 connection
+  dropped, the grab was gone and Ctrl+Alt+G was dead for the life of the
+  process. The listener now clears its armed flag and logs on the way out. A
+  partial grab - working plain, failing under Caps or Num Lock - is no longer
+  reported as full success.
+- Occluded-window capture inherited the full 20-second accessibility walk
+  budget; bounded to 3 seconds.
+- Application-supplied values (`n_actions`, element extents) are capped and
+  saturated rather than trusted.
+
+### Changed
+
+- `ghost doctor` reports emergency-stop status by querying the grab rather
+  than re-registering it. Re-registering to test would collide with Ghost's
+  own working grab and report a healthy hotkey as held by another application.
+- The Linux limitations table in `docs/linux-fedora.md` said window
+  minimize/maximize/restore, the global hotkey, and local OCR were
+  unsupported. All three ship on X11. Each entry is now scoped to the session
+  type where the limit is real.
+
 ## [0.18.0] - 2026-08-02 - Linux parity, and the fixes four reviews found
 
 Supersedes 0.17.0 for Linux users. 0.17.0 shipped defects that could hang the
