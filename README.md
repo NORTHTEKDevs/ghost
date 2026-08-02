@@ -1,11 +1,17 @@
 # Ghost
 
-**The computer-use layer for AI agents on Windows.** Ghost lets an agent operate
-any Windows app — including the ones with no API — **in the background without
-taking your screen or cursor**, and it **proves every action actually happened**.
+**The computer-use layer for AI agents, on Windows and Linux.** Ghost lets an
+agent operate any desktop app — including the ones with no API — **in the
+background without taking your screen or cursor**, and it **proves every action
+actually happened**.
 
-Like Playwright, but for native Windows apps, and built for agents: an MCP server
+Like Playwright, but for native desktop apps, and built for agents: an MCP server
 any model can mount to see and drive the desktop.
+
+One MCP surface, two engines: Win32 UI Automation on Windows, AT-SPI2 over D-Bus
+on Linux. The verbs, the locator tiers and the act-then-verify loop are written
+once and behave the same on both. [Platform support](#platforms) ·
+[Linux setup](docs/linux-fedora.md)
 
 ## Why Ghost is different
 
@@ -22,8 +28,9 @@ any model can mount to see and drive the desktop.
   browser, no app cooperation required.
 - **Model-agnostic.** Vision grounding works with any OpenAI-compatible model
   (NVIDIA, OpenAI, Gemini, Groq, local vLLM/Ollama) or Anthropic. No vendor lock-in.
-- **Windows-native and deep.** Uses UI Automation for real element discovery, not
-  pixel-guessing — the gap left by Mac/Linux-first agent tooling.
+- **Accessibility-native and deep.** Real element discovery through the OS's own
+  accessibility API — UI Automation on Windows, AT-SPI2 on Linux — not
+  pixel-guessing. Elements come back with real names, roles and bounds.
 
 See it in one script: [`examples/background_agent_demo.py`](examples/background_agent_demo.py)
 drives an app in the background while the foreground stays yours.
@@ -32,13 +39,15 @@ Honest comparison vs Playwright-MCP / cua-driver / Computer Use:
 
 ## What is Ghost?
 
-Ghost gives you programmatic control over any Windows application — native Win32, Electron, WPF, UWP, or otherwise. It uses the Windows UI Automation API for element discovery, Win32 SendInput for keyboard/mouse injection, and DXGI/GDI for screen capture.
+Ghost gives you programmatic control over any desktop application — native Win32, Electron, WPF, UWP, GTK, Qt, or otherwise.
+
+On **Windows** it uses UI Automation for element discovery, SendInput for keyboard/mouse injection, and DXGI/GDI for screen capture. On **Linux** it uses AT-SPI2 over D-Bus for discovery and actions, XTEST (X11) or the RemoteDesktop portal / uinput (Wayland) for input, and X11 `GetImage` or the Screenshot portal for capture. The Linux engine is pure Rust — no `-devel` packages to install.
 
 Ship it three ways:
 
 - **`ghost` CLI** — one-shot commands, great for scripts and CI (`ghost click --name "Submit"`)
 - **`ghost-http` server** — local REST API, call it from Python, Node, curl, anything (`curl http://127.0.0.1:7878/list-windows`)
-- **`ghost-mcp` server** — Model Context Protocol server for Claude, Cursor, and any MCP client (37 tools)
+- **`ghost-mcp` server** — Model Context Protocol server for Claude, Cursor, and any MCP client (20 verbs)
 
 No Claude required. No browser required. No CDP. It drives apps through the OS's
 own automation and input APIs, so it works with native apps that have no API and
@@ -78,7 +87,22 @@ authorized to automate, and in line with the terms of the software you drive.
 
 ## Install
 
-**Option A — Ready-to-run kit ($20, one-time).** Prebuilt Windows binaries (`ghost.exe`,
+**Option A — Prebuilt binaries (free).** Every release ships signed-by-checksum
+archives for both platforms on the
+[Releases page](https://github.com/NORTHTEKDevs/ghost/releases/latest):
+
+```bash
+# Linux x86_64
+curl -LO https://github.com/NORTHTEKDevs/ghost/releases/latest/download/ghost-linux-x86_64.tar.gz
+curl -LO https://github.com/NORTHTEKDevs/ghost/releases/latest/download/ghost-linux-x86_64.tar.gz.sha256
+sha256sum -c ghost-linux-x86_64.tar.gz.sha256
+tar -xzf ghost-linux-x86_64.tar.gz && ./install.sh
+```
+
+Windows: download `ghost-windows-x64.zip` from the same page. Verify the
+checksum, unzip, and add the folder to your `PATH`. Then run `ghost doctor`.
+
+**Option B — Ready-to-run Windows kit ($20, one-time).** Prebuilt Windows binaries (`ghost.exe`,
 `ghost-http.exe`, `ghost-mcp.exe`) plus a quick-start, MCP config, and examples — no Rust toolchain, runs in
 two minutes. Every kit is built by `scripts/package-kit.ps1`, which refuses to package unless the full live
 desktop suite passes. Get it at **[northtek.io/ghost](https://northtek.io/ghost)**.
@@ -87,7 +111,7 @@ The binaries are **not code-signed**, so Windows SmartScreen will warn you on fi
 → *Run anyway*). The kit buys convenience, not capability — everything Ghost can do is in the free source
 below, and building it yourself takes one command.
 
-**Option B — Build from source (free, MIT).** Ghost is open source. Compile it yourself:
+**Option C — Build from source (free, MIT).** Ghost is open source. Compile it yourself:
 
 ```bash
 git clone https://github.com/NORTHTEKDevs/ghost
