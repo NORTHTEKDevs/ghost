@@ -1,5 +1,62 @@
 # Changelog
 
+## [0.18.0] - 2026-08-02 - Linux parity, and the fixes four reviews found
+
+Supersedes 0.17.0 for Linux users. 0.17.0 shipped defects that could hang the
+MCP server; anyone on Linux should take this instead.
+
+### Added — closing the Windows parity gaps
+
+- **Window state via EWMH** (`ghost-linux/src/wm.rs`). `ghost_window op=state`
+  now supports minimize, maximize, restore and close on X11 and on XWayland
+  windows, using ClientMessages to the root window. AT-SPI has no window
+  management at all, which is why this needed a new mechanism.
+- **Background-safe edit shortcuts.** Copy/cut/paste/select-all go through
+  AT-SPI `EditableText`, the direct analogue of Windows' `WM_COPY`/`WM_CUT`/
+  `WM_PASTE`. The application performs the operation, so no keystroke is
+  synthesised, the pointer does not move and focus does not change.
+- **Occluded-window capture via XComposite.** Reads a window's backing pixmap,
+  so a window that is behind another still captures its own content. Background
+  mode drives windows that are by definition not in front, so act-then-verify
+  was previously checking the wrong pixels.
+- **Global Ctrl+Alt+G emergency hotkey** on X11, grabbed under every lock-modifier
+  combination so it keeps working with Caps or Num Lock on.
+- **Local OCR via Tesseract** when installed, with real per-word boxes.
+- `ghost_scroll` left/right, and a working `release_all_modifiers`.
+
+### Fixed — from the production, code, parity and test-quality reviews
+
+- **The MCP server could hang permanently.** The Wayland Screenshot portal call
+  had no timeout, and the server runs a current-thread runtime dispatching
+  serially — a wedged portal froze everything, silently. Now bounded.
+- **Every response ran a full AT-SPI walk.** `foreground_info` is attached to all
+  tool results; on Linux it enumerated every application under a 20s budget. Now
+  400ms-bounded.
+- **Data loss.** `set_value_ex`'s fallback fired Ctrl+A + Delete with no guard.
+  Windows gates that on `is_editable_role` precisely because on a non-editable
+  target it means select-all + delete. Ported.
+- **`mode=background` moved the real cursor** for non-button elements while
+  reporting `cursor_preserved: true`. It now drives AT-SPI or refuses.
+- **Zombie processes.** Launched applications were never reaped.
+- **A declined Wayland consent dialog killed input for the whole session** —
+  the error was cached in a `OnceLock`. Only success is cached now.
+- **`ghost doctor` raised permission prompts on Wayland.** Diagnostics now report
+  which paths would be used instead of exercising them.
+- Cycle detection in the AT-SPI walks; blocking captures moved off the async
+  runtime; idle waits honour the stop flag.
+
+### Changed
+
+- `capabilities_for(Linux)` claims 7 of 9 features. `KeyInput` is still not
+  claimed: synthetic typing has no end-to-end test.
+- `ghost doctor` reports Wayland limits explicitly.
+
+### Verification
+
+19 live tests against a real GTK application on Ubuntu and Fedora 41, plus the
+CLI, the installer and an MCP stdio smoke test. The Wayland portal paths remain
+unverified on hardware — CI runs X11 — and are documented as such.
+
 ## [0.17.0] - 2026-08-01 - Linux support (AT-SPI2)
 
 Ghost runs on Linux. `ghost`, `ghost-mcp` and `ghost-http` all build and run
