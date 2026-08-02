@@ -19,6 +19,28 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
+/// Decode standard-alphabet base64. Written inline so the test needs no extra
+/// dependency just to prove the screenshot payload is a real image.
+fn base64_decode(s: &str) -> Option<Vec<u8>> {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut acc: u32 = 0;
+    let mut bits = 0u32;
+    let mut out = Vec::new();
+    for c in s.bytes() {
+        if c == b'=' || c.is_ascii_whitespace() {
+            continue;
+        }
+        let v = T.iter().position(|&t| t == c)? as u32;
+        acc = (acc << 6) | v;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+        }
+    }
+    Some(out)
+}
+
 /// A GTK app for the duration of one test, killed on drop even on panic.
 struct TestApp(Child);
 
@@ -158,10 +180,19 @@ fn server_starts_and_advertises_its_verbs() {
     let mut mcp = McpServer::start();
     mcp.initialize();
 
+    // Parse the tools array. Substring-scanning the whole response would
+    // false-pass on a verb that only appears inside another verb's description,
+    // and the verbs deliberately cross-reference each other.
     let resp = mcp.request("tools/list", json!({}));
-    let text = resp.to_string();
+    let names: Vec<&str> = resp["result"]["tools"]
+        .as_array()
+        .expect("tools/list must return an array")
+        .iter()
+        .filter_map(|t| t["name"].as_str())
+        .collect();
+
     for verb in ["ghost_see", "ghost_act", "ghost_window", "ghost_shell", "ghost_screenshot"] {
-        assert!(text.contains(verb), "tools/list must advertise {verb}");
+        assert!(names.contains(&verb), "tools/list must advertise {verb}; got {names:?}");
     }
 }
 
@@ -284,10 +315,28 @@ fn screenshot_verb_returns_an_image() {
     mcp.initialize();
 
     let out = mcp.call("ghost_screenshot", json!({}));
+
+    // Length alone is not evidence: a verbose JSON error envelope also exceeds
+    // any byte threshold. Decode the payload and check the image magic number,
+    // so only real image bytes can pass.
+    let v: Value = serde_json::from_str(&out)
+        .unwrap_or_else(|e| panic!("ghost_screenshot must return JSON ({e}): {out}"));
+    assert_ne!(v["ok"], serde_json::json!(false), "ghost_screenshot failed: {out}");
+
+    let b64 = ["jpeg_base64", "png_base64", "image_base64", "data"]
+        .iter()
+        .find_map(|k| v["data"][k].as_str().or_else(|| v[k].as_str()))
+        .unwrap_or_else(|| panic!("no base64 image field in response: {out}"));
+
+    let raw = base64_decode(b64).expect("image field must be valid base64");
+    // Magic numbers as explicit bytes: the PNG signature contains CR/LF, which
+    // is exactly the sort of thing that gets silently rewritten in transit.
+    let is_png = raw.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]);
+    let is_jpeg = raw.starts_with(&[0xFF, 0xD8]);
     assert!(
-        out.len() > 512,
-        "ghost_screenshot must return a real payload, got {} bytes: {}",
-        out.len(),
-        &out[..out.len().min(300)]
+        is_png || is_jpeg,
+        "decoded payload must be a real PNG or JPEG, got {} bytes starting {:02x?}",
+        raw.len(),
+        &raw[..raw.len().min(8)]
     );
 }

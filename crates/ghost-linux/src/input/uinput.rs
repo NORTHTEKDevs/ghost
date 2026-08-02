@@ -39,6 +39,7 @@ impl UinputBackend {
         axes.insert(RelativeAxisCode::REL_X);
         axes.insert(RelativeAxisCode::REL_Y);
         axes.insert(RelativeAxisCode::REL_WHEEL);
+        axes.insert(RelativeAxisCode::REL_HWHEEL);
 
         let dev = VirtualDevice::builder()
             .map_err(uinput_err)?
@@ -77,7 +78,13 @@ impl UinputBackend {
     }
 
     pub fn scroll(&self, clicks: i32) -> Result<()> {
-        self.emit(&[InputEvent::new(EventType::RELATIVE.0, RelativeAxisCode::REL_WHEEL.0, clicks)])
+        self.scroll_axis(clicks, false)
+    }
+
+    pub fn scroll_axis(&self, clicks: i32, horizontal: bool) -> Result<()> {
+        let axis =
+            if horizontal { RelativeAxisCode::REL_HWHEEL } else { RelativeAxisCode::REL_WHEEL };
+        self.emit(&[InputEvent::new(EventType::RELATIVE.0, axis.0, clicks)])
     }
 
     pub fn move_to(&self, _x: i32, _y: i32) -> Result<()> {
@@ -124,8 +131,31 @@ mod tests {
 
     #[test]
     fn absolute_positioning_is_refused_with_a_usable_alternative() {
-        // Silently clicking the wrong coordinates would be far worse than an error.
-        let msg = CoreError::Unsupported("x".into());
-        assert!(matches!(msg, CoreError::Unsupported(_)));
+        // Silently clicking the wrong coordinates would be far worse than an
+        // error. This must call the real function: an earlier version built a
+        // CoreError locally and matched it against itself, which passed no
+        // matter what move_to did.
+        //
+        // Opening /dev/uinput needs privileges CI does not have, so the device
+        // is only exercised when it is actually available; the refusal itself is
+        // what is under test, and it does not depend on the device.
+        match UinputBackend::new() {
+            Ok(b) => {
+                let err = b.move_to(100, 200).expect_err("uinput must refuse absolute coordinates");
+                assert!(
+                    matches!(err, CoreError::Unsupported(ref m) if m.contains("ghost_act")),
+                    "the refusal must name the working alternative, got: {err}"
+                );
+            }
+            Err(e) => {
+                // No /dev/uinput here. Assert the diagnosis is actionable rather
+                // than silently skipping.
+                let m = e.to_string();
+                assert!(
+                    m.contains("uinput") || m.contains("permission"),
+                    "an unavailable uinput device must explain why, got: {m}"
+                );
+            }
+        }
     }
 }

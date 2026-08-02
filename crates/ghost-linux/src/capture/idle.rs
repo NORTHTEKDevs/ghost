@@ -52,6 +52,12 @@ impl IdleDetector {
         let mut still = 0u32;
 
         loop {
+            // Honour the emergency stop between samples. On Linux `ghost_stop`
+            // is the only out-of-band control -- there is no global hotkey -- so
+            // a long wait that ignores the flag is genuinely uninterruptible.
+            if crate::input::hotkey::is_stopped() {
+                return Err(crate::error::CoreError::JobTimeout);
+            }
             // Capture is blocking; keep it off the async worker.
             let shot = tokio::task::spawn_blocking(capture_screen_full_rgba)
                 .await
@@ -92,6 +98,9 @@ impl IdleDetector {
         let mut still = 0u32;
 
         while Instant::now() < deadline {
+            if crate::input::hotkey::is_stopped() {
+                return false;
+            }
             let Ok((rgba, w, h)) = capture_screen_full_rgba() else { return false };
             let Some(grid) = luma_grid(&rgba, w, h) else {
                 return false;
