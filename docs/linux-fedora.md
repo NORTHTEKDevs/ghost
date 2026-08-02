@@ -182,6 +182,7 @@ Then the real behavioural checks, against a GTK application (`gedit`,
 | `ghost_act` on a button by name | the button activates, **cursor does not move** |
 | `ghost_act` typing into a text field | text appears without keystrokes being synthesised |
 | `ghost_screenshot` | a real PNG of the screen |
+| `ghost_scroll direction=up` **on Wayland** | the page scrolls **up**. The portal follows the Wayland axis convention (positive = down), the opposite of X11 and uinput, so Ghost inverts the sign for it. That inversion is inferred from the spec and unconfirmed on hardware — if scrolling goes the wrong way on Wayland, this is why |
 
 The third and fourth rows are the ones that prove the wedge survived the port:
 if the pointer visibly moves, the AT-SPI action path was not taken and something

@@ -340,6 +340,33 @@ pub fn run_checks() -> Vec<Check> {
         ));
     }
 
+    // The emergency stop is the one thing a user needs to know the state of
+    // before letting an agent drive their desktop.
+    out.push(match kind {
+        SessionKind::X11 => {
+            if crate::engine::input::hotkey_x11::is_registered() {
+                Check::new(
+                    "emergency stop",
+                    Status::Pass,
+                    "Ctrl+Alt+G is armed globally, and ghost_stop over MCP also works".to_string(),
+                )
+            } else {
+                Check::new(
+                    "emergency stop",
+                    Status::Warn,
+                    "Ctrl+Alt+G is not armed in this process (it is registered when a Ghost              session starts, and another application may hold the combination).              ghost_stop over MCP still works"
+                        .to_string(),
+                )
+            }
+        }
+        _ => Check::new(
+            "emergency stop",
+            Status::Warn,
+            "ghost_stop over MCP. Wayland does not let a client grab keys globally, so there              is no Ctrl+Alt+G here -- that is a security property of the display server,              not a Ghost limitation"
+                .to_string(),
+        ),
+    });
+
     // Same reasoning as the input backend: on Wayland a capture goes through
     // the Screenshot portal, which prompts. Diagnostics must not ask the user
     // for permissions, so report the path instead of exercising it.

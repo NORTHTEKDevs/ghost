@@ -17,6 +17,27 @@
 
 use std::sync::atomic::Ordering;
 
+/// Whether the grab is currently held and its listener alive.
+///
+/// Idempotent, but NOT permanent. If the listener thread exits -- the X server
+/// restarted, the display was reconfigured, a suspend/resume dropped the
+/// connection -- the grab is gone and Ctrl+Alt+G is dead. Latching this forever
+/// would make that silently unrecoverable, and on Linux this is the only
+/// out-of-band kill switch. The listener clears it on the way out so the next
+/// `register()` re-arms.
+static ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Is the emergency-stop hotkey currently armed?
+///
+/// `ghost doctor` must call THIS rather than `register()`. Re-registering to
+/// test the state re-grabs the same combination on a second connection, which
+/// the X server refuses with `BadAccess` precisely *because* the first grab is
+/// working -- so a healthy hotkey would be reported as held by another
+/// application.
+pub fn is_registered() -> bool {
+    ACTIVE.load(Ordering::SeqCst)
+}
+
 use x11rb::connection::Connection;
 use x11rb::protocol::xproto::{ConnectionExt, GrabMode, ModMask};
 use x11rb::protocol::Event;
@@ -34,6 +55,21 @@ const KEYSYM_G: u32 = 0x67;
 /// combination), rather than reporting success for a hotkey that will never
 /// fire.
 pub fn register() -> Result<()> {
+    // Idempotent, matching the Windows engine, which treats
+    // ERROR_HOTKEY_ALREADY_REGISTERED as success. Without this every call grabs
+    // the key again and spawns another listener thread holding another X11
+    // connection -- and GhostSession::new() calls this, so a process that builds
+    // more than one session leaks both.
+    // Idempotent, but NOT permanent. If the listener thread exits -- the X
+    // server restarted, the display was reconfigured, a suspend/resume dropped
+    // the connection -- the grab is gone and Ctrl+Alt+G is dead. Latching a
+    // "registered" flag forever would make that silently unrecoverable, and on
+    // Linux this is the only out-of-band kill switch. The flag is cleared by the
+    // listener on the way out so the next call re-arms.
+    if ACTIVE.load(Ordering::SeqCst) {
+        return Ok(());
+    }
+
     if session_kind() != SessionKind::X11 {
         return Err(CoreError::Unsupported(
             "a global hotkey needs an X11 session; Wayland does not allow clients to grab keys \
@@ -54,19 +90,34 @@ pub fn register() -> Result<()> {
     // on -- a classic X11 trap, and one a panicking user is very likely to hit.
     let base = ModMask::CONTROL | ModMask::M1;
     let lock_variants = [
-        ModMask::from(0u16),
-        ModMask::LOCK,          // Caps Lock
-        ModMask::M2,            // Num Lock
-        ModMask::LOCK | ModMask::M2,
+        (ModMask::from(0u16), "none"),
+        (ModMask::LOCK, "caps lock"),
+        (ModMask::M2, "num lock"),
+        (ModMask::LOCK | ModMask::M2, "caps+num lock"),
     ];
 
+    // The plain variant is the one that decides success. Accepting a partial
+    // grab reports a working hotkey that silently does nothing whenever Caps
+    // Lock or Num Lock happens to be on.
     let mut grabbed = false;
-    for extra in lock_variants {
+    let mut missing: Vec<&str> = Vec::new();
+    for (extra, label) in lock_variants {
         let ok = conn
             .grab_key(true, root, base | extra, keycode, GrabMode::ASYNC, GrabMode::ASYNC)
             .map(|c| c.check().is_ok())
             .unwrap_or(false);
-        grabbed |= ok;
+        if label == "none" {
+            grabbed = ok;
+        } else if !ok {
+            missing.push(label);
+        }
+    }
+    if grabbed && !missing.is_empty() {
+        tracing::warn!(
+            "emergency-stop hotkey Ctrl+Alt+G registered, but not for these lock states: {}. It \
+             will not fire while they are on",
+            missing.join(", ")
+        );
     }
     conn.flush().map_err(|e| CoreError::platform(format!("x11 flush: {e}")))?;
 
@@ -77,6 +128,7 @@ pub fn register() -> Result<()> {
         ));
     }
 
+    ACTIVE.store(true, Ordering::SeqCst);
     std::thread::Builder::new()
         .name("ghost-hotkey".into())
         .spawn(move || {
@@ -86,8 +138,20 @@ pub fn register() -> Result<()> {
                     super::hotkey::STOP_FLAG.store(true, Ordering::SeqCst);
                 }
             }
+            // The connection dropped. Clear the flag so a later call re-arms
+            // instead of assuming a hotkey that no longer exists, and say so:
+            // an emergency stop that dies silently is the one failure this
+            // module exists to prevent.
+            ACTIVE.store(false, Ordering::SeqCst);
+            tracing::warn!(
+                "the emergency-stop hotkey listener exited (the X11 connection dropped); \
+                 Ctrl+Alt+G is no longer armed. ghost_stop over MCP still works"
+            );
         })
-        .map_err(|e| CoreError::platform(format!("could not spawn hotkey thread: {e}")))?;
+        .map_err(|e| {
+            ACTIVE.store(false, Ordering::SeqCst);
+            CoreError::platform(format!("could not spawn hotkey thread: {e}"))
+        })?;
 
     Ok(())
 }

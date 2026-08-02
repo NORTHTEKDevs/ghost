@@ -337,11 +337,6 @@ pub mod hotkey {
         }
     }
 
-    /// Whether the global hotkey is actually active, for `ghost doctor`.
-    pub fn global_hotkey_status() -> std::result::Result<(), String> {
-        super::hotkey_x11::register().map_err(|e| e.to_string())
-    }
-
     /// Release every modifier, unconditionally.
     ///
     /// `ghost_key` deliberately exposes `down:ctrl` / `up:ctrl` so a caller can

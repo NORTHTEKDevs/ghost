@@ -7,7 +7,9 @@
 //!
 //! Persistent framing: the driver reads `<nonce> <base64(utf8 cmd)>` lines from
 //! stdin, `Invoke-Expression`s the decoded command with stderr merged, then emits
-//! a sentinel line `__GHOST_DONE_<nonce>__ <exitcode>`. base64 makes any command
+//! a sentinel line `__GHOST_DONE_<nonce>__ <exitcode>`, where `<nonce>` is an
+//! unguessable per-session secret plus a counter, so command output cannot
+//! forge a completion. base64 makes any command
 //! text injection-safe; the per-session nonce means a late sentinel from a
 //! timed-out command can never be mistaken for a later command's sentinel.
 //!
@@ -38,8 +40,17 @@ struct ShellSession {
     child: Child,
     stdin: ChildStdin,
     reader: BufReader<ChildStdout>,
-    /// Monotonic per-session command counter; also the sentinel nonce.
+    /// Monotonic per-session command counter.
     nonce: u64,
+    /// Random per-session value mixed into every sentinel, so the completion
+    /// marker cannot be predicted -- and therefore cannot be forged -- by
+    /// anything the command prints. Without it the marker is
+    /// `__GHOST_DONE_1__ 0`, which a command that echoes attacker-controlled
+    /// text (a log line, a downloaded file, `cat` of an untrusted path) can
+    /// emit itself: Ghost would then report someone else's exit code, treat the
+    /// real output as belonging to the next command, and desynchronise the
+    /// session for good.
+    secret: String,
     /// Set when a `send` timed out and its command is still running. Holds the
     /// nonce whose sentinel `read` must still drain before the session is usable.
     pending: Option<u64>,
@@ -302,6 +313,7 @@ impl GhostSession {
             stdin,
             reader: BufReader::new(stdout),
             nonce: 0,
+            secret: session_secret(),
             pending: None,
             created: Instant::now(),
             pid,
@@ -343,14 +355,17 @@ impl GhostSession {
 
         sess.nonce += 1;
         let nonce = sess.nonce;
-        let frame = format!("{} {}\n", nonce, b64_encode(cmd.as_bytes()));
+        // The driver echoes this field back verbatim, so folding the secret
+        // into the nonce needs no change on the driver side.
+        let token = sentinel_token(&sess.secret, nonce);
+        let frame = format!("{} {}\n", token, b64_encode(cmd.as_bytes()));
         if let Err(e) = sess.stdin.write_all(frame.as_bytes()).await {
             let _ = sess.child.start_kill();
             return Err(GhostError::Config(format!("ghost_shell: session '{id}' write failed: {e}")));
         }
         let _ = sess.stdin.flush().await;
 
-        let outcome = read_until_sentinel(&mut sess, nonce, dur).await;
+        let outcome = read_until_sentinel(&mut sess, &token, dur).await;
         self.finish_send(id, sess, nonce, outcome).await
     }
 
@@ -376,7 +391,8 @@ impl GhostSession {
                 return Ok(json!({ "ok": true, "id": id, "output": "", "busy": false, "note": "no command pending" }));
             }
         };
-        let outcome = read_until_sentinel(&mut sess, nonce, dur).await;
+        let token = sentinel_token(&sess.secret, nonce);
+        let outcome = read_until_sentinel(&mut sess, &token, dur).await;
         self.finish_send(id, sess, nonce, outcome).await
     }
 
@@ -468,11 +484,30 @@ enum ReadOutcome {
     Eof { output: String },
 }
 
+/// A value the shell session's own output cannot predict.
+///
+/// `RandomState` is seeded by the OS per process and differs per instance, so
+/// two sessions in one process do not share a secret either. This is framing
+/// integrity, not cryptography: it has to be unguessable by a command that is
+/// merely printing text, and 64 bits of OS entropy is far past that bar.
+fn session_secret() -> String {
+    use std::hash::{BuildHasher, Hasher};
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    h.write_u64(0x9E37_79B9_7F4A_7C15);
+    format!("{:016x}", h.finish())
+}
+
+/// The nonce field for one command: secret plus counter, no whitespace, so both
+/// the bash and PowerShell drivers can echo it back as a single token.
+fn sentinel_token(secret: &str, nonce: u64) -> String {
+    format!("{secret}x{nonce}")
+}
+
 /// Read lines from the session until the nonce-stamped sentinel appears, the
 /// deadline passes, the stop flag fires, or stdout hits EOF. Everything before
 /// the sentinel is the command's merged output.
-async fn read_until_sentinel(sess: &mut ShellSession, nonce: u64, dur: Duration) -> ReadOutcome {
-    let sentinel = format!("__GHOST_DONE_{nonce}__ ");
+async fn read_until_sentinel(sess: &mut ShellSession, token: &str, dur: Duration) -> ReadOutcome {
+    let sentinel = format!("__GHOST_DONE_{token}__ ");
     let deadline = Instant::now() + dur;
     let mut output = String::new();
 
