@@ -191,6 +191,27 @@ fell through to synthetic input.
 
 ## 4. Wayland specifics
 
+**Fedora Workstation defaults to Wayland, so this is probably your session.**
+What that means in practice:
+
+| Works on Wayland | Needs X11 (or an XWayland app) |
+|---|---|
+| Element discovery, `ghost_see`, `ghost_find` | `ghost_window op=state` minimize/maximize/restore (EWMH) |
+| `ghost_act` click and type (AT-SPI — never prompts) | Occluded-window capture (XComposite) |
+| Clipboard / edit shortcuts (AT-SPI) | Global Ctrl+Alt+G hotkey (XGrabKey) |
+| `ghost_screenshot`, `ghost_shell`, `ghost_window` list/focus | |
+
+The X11-only features return a clear `Unsupported` error on Wayland rather than
+failing silently, and `ghost doctor` lists them up front under `wayland limits`.
+
+`ghost doctor` never triggers a permission prompt: on Wayland it reports which
+input and capture paths *would* be used instead of exercising them. The consent
+dialog appears on your first real synthetic input or screenshot, where you
+expect it.
+
+**If you decline the consent dialog, or miss it, just try again.** The failure is
+not cached — the next call asks again.
+
 ### Consent
 
 The first synthetic-input fallback on Wayland raises a GNOME permission dialog.

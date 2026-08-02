@@ -135,11 +135,29 @@ impl MouseButton {
 
 /// The process-wide input backend, created on first use.
 pub fn backend() -> Result<&'static Backend> {
-    static BACKEND: OnceLock<std::result::Result<Backend, String>> = OnceLock::new();
-    BACKEND
-        .get_or_init(|| select_backend().map_err(|e| e.to_string()))
-        .as_ref()
-        .map_err(|e| CoreError::platform(e.clone()))
+    static BACKEND: OnceLock<Backend> = OnceLock::new();
+    static INIT: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    if let Some(b) = BACKEND.get() {
+        return Ok(b);
+    }
+
+    // Serialise attempts so two callers cannot race into raising two consent
+    // dialogs on Wayland.
+    let _guard = INIT.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(b) = BACKEND.get() {
+        return Ok(b);
+    }
+
+    // Only SUCCESS is cached. A failure here is very often transient and
+    // user-recoverable: on Wayland the first synthetic input raises a consent
+    // dialog, and the user may decline it, never see it (it can open on another
+    // workspace), or let it time out. Caching that error would leave synthetic
+    // input dead for the entire life of the MCP server, recoverable only by
+    // restarting the client -- turning one mis-click into a broken session.
+    // Retrying means the next call simply asks again.
+    let b = select_backend()?;
+    Ok(BACKEND.get_or_init(|| b))
 }
 
 fn select_backend() -> Result<Backend> {
