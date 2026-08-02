@@ -1,0 +1,74 @@
+name: Bug report
+description: Something Ghost did wrong, or did not do at all
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Run `ghost doctor` first.** It reports PASS/WARN/FAIL on the things
+        that actually break Ghost, and it names most problems outright -
+        especially on Linux, where the accessibility bus has to be enabled and
+        applications have to be restarted afterwards.
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `ghost doctor`
+      description: Paste it verbatim. This is the single most useful thing in a report.
+      render: shell
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Windows
+        - Linux - X11 session
+        - Linux - Wayland session
+        - Linux - not sure (run `echo $XDG_SESSION_TYPE`)
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Ghost version
+      description: "`ghost --version`, or the release tag you downloaded"
+      placeholder: v0.18.1
+    validations:
+      required: true
+
+  - type: input
+    id: target
+    attributes:
+      label: Application you were driving
+      description: Name and toolkit if you know it. GTK, Qt, Electron and native apps expose accessibility differently.
+      placeholder: "GNOME Text Editor (GTK4), or Notepad on Windows 11"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: |
+        The call you made and what came back. Ghost reports failure in two
+        places - the JSON-RPC error, and an `ok:false` payload with `error` and
+        `suggested_action`. Please include whichever you got.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: A minimal sequence someone else can run. If it only happens with one specific application, say so - that is useful information, not a disqualifier.
