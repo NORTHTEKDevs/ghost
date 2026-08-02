@@ -175,6 +175,8 @@ Then the real behavioural checks, against a GTK application (`gedit`,
 
 | Check | Expected |
 |---|---|
+| `ghost_window op=state state=minimize` then `restore` | the window minimises and comes back. Implemented via EWMH and its plumbing is CI-verified, but the *effect* is unverified - CI's container window manager will not iconify a dialog |
+| `ghost_window op=state state=close` | the window closes |
 | `ghost_window` (list) | your open windows, with real titles and PIDs |
 | `ghost_see` | elements with real names, roles and on-screen rectangles |
 | `ghost_act` on a button by name | the button activates, **cursor does not move** |
