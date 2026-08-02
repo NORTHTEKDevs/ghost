@@ -272,16 +272,15 @@ fn window_manager_control_reaches_the_real_window() {
     let state = ghost_linux::wm::is_minimized(win.pid, Some(&win.name));
     assert!(state.is_some(), "WM_STATE must be readable for a managed window");
 
-    // Close is the observable effect: the window must actually go away.
+    // Close is the observable effect. Observed through X11 rather than AT-SPI:
+    // the question is whether the window manager dropped the window from
+    // _NET_CLIENT_LIST, and routing that through AT-SPI's own view would add a
+    // second cache with its own timing as a confounder.
     ghost_linux::wm::apply(win.pid, Some(&win.name), ghost_linux::wm::WmAction::Close)
         .expect("close must be accepted");
     assert!(
-        wait_for(|| {
-            list_windows()
-                .map(|ws| !ws.iter().any(|w| w.name.contains("GhostWmProbe")))
-                .unwrap_or(false)
-        }),
-        "a close request through EWMH must actually close the window"
+        wait_for(|| ghost_linux::wm::x11_window_for(win.pid, Some(&win.name)).is_none()),
+        "a close request through EWMH must remove the window from _NET_CLIENT_LIST"
     );
 }
 
