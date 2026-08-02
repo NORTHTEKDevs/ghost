@@ -63,6 +63,7 @@ struct Atoms {
     net_active_window: Atom,
     net_close_window: Atom,
     wm_change_state: Atom,
+    wm_state: Atom,
     utf8_string: Atom,
 }
 
@@ -104,6 +105,7 @@ impl Ewmh {
             net_active_window: self.atom("_NET_ACTIVE_WINDOW")?,
             net_close_window: self.atom("_NET_CLOSE_WINDOW")?,
             wm_change_state: self.atom("WM_CHANGE_STATE")?,
+            wm_state: self.atom("WM_STATE")?,
             utf8_string: self.atom("UTF8_STRING")?,
         })
     }
@@ -257,12 +259,25 @@ pub fn apply(pid: u32, title: Option<&str>, action: WmAction) -> Result<()> {
 
 /// Whether the window owned by `pid` is currently minimised.
 ///
-/// Used to report `state` in `list_windows` from the window manager's own view
-/// rather than inferring it, which is what the Windows engine does.
+/// Checks ICCCM `WM_STATE` first and only then EWMH `_NET_WM_STATE_HIDDEN`.
+/// `WM_STATE` is the authoritative, universally-implemented answer -- its first
+/// value is `IconicState` when a window is minimised -- whereas
+/// `_NET_WM_STATE_HIDDEN` is advisory and not every window manager sets it on
+/// iconify. Reading only the EWMH hint reports "not minimised" for a window that
+/// plainly is.
 pub fn is_minimized(pid: u32, title: Option<&str>) -> Option<bool> {
     let e = Ewmh::open().ok()?;
     let a = e.atoms().ok()?;
     let w = find_window(&e, &a, pid, title).ok()??;
+
+    if let Ok(Ok(r)) =
+        e.conn.get_property(false, w, a.wm_state, a.wm_state, 0, 2).map(|c| c.reply())
+    {
+        let vals: Vec<u32> = r.value32().map(|v| v.collect()).unwrap_or_default();
+        if let Some(&state) = vals.first() {
+            return Some(state == ICONIC_STATE);
+        }
+    }
 
     let r = e
         .conn
