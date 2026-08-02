@@ -268,9 +268,10 @@ These are reported as `Unsupported` errors, never faked:
 | Per-window capture on native Wayland | no compositor API exposes it to an ordinary client |
 | Root-window capture under XWayland | rootless XWayland has no screen-sized root backing store; `GetImage` returns `BadMatch` |
 | XTEST against native Wayland windows | XTEST reaches XWayland clients only — which is why the portal backend is selected on Wayland |
-| Local OCR (`find_text_local`) | no always-present Fedora OCR engine; AT-SPI already returns real text with real bounds |
-| Global Ctrl+Alt+G emergency hotkey | no X11/Wayland equivalent without grabbing keys globally; `ghost_stop` over MCP is the supported stop |
-| `ghost_window` minimize / maximize / restore | AT-SPI exposes no such action and Ghost speaks no window-manager protocol. `close` works (via the window's own accessible action); the others return `Unsupported` rather than silently doing nothing |
+| Local OCR (`find_text_local`) without Tesseract | Fedora ships no OCR engine by default. `sudo dnf install tesseract` enables it; without it the call names that command instead of failing vaguely. Prefer `ghost_find`/`ghost_see` regardless — the accessibility tree returns real text with real bounds and no OCR error |
+| Global Ctrl+Alt+G emergency hotkey on **Wayland** | Wayland does not let a client grab keys globally. That is a security property of the display server, not a gap in Ghost. It works on X11 (`XGrabKey`); on Wayland `ghost_stop` over MCP is the supported stop |
+| `ghost_window` minimize / maximize / restore on **Wayland** | these go through EWMH, an X11 window-manager protocol. They work on X11 and for XWayland apps. On native Wayland only `close` works, via the window's own accessible action; the rest return `Unsupported` rather than silently doing nothing |
+| Undo (`ghost_act op=undo`) | AT-SPI exposes no undo verb. Ghost refuses rather than firing Ctrl+Z at whatever happens to be focused, which is not necessarily the element you named. Send `ghost_key ctrl+z` yourself once the element is focused |
 | Pointer position under Wayland | neither the portal nor uinput reports it, so `cursor_preserved` is reported from the dispatch path rather than measured. AT-SPI actions never touch the pointer, so this is accurate for the path that matters |
 | Applications with no accessibility tree | AT-SPI cannot reconstruct semantics from pixels; vision grounding (`ghost-ground`) is the fallback, exactly as on Windows |
 
