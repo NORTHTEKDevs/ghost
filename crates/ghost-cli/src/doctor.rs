@@ -300,26 +300,60 @@ pub fn run_checks() -> Vec<Check> {
 
     // Synthetic input is a fallback, not the primary path, so a failure here is
     // a warning: AT-SPI actions still drive most applications.
-    match crate::engine::input::backend() {
-        Ok(b) => out.push(Check::new(
+    //
+    // On Wayland this deliberately does NOT construct the backend. Doing so
+    // opens the RemoteDesktop portal, which raises a screen-share consent
+    // dialog -- running diagnostics must never prompt the user for permissions,
+    // and on a fresh machine that dialog is alarming and can block for minutes.
+    // Report what would be selected instead; the real request happens on the
+    // first synthetic input, where the user expects it.
+    match kind {
+        SessionKind::Wayland => out.push(Check::new(
             "input backend",
             Status::Pass,
-            format!("{} (override with GHOST_INPUT=x11|portal|uinput)", b.name()),
+            "portal (RemoteDesktop). Consent is requested once, on the first synthetic input,              and remembered afterwards. AT-SPI actions never prompt"
+                .to_string(),
         )),
-        Err(e) => out.push(Check::new(
-            "input backend",
-            Status::Warn,
-            format!("{e}. AT-SPI actions still work; only coordinate input is affected"),
-        )),
+        _ => match crate::engine::input::backend() {
+            Ok(b) => out.push(Check::new(
+                "input backend",
+                Status::Pass,
+                format!("{} (override with GHOST_INPUT=x11|portal|uinput)", b.name()),
+            )),
+            Err(e) => out.push(Check::new(
+                "input backend",
+                Status::Warn,
+                format!("{e}. AT-SPI actions still work; only coordinate input is affected"),
+            )),
+        },
     }
 
-    match capture_probe() {
-        Ok(bytes) => out.push(Check::new("capture", Status::Pass, format!("{bytes} bytes"))),
-        Err(e) => out.push(Check::new(
-            "capture",
+    // What this session can and cannot do, stated up front. The X11-only
+    // features degrade honestly on Wayland, but a user should learn that here
+    // rather than from a failed call mid-task.
+    if kind == SessionKind::Wayland {
+        out.push(Check::new(
+            "wayland limits",
             Status::Warn,
-            format!("{e}. On Wayland the Screenshot portal needs xdg-desktop-portal-gnome"),
+            "window minimize/maximize/restore (EWMH), occluded-window capture (XComposite) and              the global Ctrl+Alt+G hotkey need X11 and report Unsupported here. Everything              else -- element discovery, actions, typing, clipboard, screenshots -- works.              XWayland apps get the X11 features too"
+                .to_string(),
+        ));
+    }
+
+    // Same reasoning as the input backend: on Wayland a capture goes through
+    // the Screenshot portal, which prompts. Diagnostics must not ask the user
+    // for permissions, so report the path instead of exercising it.
+    match kind {
+        SessionKind::Wayland => out.push(Check::new(
+            "capture",
+            Status::Pass,
+            "Screenshot portal. Needs xdg-desktop-portal and xdg-desktop-portal-gnome;              consent is requested on first use"
+                .to_string(),
         )),
+        _ => match capture_probe() {
+            Ok(bytes) => out.push(Check::new("capture", Status::Pass, format!("{bytes} bytes"))),
+            Err(e) => out.push(Check::new("capture", Status::Warn, e)),
+        },
     }
 
     out
