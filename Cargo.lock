@@ -1175,7 +1175,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-linux"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "arboard",
  "ashpd",
@@ -1193,7 +1193,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-mcp"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "ghost-core",
  "ghost-ground",
