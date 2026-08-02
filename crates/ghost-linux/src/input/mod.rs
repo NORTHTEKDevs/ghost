@@ -82,11 +82,20 @@ impl Backend {
         }
     }
 
+    /// Vertical scroll. Positive is up, matching the Windows engine.
     pub fn scroll(&self, clicks: i32) -> Result<()> {
+        self.scroll_axis(clicks, false)
+    }
+
+    /// Scroll on either axis. Horizontal exists because the Windows engine
+    /// supports `direction=left|right` via MOUSEEVENTF_HWHEEL; refusing it here
+    /// would make the same `ghost_scroll` call succeed on one platform and error
+    /// on the other.
+    pub fn scroll_axis(&self, clicks: i32, horizontal: bool) -> Result<()> {
         match self {
-            Backend::X11(b) => b.scroll(clicks),
-            Backend::Portal(b) => b.scroll(clicks),
-            Backend::Uinput(b) => b.scroll(clicks),
+            Backend::X11(b) => b.scroll_axis(clicks, horizontal),
+            Backend::Portal(b) => b.scroll_axis(clicks, horizontal),
+            Backend::Uinput(b) => b.scroll_axis(clicks, horizontal),
         }
     }
 
@@ -246,16 +255,18 @@ pub mod mouse {
     pub fn scroll(x: i32, y: i32, direction: &str, amount: i32) -> Result<()> {
         let b = backend()?;
         b.move_to(x, y)?;
-        let clicks = match direction.trim().to_ascii_lowercase().as_str() {
-            "up" => amount,
-            "down" => -amount,
+        let (clicks, horizontal) = match direction.trim().to_ascii_lowercase().as_str() {
+            "up" => (amount, false),
+            "down" => (-amount, false),
+            "right" => (amount, true),
+            "left" => (-amount, true),
             other => {
                 return Err(CoreError::platform(format!(
-                    "scroll direction {other:?} is not supported (expected up or down)"
+                    "scroll direction {other:?} is not supported (expected up, down, left or right)"
                 )))
             }
         };
-        b.scroll(clicks)
+        b.scroll_axis(clicks, horizontal)
     }
 
     fn press_at(x: i32, y: i32, btn: MouseButton) -> Result<()> {
@@ -299,9 +310,30 @@ pub mod hotkey {
         Ok(())
     }
 
-    /// No modifier is ever left latched by this backend: every `key_down` in a
-    /// combo is paired with a `key_up` before the call returns.
-    pub fn release_all_modifiers() {}
+    /// Release every modifier, unconditionally.
+    ///
+    /// `ghost_key` deliberately exposes `down:ctrl` / `up:ctrl` so a caller can
+    /// hold a modifier across calls. If `ghost_stop` fires between the two, the
+    /// modifier stays physically latched in the user's session until they tap
+    /// the real key — and on Linux `ghost_stop` is the *only* out-of-band
+    /// control, since there is no global emergency hotkey. So the stop path has
+    /// to actively clear them, exactly as the Windows engine does.
+    ///
+    /// Errors are ignored on purpose: this runs on the panic/stop path, where
+    /// making a best effort on every key matters more than reporting which one
+    /// failed.
+    pub fn release_all_modifiers() {
+        const MODIFIERS: [u32; 8] = [
+            0xFFE1, 0xFFE2, // Shift_L, Shift_R
+            0xFFE3, 0xFFE4, // Control_L, Control_R
+            0xFFE9, 0xFFEA, // Alt_L, Alt_R
+            0xFFEB, 0xFFEC, // Super_L, Super_R
+        ];
+        let Ok(b) = super::backend() else { return };
+        for sym in MODIFIERS {
+            let _ = b.key(super::VirtualKey(sym), false);
+        }
+    }
 }
 
 // -------------------------------------------------- background dispatch
@@ -421,17 +453,48 @@ impl BackgroundClicker {
         }
     }
 
-    pub fn click_screen(_handle: isize, x: i32, y: i32) -> Result<()> {
-        mouse::click(x, y)
+    /// Background click at a screen point.
+    ///
+    /// On Windows this posts `WM_LBUTTONDOWN/UP` to the target window: the
+    /// message never touches the OS cursor. Linux has no equivalent — a
+    /// coordinate click here would be a *real* synthetic pointer warp, which
+    /// moves the user's cursor and can steal focus under click-to-focus window
+    /// managers.
+    ///
+    /// So this drives the element behind `handle` through AT-SPI instead, which
+    /// is the actual background primitive on Linux. If that element exposes no
+    /// usable action, the call **fails** rather than silently falling back to a
+    /// pointer warp. That failure is the honest answer: callers use this path
+    /// precisely because they were promised nothing would be disturbed, and
+    /// `cursor_preserved` cannot even detect the violation on Wayland (pointer
+    /// position is unreadable there, so an unchanged reading is assumed).
+    pub fn click_screen(handle: isize, _x: i32, _y: i32) -> Result<()> {
+        Self::button_click(handle).map_err(|_| CoreError::NotActionableInBackground {
+            what: "click (element exposes no AT-SPI action; a coordinate click would move the real cursor)",
+        })
     }
-    pub fn double_click_screen(_handle: isize, x: i32, y: i32) -> Result<()> {
-        mouse::double_click(x, y)
+
+    pub fn double_click_screen(handle: isize, _x: i32, _y: i32) -> Result<()> {
+        // AT-SPI has no distinct double-click action. Invoking twice is not
+        // equivalent and can double-submit, so refuse rather than approximate.
+        let _ = handle;
+        Err(CoreError::NotActionableInBackground {
+            what: "double_click (AT-SPI exposes no double-click action; retry without background=true)",
+        })
     }
-    pub fn right_click_screen(_handle: isize, x: i32, y: i32) -> Result<()> {
-        mouse::right_click(x, y)
+
+    pub fn right_click_screen(handle: isize, _x: i32, _y: i32) -> Result<()> {
+        let _ = handle;
+        Err(CoreError::NotActionableInBackground {
+            what: "right_click (AT-SPI exposes no context-menu action; retry without background=true)",
+        })
     }
-    pub fn hover_screen(_handle: isize, x: i32, y: i32) -> Result<()> {
-        mouse::hover(x, y)
+
+    pub fn hover_screen(handle: isize, _x: i32, _y: i32) -> Result<()> {
+        let _ = handle;
+        Err(CoreError::NotActionableInBackground {
+            what: "hover (hover has no accessibility equivalent; retry without background=true)",
+        })
     }
 }
 

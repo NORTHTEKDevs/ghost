@@ -79,7 +79,16 @@ pub fn set_value_ex(element: &A11yElement, value: &str, allow_fallback: bool) ->
             // it is a real behaviour change from the direct path -- which is
             // exactly why it is gated behind `allow_fallback`.
             element.set_focus()?;
-            crate::input::clear_focused_field()?;
+
+            // Only clear (Ctrl+A + Delete) when we are confident focus is a text
+            // field. This guard mirrors the Windows engine's and exists for the
+            // same reason: if the locator resolved to a non-editable control --
+            // a file-manager pane, a list, the desktop -- those two keystrokes
+            // are select-all + delete, i.e. real data loss. Typing into the
+            // wrong place is recoverable; deleting the user's files is not.
+            if is_editable_role(element.control_type()) {
+                let _ = crate::input::clear_focused_field();
+            }
             crate::input::type_text(value)
         }
     }

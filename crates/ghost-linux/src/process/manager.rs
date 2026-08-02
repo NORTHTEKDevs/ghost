@@ -87,7 +87,7 @@ pub fn launch_with_args(cmd: &str, args: &[String]) -> Result<u32> {
 }
 
 fn spawn(program: &str, args: &[String]) -> Result<u32> {
-    Command::new(program)
+    let child = Command::new(program)
         .args(args)
         // Never let a child write to the MCP server's stdout: that stream is
         // the JSON-RPC transport.
@@ -95,8 +95,30 @@ fn spawn(program: &str, args: &[String]) -> Result<u32> {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .map(|c| c.id())
-        .map_err(|e| CoreError::platform(format!("failed to launch {program}: {e}")))
+        .map_err(|e| CoreError::platform(format!("failed to launch {program}: {e}")))?;
+
+    let pid = child.id();
+    reap(child);
+    Ok(pid)
+}
+
+/// Wait for a launched application in the background so it does not become a
+/// zombie.
+///
+/// `ghost-mcp` is long-lived. On Linux an un-waited child stays in the process
+/// table as `<defunct>` from the moment the user closes the app until the server
+/// itself exits, so a session that opens and closes many applications leaks a
+/// process-table entry every time. Dropping the `Child` does not reap it -- only
+/// `wait()` does.
+///
+/// One detached thread per launch is acceptable: launches are user-paced, and
+/// the thread exits as soon as the application does.
+fn reap(mut child: std::process::Child) {
+    let _ = std::thread::Builder::new()
+        .name("ghost-reaper".into())
+        .spawn(move || {
+            let _ = child.wait();
+        });
 }
 
 #[cfg(test)]

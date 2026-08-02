@@ -34,6 +34,24 @@ pub fn window_rect(hwnd: isize) -> Option<(i32, i32, i32, i32)> {
     A11yTree::new().ok()?.window_rect(hwnd)
 }
 
+/// Handle and title of the active window, on a short leash.
+///
+/// `ghost-mcp` attaches this to **every** tool response. On Windows the
+/// equivalent is one `GetForegroundWindow` call; on Linux it is a full AT-SPI
+/// registry walk, so using the normal 20s walk budget here would let a single
+/// slow application add up to twenty seconds of latency to every response the
+/// server sends -- while blocking its only runtime thread.
+///
+/// Metadata is worth a few hundred milliseconds and not one millisecond more:
+/// on timeout this returns `None` and the caller reports "unknown" rather than
+/// stalling the session.
+pub fn foreground_info_fast() -> Option<(isize, String)> {
+    const BUDGET: std::time::Duration = std::time::Duration::from_millis(400);
+    let tree = A11yTree::new().ok()?;
+    let windows = tree.list_windows_within(BUDGET).ok()?;
+    windows.into_iter().find(|w| w.focused).map(|w| (w.hwnd, w.name))
+}
+
 /// Rectangle of the active window.
 pub fn foreground_window_rect() -> Option<(i32, i32, i32, i32)> {
     window_rect(foreground_window())

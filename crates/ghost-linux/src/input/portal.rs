@@ -36,7 +36,7 @@ enum Cmd {
     MoveRelative(f64, f64, SyncSender<Result<()>>),
     Button(i32, bool, SyncSender<Result<()>>),
     Key(u32, bool, SyncSender<Result<()>>),
-    Scroll(i32, SyncSender<Result<()>>),
+    Scroll(i32, bool, SyncSender<Result<()>>),
 }
 
 pub struct PortalBackend {
@@ -106,7 +106,11 @@ impl PortalBackend {
         self.send(|tx| Cmd::Key(keysym, down, tx))
     }
     pub fn scroll(&self, clicks: i32) -> Result<()> {
-        self.send(|tx| Cmd::Scroll(clicks, tx))
+        self.scroll_axis(clicks, false)
+    }
+
+    pub fn scroll_axis(&self, clicks: i32, horizontal: bool) -> Result<()> {
+        self.send(|tx| Cmd::Scroll(clicks, horizontal, tx))
     }
 }
 
@@ -214,12 +218,17 @@ impl PortalSession {
                     .map_err(portal_err);
                 let _ = reply.send(r);
             }
-            Cmd::Scroll(clicks, reply) => {
+            Cmd::Scroll(clicks, horizontal, reply) => {
+                let axis = if horizontal {
+                    ashpd::desktop::remote_desktop::Axis::Horizontal
+                } else {
+                    ashpd::desktop::remote_desktop::Axis::Vertical
+                };
                 let r = self
                     .rd
                     .notify_pointer_axis_discrete(
                         &self.session,
-                        ashpd::desktop::remote_desktop::Axis::Vertical,
+                        axis,
                         clicks,
                         Default::default(),
                     )
