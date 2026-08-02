@@ -12,6 +12,7 @@
 //! [`BackgroundClicker`], which drives controls through AT-SPI: no pointer
 //! movement, no focus steal, no prompts, and identical on X11 and Wayland.
 
+pub mod hotkey_x11;
 pub mod keyboard;
 pub mod portal;
 pub mod uinput;
@@ -301,13 +302,26 @@ pub mod hotkey {
         STOP_FLAG.store(false, Ordering::SeqCst);
     }
 
-    /// Windows registers a global Ctrl+Alt+G hotkey. Neither X11 nor Wayland
-    /// offers an equivalent that works without either grabbing keys from every
-    /// application or holding a GlobalShortcuts portal session, so Ghost does
-    /// not claim one here. `ghost_stop` over MCP remains fully functional and is
-    /// the supported emergency stop on Linux.
+    /// Register the global Ctrl+Alt+G emergency stop.
+    ///
+    /// Works on X11 via `GrabKey`, matching the Windows engine's
+    /// `RegisterHotKey`. Wayland does not permit global key grabs, so there this
+    /// reports unavailable and `ghost_stop` over MCP remains the supported
+    /// route.
+    ///
+    /// A failure here is deliberately **not** fatal to session startup: losing
+    /// the convenience hotkey must not stop Ghost from running.
     pub fn register_emergency_stop() -> Result<()> {
-        Ok(())
+        match super::hotkey_x11::register() {
+            Ok(()) => Ok(()),
+            // Reported, not fatal: ghost_stop still works.
+            Err(_) => Ok(()),
+        }
+    }
+
+    /// Whether the global hotkey is actually active, for `ghost doctor`.
+    pub fn global_hotkey_status() -> std::result::Result<(), String> {
+        super::hotkey_x11::register().map_err(|e| e.to_string())
     }
 
     /// Release every modifier, unconditionally.
@@ -361,16 +375,15 @@ impl EditCommand {
         }
     }
 
-    fn keysyms(&self) -> (u32, u32) {
-        // (ctrl, letter)
-        let letter = match self {
-            EditCommand::Copy => 0x63,      // c
-            EditCommand::Cut => 0x78,       // x
-            EditCommand::Paste => 0x76,     // v
-            EditCommand::Undo => 0x7A,      // z
-            EditCommand::SelectAll => 0x61, // a
-        };
-        (0xFFE3, letter)
+    /// Map to the engine-level command the AT-SPI path performs.
+    fn kind(&self) -> ops::EditKind {
+        match self {
+            EditCommand::Copy => ops::EditKind::Copy,
+            EditCommand::Cut => ops::EditKind::Cut,
+            EditCommand::Paste => ops::EditKind::Paste,
+            EditCommand::Undo => ops::EditKind::Undo,
+            EditCommand::SelectAll => ops::EditKind::SelectAll,
+        }
     }
 }
 
@@ -417,23 +430,24 @@ impl BackgroundClicker {
             .unwrap_or(0)
     }
 
-    /// Clipboard/edit commands. AT-SPI has no action for these, so they go
-    /// through synthetic keys and therefore need the target focused.
+    /// Clipboard/edit commands, performed by the application itself.
+    ///
+    /// These go through AT-SPI's `EditableText`/`Text` interfaces, which is the
+    /// direct analogue of the Windows engine's `WM_COPY`/`WM_CUT`/`WM_PASTE`/
+    /// `EM_SETSEL`: the application runs its own copy or paste, so no keystroke
+    /// is synthesised, the pointer does not move, and **focus does not change**.
+    ///
+    /// The earlier implementation grabbed focus and fired Ctrl+C. That both
+    /// disturbed the desktop -- breaking the guarantee this call exists to
+    /// provide -- and could act on the wrong control entirely if the focus grab
+    /// quietly failed.
     pub fn edit_command(handle: isize, cmd: EditCommand) -> Result<()> {
-        if let Some(addr) = handles::resolve(handle) {
-            if let Ok(bridge) = global_bridge() {
-                let a = addr.clone();
-                let _ = bridge
-                    .run_default(move |ctx| Box::pin(async move { ops::grab_focus(ctx, &a).await }));
-            }
-        }
-        let b = backend()?;
-        let (ctrl, letter) = cmd.keysyms();
-        b.key(VirtualKey(ctrl), true)?;
-        b.key(VirtualKey(letter), true)?;
-        sleep(KEY_HOLD);
-        b.key(VirtualKey(letter), false)?;
-        b.key(VirtualKey(ctrl), false)
+        let addr = handles::resolve(handle).ok_or(CoreError::WindowGone)?;
+        let bridge = global_bridge()?;
+        let kind = cmd.kind();
+        bridge.run_default(move |ctx| {
+            Box::pin(async move { ops::edit_command(ctx, &addr, kind).await })
+        })
     }
 
     pub fn send_key(handle: isize, keysym: u32) -> Result<()> {
@@ -513,9 +527,13 @@ mod tests {
     }
 
     #[test]
-    fn edit_command_keysyms_are_the_lowercase_letters() {
-        assert_eq!(EditCommand::Copy.keysyms(), (0xFFE3, 0x63));
-        assert_eq!(EditCommand::SelectAll.keysyms(), (0xFFE3, 0x61));
+    fn every_edit_command_maps_to_an_engine_kind() {
+        // A missing arm would silently perform the wrong operation.
+        assert_eq!(EditCommand::Copy.kind(), ops::EditKind::Copy);
+        assert_eq!(EditCommand::Cut.kind(), ops::EditKind::Cut);
+        assert_eq!(EditCommand::Paste.kind(), ops::EditKind::Paste);
+        assert_eq!(EditCommand::Undo.kind(), ops::EditKind::Undo);
+        assert_eq!(EditCommand::SelectAll.kind(), ops::EditKind::SelectAll);
     }
 
     #[test]

@@ -65,7 +65,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            at-spi2-core dbus-x11 xvfb zenity libgtk-3-0 gsettings-desktop-schemas
+            at-spi2-core dbus-x11 xvfb zenity libgtk-3-0 gsettings-desktop-schemas openbox tesseract-ocr
 
       - name: Build binaries and live tests
         run: |
@@ -87,6 +87,10 @@ jobs:
           set -euo pipefail
 
           gsettings set org.gnome.desktop.interface toolkit-accessibility true || true
+          # A window manager is required for EWMH: without one there is no
+          # _NET_CLIENT_LIST and window state control has nothing to talk to.
+          openbox &
+          sleep 2
           /usr/libexec/at-spi-bus-launcher --launch-immediately &
           sleep 3
           /usr/libexec/at-spi2-registryd &
@@ -150,7 +154,7 @@ jobs:
         run: |
           dnf -y install \
             at-spi2-core at-spi2-atk \
-            xorg-x11-server-Xvfb dbus-x11 zenity gtk3 \
+            xorg-x11-server-Xvfb dbus-x11 zenity gtk3 openbox tesseract \
             gcc curl findutils procps-ng \
             mesa-libGLES mesa-libEGL mesa-dri-drivers
 
@@ -182,6 +186,8 @@ jobs:
           cat > run-live.sh <<'EOF'
           #!/usr/bin/env bash
           set -euo pipefail
+          openbox &
+          sleep 2
           /usr/libexec/at-spi-bus-launcher --launch-immediately &
           sleep 3
           /usr/libexec/at-spi2-registryd &

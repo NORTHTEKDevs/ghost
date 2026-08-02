@@ -332,6 +332,112 @@ pub async fn pid_for_bus(ctx: &Ctx, bus: &str) -> Option<u32> {
     dbus.get_connection_unix_process_id(name).await.ok()
 }
 
+/// Clipboard and selection commands, performed by the application itself.
+///
+/// This is the Linux analogue of the Windows engine's `WM_COPY`/`WM_CUT`/
+/// `WM_PASTE`/`EM_SETSEL` messages: AT-SPI's `EditableText` interface asks the
+/// application to run its own copy/cut/paste, so the operation needs no
+/// synthetic keystrokes, does not move the pointer, and -- critically -- does
+/// **not** change which control has focus.
+///
+/// The previous implementation grabbed focus and fired Ctrl+C, which both
+/// disturbed the desktop and could land on the wrong control if the focus grab
+/// silently failed. This cannot.
+///
+/// Copy and cut act on the current selection, matching `WM_COPY`. With nothing
+/// selected they report rather than silently doing nothing, since "copied
+/// successfully, clipboard unchanged" is indistinguishable from a bug.
+pub async fn edit_command(ctx: &Ctx, addr: &ObjAddr, cmd: EditKind) -> Result<()> {
+    let acc = accessible(ctx, addr).await?;
+    let ifaces = acc.get_interfaces().await.unwrap_or_default();
+
+    if !ifaces.contains(Interface::Text) {
+        return Err(CoreError::NotActionable(format!(
+            "{} exposes no Text interface, so {cmd:?} cannot be performed without synthetic keys",
+            addr.path
+        )));
+    }
+    let text = text_iface(ctx, addr).await?;
+
+    // SelectAll needs only the Text interface; the rest need EditableText.
+    if cmd == EditKind::SelectAll {
+        let count = text.character_count().await.unwrap_or(0);
+        if count <= 0 {
+            return Ok(());
+        }
+        text.add_selection(0, count)
+            .await
+            .map_err(|e| CoreError::Platform(format!("add_selection: {e}")))?;
+        return Ok(());
+    }
+
+    if !ifaces.contains(Interface::EditableText) {
+        return Err(CoreError::NotActionable(format!(
+            "{} is not editable, so {cmd:?} cannot be performed",
+            addr.path
+        )));
+    }
+    let ed = editable(ctx, addr).await?;
+
+    match cmd {
+        EditKind::Paste => {
+            let at = text.caret_offset().await.unwrap_or(0);
+            ed.paste_text(at)
+                .await
+                .map_err(|e| CoreError::Platform(format!("paste_text: {e}")))?;
+            Ok(())
+        }
+        EditKind::Copy | EditKind::Cut => {
+            let (start, end) = selection_range(&text).await.ok_or_else(|| {
+                CoreError::NotActionable(
+                    "nothing is selected; select a range first (op=select_all) before copy/cut"
+                        .into(),
+                )
+            })?;
+            if cmd == EditKind::Copy {
+                ed.copy_text(start, end)
+                    .await
+                    .map_err(|e| CoreError::Platform(format!("copy_text: {e}")))?;
+            } else {
+                ed.cut_text(start, end)
+                    .await
+                    .map_err(|e| CoreError::Platform(format!("cut_text: {e}")))?;
+            }
+            Ok(())
+        }
+        // AT-SPI has no undo verb. Refusing is better than firing Ctrl+Z at
+        // whatever happens to be focused, which is not necessarily this element.
+        EditKind::Undo => Err(CoreError::NotActionable(
+            "AT-SPI exposes no undo action; send ghost_key ctrl+z with the element focused"
+                .into(),
+        )),
+        EditKind::SelectAll => unreachable!("handled above"),
+    }
+}
+
+/// The current selection range, if there is one.
+async fn selection_range(text: &TextProxy<'_>) -> Option<(i32, i32)> {
+    if text.get_n_selections().await.unwrap_or(0) <= 0 {
+        return None;
+    }
+    let (start, end) = text.get_selection(0).await.ok()?;
+    if end > start {
+        Some((start, end))
+    } else {
+        None
+    }
+}
+
+/// Which edit command to perform. Mirrors `ghost_core::input::EditCommand`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditKind {
+    Copy,
+    Cut,
+    Paste,
+    Undo,
+    SelectAll,
+}
+
 /// Find the focused descendant of a window, if any.
 ///
 /// Bounded like every other walk: a window with a pathological tree must not be

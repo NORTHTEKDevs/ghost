@@ -118,17 +118,74 @@ pub fn capture_screen_region(
     encode_rgba(&img.into_raw(), iw, ih, format)
 }
 
-/// Capture one window by handle.
+/// Capture one window, seeing through anything on top of it where possible.
 ///
-/// Named for the Windows engine's `PrintWindow`, which can capture an occluded
-/// window. Linux has no equivalent available to an ordinary client, so this
-/// captures the window's screen rectangle instead. That means an **occluded
-/// window captures whatever is on top of it**, which callers must treat as
-/// "cannot verify" rather than "verified". When the rectangle is unknown the
-/// call fails rather than silently returning the whole screen.
+/// This is the `PrintWindow` analogue, and it matters more than it sounds:
+/// background mode drives windows that are *by definition* not in front, so
+/// verifying an action by cropping the screen would mostly photograph whatever
+/// is covering them.
+///
+/// Two paths, best first:
+///
+/// 1. **XComposite** — `NameWindowPixmap` hands back the window's own backing
+///    pixmap, which is exactly what a compositor draws from. Reading that gives
+///    the window's real content regardless of what overlaps it. Every modern
+///    desktop runs a compositor, so this is the normal case.
+/// 2. **Screen-rectangle crop** — the fallback when composite is unavailable
+///    (bare X11, no compositor). Here an occluded window really does capture
+///    whatever is on top, so the result must be treated as "cannot verify".
 pub fn capture_window_printwindow(hwnd_raw: isize) -> Result<(Vec<u8>, usize, usize)> {
+    if let Some(shot) = composite_capture(hwnd_raw) {
+        return Ok(shot);
+    }
     let rect = crate::system::window::window_rect(hwnd_raw).ok_or(CoreError::WindowGone)?;
     capture_screen_region_fast(rect)
+}
+
+/// Capture a window's backing pixmap via XComposite. `None` when unavailable,
+/// so the caller can fall back rather than fail.
+fn composite_capture(hwnd_raw: isize) -> Option<(Vec<u8>, usize, usize)> {
+    use x11rb::protocol::composite::{ConnectionExt as CompositeExt, Redirect};
+
+    if session_kind() != SessionKind::X11 {
+        return None;
+    }
+
+    // Ghost handles are AT-SPI addresses, so go through the same PID/title join
+    // the window-manager module uses to reach a real X11 window id.
+    let (pid, title) = crate::system::window::window_identity(hwnd_raw)?;
+    let win = crate::wm::x11_window_for(pid, title.as_deref())?;
+
+    let (conn, _screen) = x11rb::connect(None).ok()?;
+    conn.composite_query_version(0, 4).ok()?.reply().ok()?;
+
+    // Redirecting is only needed when nothing else has: with a compositor
+    // running the window is already redirected and this is a harmless no-op.
+    // Automatic keeps the window drawn on screen as usual.
+    let _ = conn.composite_redirect_window(win, Redirect::AUTOMATIC);
+    conn.flush().ok()?;
+
+    let geom = conn.get_geometry(win).ok()?.reply().ok()?;
+    let (w, h) = (geom.width, geom.height);
+    if w == 0 || h == 0 {
+        return None;
+    }
+
+    let pixmap = conn.generate_id().ok()?;
+    conn.composite_name_window_pixmap(win, pixmap).ok()?.check().ok()?;
+
+    let reply = conn.get_image(ImageFormat::Z_PIXMAP, pixmap, 0, 0, w, h, !0).ok()?.reply();
+    let _ = conn.free_pixmap(pixmap);
+    let reply = reply.ok()?;
+
+    let mut rgba = Vec::with_capacity(w as usize * h as usize * 4);
+    for px in reply.data.chunks_exact(4) {
+        rgba.extend_from_slice(&[px[2], px[1], px[0], 255]);
+    }
+    if rgba.len() < w as usize * h as usize * 4 {
+        return None;
+    }
+    Some((rgba, w as usize, h as usize))
 }
 
 /// Region capture with numbered Set-of-Marks badges, JPEG-encoded.
@@ -181,7 +238,7 @@ pub fn crop_rgba(
     out
 }
 
-fn encode_rgba(rgba: &[u8], w: usize, h: usize, format: CaptureFormat) -> Result<Vec<u8>> {
+pub(crate) fn encode_rgba(rgba: &[u8], w: usize, h: usize, format: CaptureFormat) -> Result<Vec<u8>> {
     let img = RgbaImage::from_raw(w as u32, h as u32, rgba.to_vec())
         .ok_or_else(|| CoreError::Platform("capture buffer does not match dimensions".into()))?;
     let mut out = Cursor::new(Vec::new());
