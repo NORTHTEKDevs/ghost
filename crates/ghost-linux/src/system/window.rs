@@ -34,6 +34,17 @@ pub fn window_rect(hwnd: isize) -> Option<(i32, i32, i32, i32)> {
     A11yTree::new().ok()?.window_rect(hwnd)
 }
 
+/// The owning process id and title of a Ghost window handle.
+///
+/// The bridge between Ghost's AT-SPI handles and anything that speaks X11:
+/// window-manager control and occluded capture both need a real X11 window, and
+/// PID + title is what identifies it.
+pub fn window_identity(handle: isize) -> Option<(u32, Option<String>)> {
+    let tree = A11yTree::new().ok()?;
+    let w = tree.list_windows().ok()?.into_iter().find(|w| w.hwnd == handle)?;
+    Some((w.pid, Some(w.name)))
+}
+
 /// Handle and title of the active window, on a short leash.
 ///
 /// `ghost-mcp` attaches this to **every** tool response. On Windows the
