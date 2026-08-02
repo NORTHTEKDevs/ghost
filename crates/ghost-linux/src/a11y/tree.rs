@@ -8,7 +8,7 @@
 //! Chromium tab can expose tens of thousands of accessible nodes, and an
 //! unbounded walk there would hang the serial MCP server.
 
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -60,8 +60,18 @@ impl A11yTree {
     // ---------------------------------------------------------------- windows
 
     pub fn list_windows(&self) -> Result<Vec<WindowInfo>> {
+        self.list_windows_within(WALK_TIMEOUT)
+    }
+
+    /// `list_windows` with a caller-chosen deadline.
+    ///
+    /// Enumerating windows is a full AT-SPI registry walk -- a D-Bus round trip
+    /// per application -- so the 20s default is right for an explicit
+    /// `ghost_window` call and badly wrong for anything on a hot path. A caller
+    /// that would rather have nothing than a stall picks its own bound here.
+    pub fn list_windows_within(&self, timeout: Duration) -> Result<Vec<WindowInfo>> {
         self.bridge
-            .run(WALK_TIMEOUT, move |ctx| Box::pin(async move { list_windows_async(ctx).await }))
+            .run(timeout, move |ctx| Box::pin(async move { list_windows_async(ctx).await }))
     }
 
     /// Handle of the active window, or 0.
@@ -395,6 +405,12 @@ async fn collect_matching(
     let mut queue: VecDeque<ObjAddr> = VecDeque::new();
     queue.push_back(root.clone());
 
+    // A toolkit can expose a child that points back at an ancestor. Without a
+    // seen-set the walk burns its whole budget on that loop and reports "not
+    // found" for elements that exist elsewhere in the tree.
+    let mut seen: HashSet<ObjAddr> = HashSet::new();
+    seen.insert(root.clone());
+
     let mut visited = 0usize;
     let mut out = Vec::new();
 
@@ -414,7 +430,9 @@ async fn collect_matching(
 
         if let Ok(kids) = ops::children(ctx, &addr).await {
             for k in kids {
-                queue.push_back(k);
+                if seen.insert(k.clone()) {
+                    queue.push_back(k);
+                }
             }
         }
     }
@@ -428,6 +446,8 @@ async fn collect_descriptors(
 ) -> Result<Vec<ElementDescriptor>> {
     let mut queue: VecDeque<ObjAddr> = VecDeque::new();
     queue.push_back(root.clone());
+    let mut seen: HashSet<ObjAddr> = HashSet::new();
+    seen.insert(root.clone());
 
     let mut visited = 0usize;
     let mut out = Vec::new();
@@ -460,7 +480,9 @@ async fn collect_descriptors(
 
         if let Ok(kids) = ops::children(ctx, &addr).await {
             for k in kids {
-                queue.push_back(k);
+                if seen.insert(k.clone()) {
+                    queue.push_back(k);
+                }
             }
         }
     }
@@ -475,6 +497,8 @@ async fn collect_text_async(
 ) -> Result<()> {
     let mut queue: VecDeque<ObjAddr> = VecDeque::new();
     queue.push_back(root.clone());
+    let mut seen: HashSet<ObjAddr> = HashSet::new();
+    seen.insert(root.clone());
 
     let mut visited = 0usize;
     while let Some(addr) = queue.pop_front() {
@@ -500,7 +524,9 @@ async fn collect_text_async(
 
         if let Ok(kids) = ops::children(ctx, &addr).await {
             for k in kids {
-                queue.push_back(k);
+                if seen.insert(k.clone()) {
+                    queue.push_back(k);
+                }
             }
         }
     }

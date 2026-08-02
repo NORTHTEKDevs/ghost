@@ -128,6 +128,9 @@ fn finds_an_entry_by_role() {
         .expect("role search must not error")
         .unwrap_or_else(|| panic!("no role=edit found. Roles present: {}", roles_in(&tree)));
 
+    // Assert the role too: a role-filter bug that returned the first enabled
+    // leaf (a button, say) would otherwise pass this test.
+    assert_eq!(el.role_name(), "edit", "role=edit must return an edit, not just any element");
     assert!(el.is_enabled(), "a fresh entry is enabled");
 }
 

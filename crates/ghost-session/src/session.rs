@@ -344,7 +344,10 @@ impl GhostSession {
             Ok(r) => r,
             Err(_elapsed) => {
                 tracing::warn!(action = %action, "find timeout, capturing screenshot");
-                let screenshot = capture_screen().ok();
+                // Capture is blocking (GDI on Windows, X11/portal on Linux) and
+                // the MCP server runs a current-thread runtime, so doing it
+                // inline freezes every other call. Matches the wrapped sites below.
+                let screenshot = tokio::task::spawn_blocking(capture_screen).await.ok().and_then(|r| r.ok());
                 Err(GhostError::ElementNotFound {
                     query: action,
                     screenshot,
@@ -493,11 +496,17 @@ impl GhostSession {
         } else {
             original
         };
-        let jpeg = crate::engine::capture::capture_screen_region(
-            Some(rect),
-            Some(max_dim),
-            crate::engine::capture::CaptureFormat::Jpeg(80),
-        ).map_err(GhostError::Core)?;
+        // Off the async worker: blocking capture must not stall the runtime.
+        let jpeg = tokio::task::spawn_blocking(move || {
+            crate::engine::capture::capture_screen_region(
+                Some(rect),
+                Some(max_dim),
+                crate::engine::capture::CaptureFormat::Jpeg(80),
+            )
+        })
+        .await
+        .map_err(|e| GhostError::Core(crate::engine::error::CoreError::WorkerPanic(e.to_string())))?
+        .map_err(GhostError::Core)?;
 
         let crop = crate::vision::Crop {
             origin: (rect.0, rect.1),
@@ -565,11 +574,17 @@ impl GhostSession {
             return Ok(serde_json::Map::new());
         }
         let rect = region.or_else(|| self.foreground_window_rect());
-        let jpeg = crate::engine::capture::capture_screen_region(
-            rect,
-            Some(1024),
-            crate::engine::capture::CaptureFormat::Jpeg(80),
-        ).map_err(GhostError::Core)?;
+        // Off the async worker: blocking capture must not stall the runtime.
+        let jpeg = tokio::task::spawn_blocking(move || {
+            crate::engine::capture::capture_screen_region(
+                rect,
+                Some(1024),
+                crate::engine::capture::CaptureFormat::Jpeg(80),
+            )
+        })
+        .await
+        .map_err(|e| GhostError::Core(crate::engine::error::CoreError::WorkerPanic(e.to_string())))?
+        .map_err(GhostError::Core)?;
         crate::vision::vision_extract(fields, &jpeg).await
     }
 

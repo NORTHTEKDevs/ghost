@@ -16,6 +16,7 @@
 //! no region parameter.
 
 use std::io::Cursor;
+use std::time::Duration;
 
 use image::{DynamicImage, RgbaImage};
 use x11rb::connection::Connection;
@@ -240,17 +241,39 @@ fn x11_capture(region: Option<(i32, i32, u32, u32)>) -> Result<(Vec<u8>, usize, 
 
 // ------------------------------------------------------------------- portal
 
-fn portal_capture() -> Result<(Vec<u8>, usize, usize)> {
-    // Runs on its own thread: this may be called from inside ghost-mcp's
-    // runtime, where block_on would panic.
-    std::thread::scope(|s| {
-        s.spawn(|| {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(|e| CoreError::Platform(format!("screenshot runtime: {e}")))?;
+/// Hard ceiling on a Screenshot-portal request.
+///
+/// Generous because the first call on a session can raise a consent dialog, but
+/// finite because the alternative is fatal: see [`portal_capture`].
+const PORTAL_CAPTURE_TIMEOUT: Duration = Duration::from_secs(45);
 
-            rt.block_on(async {
+/// Capture via the Screenshot portal, bounded.
+///
+/// The bound is not a nicety. `ghost-mcp` runs on a current-thread runtime and
+/// dispatches tool calls serially, so a blocking wait here does not stall one
+/// call -- it wedges the entire MCP server, with no way for the client to
+/// recover and (since the portal is asynchronous and silent) no log line
+/// explaining why. A compositor that never answers -- busy, wedged
+/// `xdg-desktop-portal`, or a consent dialog raised on another workspace where
+/// nobody sees it -- must degrade to a timeout error, not a dead server.
+///
+/// The worker is deliberately **detached** rather than joined: if the portal
+/// never replies, that thread stays parked forever. Leaking one parked thread is
+/// strictly better than blocking the process, and the runtime it owns is dropped
+/// with it if the call ever does return.
+fn portal_capture() -> Result<(Vec<u8>, usize, usize)> {
+    let (tx, rx) = std::sync::mpsc::sync_channel::<Result<(Vec<u8>, usize, usize)>>(1);
+
+    std::thread::Builder::new()
+        .name("ghost-screenshot".into())
+        .spawn(move || {
+            let result = (|| {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|e| CoreError::Platform(format!("screenshot runtime: {e}")))?;
+
+                rt.block_on(async {
                 let response = ashpd::desktop::screenshot::Screenshot::request()
                     .interactive(false)
                     .modal(false)
@@ -272,13 +295,27 @@ fn portal_capture() -> Result<(Vec<u8>, usize, usize)> {
                 let img = image::load_from_memory(&bytes)
                     .map_err(|e| CoreError::Platform(format!("decoding screenshot: {e}")))?
                     .to_rgba8();
-                let (w, h) = img.dimensions();
-                Ok((img.into_raw(), w as usize, h as usize))
-            })
+                    let (w, h) = img.dimensions();
+                    Ok((img.into_raw(), w as usize, h as usize))
+                })
+            })();
+            // Receiver may already have timed out and gone; that is fine.
+            let _ = tx.send(result);
         })
-        .join()
-        .map_err(|_| CoreError::WorkerPanic("screenshot thread panicked".into()))?
-    })
+        .map_err(|e| CoreError::Platform(format!("could not spawn screenshot thread: {e}")))?;
+
+    match rx.recv_timeout(PORTAL_CAPTURE_TIMEOUT) {
+        Ok(r) => r,
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(CoreError::Platform(format!(
+            "the Screenshot portal did not respond within {}s. Check that \
+             xdg-desktop-portal and xdg-desktop-portal-gnome are running, and that no consent \
+             dialog is waiting on another workspace",
+            PORTAL_CAPTURE_TIMEOUT.as_secs()
+        ))),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            Err(CoreError::WorkerPanic("screenshot thread panicked".into()))
+        }
+    }
 }
 
 /// Turn a `file://` URI into a path.

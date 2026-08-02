@@ -73,8 +73,17 @@ impl X11Backend {
     }
 
     pub fn scroll(&self, clicks: i32) -> Result<()> {
-        // X11 encodes wheel as buttons 4 (up) and 5 (down).
-        let button = if clicks > 0 { 4 } else { 5 };
+        self.scroll_axis(clicks, false)
+    }
+
+    /// X11 encodes the wheel as buttons: 4 up, 5 down, 6 left, 7 right.
+    pub fn scroll_axis(&self, clicks: i32, horizontal: bool) -> Result<()> {
+        let button = match (horizontal, clicks > 0) {
+            (false, true) => 4,
+            (false, false) => 5,
+            (true, false) => 6,
+            (true, true) => 7,
+        };
         for _ in 0..clicks.abs() {
             self.button(button, true)?;
             self.button(button, false)?;

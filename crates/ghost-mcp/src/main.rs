@@ -169,12 +169,12 @@ fn foreground_info() -> Value {
         // Same shape as the Windows branch. The handle is an interned AT-SPI
         // address rather than an HWND, but it is stable and round-trips through
         // the same session APIs.
-        let hwnd = ghost_linux::system::foreground_window();
-        let title = ghost_linux::a11y::tree::list_windows()
-            .ok()
-            .and_then(|ws| ws.into_iter().find(|w| w.hwnd == hwnd).map(|w| w.name))
-            .unwrap_or_default();
-        json!({ "hwnd": hwnd as i64, "title": title })
+        // Bounded: this runs on every response, and on Linux it is an AT-SPI
+        // walk rather than a cheap OS call. Unknown beats slow.
+        match ghost_linux::system::window::foreground_info_fast() {
+            Some((hwnd, title)) => json!({ "hwnd": hwnd as i64, "title": title }),
+            None => json!({ "hwnd": 0, "title": "" }),
+        }
     }
     #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     {
