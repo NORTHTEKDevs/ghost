@@ -274,7 +274,7 @@ then drive the new terminal window with `ghost_see` / `ghost_act` / `ghost_key`.
 disable the verb entirely — every op then returns a clear refusal, leaving the GUI
 automation verbs fully usable.
 
-## Reliability Model (v0.7.x)
+## Reliability Model
 
 Desktop automation driven from an MCP client has a hostile focus environment: between tool
 calls, the client's own terminal usually retakes OS focus. Ghost is built for that:
