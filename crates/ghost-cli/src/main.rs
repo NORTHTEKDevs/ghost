@@ -12,6 +12,8 @@
 //!   lifetime is the process - a one-shot `ghost desktop create` would create a
 //!   desktop and immediately destroy it again.
 
+mod verify;
+
 use serde_json::{json, Map, Value};
 use std::io::BufRead;
 
@@ -20,6 +22,7 @@ const HELP: &str = r#"ghost - Windows automation that runs in the background
 USAGE
   ghost <command> [--key value ...] [-o FILE] [--raw]
   ghost run [FILE|-]              run a command script in one process
+  ghost verify [--strict-cursor]  prove every product claim on this machine
   ghost tools [FILTER]            list available commands
   ghost help [COMMAND]            show a command's parameters
 
@@ -74,6 +77,10 @@ async fn run(args: Vec<String>) -> i32 {
     }
     if args[0] == "tools" || args[0] == "list-tools" {
         return list_tools(args.get(1).map(|s| s.as_str()));
+    }
+    if args[0] == "verify" {
+        let strict = args.iter().any(|a| a == "--strict-cursor");
+        return verify::run(strict).await;
     }
 
     let session = match ghost_mcp::GhostSession::new() {

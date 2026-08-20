@@ -198,6 +198,22 @@ Two things dominate if you are not careful, both avoidable:
 
 ### Verify it yourself
 
+The claims above are falsifiable, so the product ships its own audit:
+
+```bash
+ghost verify
+```
+
+Eleven checks, each with a hard timing budget: background policy enforced,
+screen-stealing calls refused, three tabs driven concurrently with no cross-talk,
+click and screenshot latency, a fast call completing while a slow call is in
+flight, two extra ghost processes running their own browsers alongside, emergency
+stop and resume, and - measured across the whole run - the foreground window
+untouched. Exits nonzero if any claim does not hold on that machine. Run it in
+every new environment before trusting ghost there.
+
+Development proofs (require the repo):
+
 ```bash
 cargo run -p ghost-browser --example browser_background_proof   # 3 tabs at once
 cargo run -p ghost-session --example desktop_background_proof   # app + real undo, untouched screen

@@ -44,6 +44,11 @@ in parallel instead of queueing.
   sessions) automating simultaneously in 1.24s wall clock with the foreground
   untouched throughout.
 
+- **`ghost verify`**: the claims audit, built into the CLI. Eleven checks with
+  hard timing budgets prove on any machine that ghost operates as advertised -
+  background enforcement, concurrent tabs, latency, multi-process operation,
+  emergency stop, and an untouched foreground. Exits nonzero on any failure.
+
 ### Changed
 
 - `ghost-intent`'s `OpsDispatcher` is now a `Send` trait (`async_trait` without
