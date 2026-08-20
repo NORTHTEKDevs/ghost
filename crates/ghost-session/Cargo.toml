@@ -1,6 +1,6 @@
 [package]
 name = "ghost-session"
-version = "0.3.0"
+version = "0.5.0"
 edition = "2021"
 description = "Safe async session API for Ghost Windows desktop automation"
 keywords = ["automation", "windows", "desktop", "mcp", "agent"]
@@ -13,6 +13,7 @@ readme = "../../README.md"
 ghost-core = { path = "../ghost-core" }
 ghost-cache = { path = "../ghost-cache" }
 ghost-intent = { path = "../ghost-intent" }
+ghost-browser = { path = "../ghost-browser" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -23,6 +24,7 @@ tracing = { workspace = true }
 image = { workspace = true }
 
 [dev-dependencies]
+ghost-browser = { path = "../ghost-browser" }
 ghost-intent = { path = "../ghost-intent" }
 async-trait = "0.1"
 
@@ -37,3 +39,15 @@ path = "../../examples/notepad_hello.rs"
 [[example]]
 name = "diagnose"
 path = "../../examples/diagnose.rs"
+
+[[example]]
+name = "desktop_background_proof"
+path = "../../examples/desktop_background_proof.rs"
+
+[[example]]
+name = "concurrency_proof"
+path = "../../examples/concurrency_proof.rs"
+
+[[example]]
+name = "bench"
+path = "../../examples/bench.rs"

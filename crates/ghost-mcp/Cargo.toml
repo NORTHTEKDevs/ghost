@@ -1,12 +1,16 @@
 [package]
 name = "ghost-mcp"
-version = "0.3.0"
+version = "0.5.0"
 edition = "2021"
-description = "MCP server binary exposing 24 Ghost desktop automation tools over stdio JSON-RPC"
+description = "Ghost MCP tool dispatch, plus the stdio JSON-RPC server binary"
 keywords = ["automation", "windows", "mcp", "agent", "claude"]
 categories = ["os::windows-apis", "command-line-utilities"]
 license = "MIT"
 repository = "https://github.com/FrostbyteDevTeam/ghost"
+
+[lib]
+name = "ghost_mcp"
+path = "src/lib.rs"
 
 [[bin]]
 name = "ghost-mcp"
@@ -14,6 +18,7 @@ path = "src/main.rs"
 
 [dependencies]
 ghost-session = { path = "../ghost-session" }
+ghost-browser = { path = "../ghost-browser" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

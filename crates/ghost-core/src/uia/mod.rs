@@ -1,4 +1,3 @@
-pub mod cached_walker;
 pub mod element;
 pub mod patterns;
 pub mod sta_pool;

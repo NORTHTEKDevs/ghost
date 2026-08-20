@@ -1,6 +1,6 @@
 [package]
 name = "ghost-core"
-version = "0.3.0"
+version = "0.5.0"
 edition = "2021"
 description = "Low-level Win32/UIA/SendInput/DXGI primitives for the Ghost desktop automation framework"
 keywords = ["automation", "windows", "win32", "desktop", "uia"]
@@ -19,3 +19,11 @@ crossbeam-channel = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 blake3 = { workspace = true }
+
+[[example]]
+name = "isolated_desktop_proof"
+path = "../../examples/isolated_desktop_proof.rs"
+
+[[example]]
+name = "desktop_input_probe"
+path = "../../examples/desktop_input_probe.rs"

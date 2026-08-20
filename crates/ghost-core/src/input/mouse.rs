@@ -2,6 +2,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
 use crate::error::CoreError;
 use super::hotkey::is_stopped;
+use crate::focus;
 
 /// Convert pixel coordinates to Windows absolute mouse coordinates (0-65535 range).
 pub fn to_absolute(x: i32, y: i32) -> (i32, i32) {
@@ -47,6 +48,7 @@ pub fn click(x: i32, y: i32) -> Result<(), CoreError> {
     if is_stopped() {
         return Err(CoreError::Win32 { code: 0, context: "stopped" });
     }
+    focus::require_foreground_allowed("click")?;
     let inputs = [move_event(x, y), click_event(false), click_event(true)];
     unsafe {
         let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
@@ -62,6 +64,7 @@ pub fn move_to(x: i32, y: i32) -> Result<(), CoreError> {
     if is_stopped() {
         return Err(CoreError::Win32 { code: 0, context: "stopped" });
     }
+    focus::require_foreground_allowed("move_to")?;
     let inputs = [move_event(x, y)];
     unsafe {
         let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
@@ -102,6 +105,7 @@ pub fn hover(x: i32, y: i32) -> Result<(), CoreError> {
     if is_stopped() {
         return Err(CoreError::Win32 { code: 0, context: "stopped" });
     }
+    focus::require_foreground_allowed("hover")?;
     let inputs = [move_event(x, y)];
     unsafe {
         let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
@@ -117,6 +121,7 @@ pub fn right_click(x: i32, y: i32) -> Result<(), CoreError> {
     if is_stopped() {
         return Err(CoreError::Win32 { code: 0, context: "stopped" });
     }
+    focus::require_foreground_allowed("right_click")?;
     let inputs = [move_event(x, y), right_click_event(false), right_click_event(true)];
     unsafe {
         let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
@@ -132,6 +137,7 @@ pub fn double_click(x: i32, y: i32) -> Result<(), CoreError> {
     if is_stopped() {
         return Err(CoreError::Win32 { code: 0, context: "stopped" });
     }
+    focus::require_foreground_allowed("double_click")?;
     let inputs = [
         move_event(x, y),
         click_event(false), click_event(true),
@@ -151,6 +157,7 @@ pub fn drag(from_x: i32, from_y: i32, to_x: i32, to_y: i32) -> Result<(), CoreEr
     if is_stopped() {
         return Err(CoreError::Win32 { code: 0, context: "stopped" });
     }
+    focus::require_foreground_allowed("drag")?;
     let inputs = [
         move_event(from_x, from_y),
         click_event(false),
@@ -171,6 +178,7 @@ pub fn scroll(x: i32, y: i32, direction: &str, amount: i32) -> Result<(), CoreEr
     if is_stopped() {
         return Err(CoreError::Win32 { code: 0, context: "stopped" });
     }
+    focus::require_foreground_allowed("scroll")?;
     let delta = match direction {
         "up" => 120 * amount,
         "down" => -(120 * amount),

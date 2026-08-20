@@ -26,6 +26,18 @@ pub enum GhostError {
 
     #[error("Intent error: {0}")]
     Intent(String),
+
+    #[error("Browser error: {0}")]
+    Browser(#[from] ghost_browser::BrowserError),
+
+    #[error("No browser registered as '{id}'; call browser_launch or browser_attach first")]
+    BrowserNotRegistered { id: String },
+
+    #[error("Unknown focus policy '{0}'; use background, prefer_background, or foreground")]
+    BadFocusPolicy(String),
+
+    #[error("No isolated desktop registered as '{id}'; call desktop_create first")]
+    DesktopNotRegistered { id: String },
 }
 
 impl From<ghost_cache::error::CacheError> for GhostError {
