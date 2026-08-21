@@ -16,6 +16,7 @@
 //!   ghost serve
 
 mod doctor;
+mod verify;
 
 use clap::{Parser, Subcommand};
 use ghost_session::{By, GhostSession, LocateMode, Target};
@@ -186,6 +187,17 @@ enum Command {
     /// Check that this machine can run Ghost. Reports PASS/WARN/FAIL per item.
     /// Exit code 1 if anything is FAIL. Run this before reporting a problem.
     Doctor,
+
+    /// Prove the product claims on this machine: background enforcement,
+    /// concurrent tabs, latency budgets, a second server alongside, emergency
+    /// stop, and an untouched foreground. Drives the real ghost-mcp server
+    /// over stdio. Exit code 1 if any claim fails.
+    Verify {
+        /// Also fail if the cursor position changed during the run (off by
+        /// default because the human at the machine moves their own mouse).
+        #[arg(long)]
+        strict_cursor: bool,
+    },
 }
 
 #[tokio::main]
@@ -204,6 +216,10 @@ async fn main() -> ExitCode {
         let checks = doctor::run_checks();
         print!("{}", doctor::render(&checks));
         return ExitCode::from(doctor::exit_code(&checks));
+    }
+
+    if let Command::Verify { strict_cursor } = &cli.command {
+        return ExitCode::from(verify::run(*strict_cursor) as u8);
     }
 
     match run(cli).await {
@@ -457,7 +473,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             }
         }
 
-        Command::Serve | Command::Doctor => unreachable!("handled above"),
+        Command::Serve | Command::Doctor | Command::Verify { .. } => unreachable!("handled above"),
     }
     Ok(())
 }

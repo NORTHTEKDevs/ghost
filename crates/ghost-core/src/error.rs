@@ -32,4 +32,18 @@ pub enum CoreError {
 
     #[error("Element not actionable in background mode: {what}")]
     NotActionableInBackground { what: &'static str },
+    #[error("'{action}' has no background path and the focus policy is 'background';              set policy to 'prefer_background' or 'foreground' to allow real input")]
+    NoBackgroundPath { action: &'static str },
+
+    #[error("another ghost process held the foreground input lease for {ms}ms")]
+    ForegroundBusy { ms: u32 },
+
+    #[error("background {action} not supported by target window (hwnd {hwnd:#x})")]
+    BackgroundUnsupported { action: &'static str, hwnd: usize },
+
+    #[error("window capture failed: {0}")]
+    CaptureFailed(String),
+
+    #[error("desktop error: {0}")]
+    Desktop(String),
 }

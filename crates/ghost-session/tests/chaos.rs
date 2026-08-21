@@ -10,7 +10,7 @@ use ghost_intent::compiler::Op;
 use async_trait::async_trait;
 
 struct AlwaysFails;
-#[async_trait(?Send)]
+#[async_trait]
 impl OpsDispatcher for AlwaysFails {
     async fn dispatch(&self, _: &Op, _: &mut IntentState) -> Result<(), IntentError> {
         Err(IntentError::OpFailed("simulated".into()))

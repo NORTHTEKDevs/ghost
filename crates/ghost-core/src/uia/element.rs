@@ -17,6 +17,14 @@ impl BoundingRect {
 
 pub struct UiaElement(pub IUIAutomationElement);
 
+// Safety: this process initializes COM with COINIT_MULTITHREADED (`init_com`).
+// CUIAutomation8 registers the "Both" threading model, so in the MTA its objects
+// are callable from any thread with no marshalling; AddRef/Release are atomic.
+// This is what lets the session be shared across concurrently executing MCP
+// request tasks. The one MTA hazard - COM event callbacks - is not used here.
+unsafe impl Send for UiaElement {}
+
+
 impl UiaElement {
     pub fn name(&self) -> String {
         unsafe {

@@ -22,6 +22,9 @@ tracing = { workspace = true }
 image = { workspace = true }
 reqwest = { workspace = true }
 
+[dependencies.ghost-browser]
+path = "../ghost-browser"
+
 [target.'cfg(windows)'.dependencies]
 ghost-core = { path = "../ghost-core" }
 windows = { workspace = true }

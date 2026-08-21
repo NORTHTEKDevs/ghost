@@ -879,7 +879,7 @@ pub fn crop_rgba(full: &[u8], full_w: usize, l: usize, t: usize, cw: usize, ch: 
 }
 
 /// Encode tightly-packed RGBA bytes as PNG. Exported for testing.
-pub(crate) fn encode_png_rgba(rgba_data: &[u8], width: u32, height: u32) -> Result<Vec<u8>, CoreError> {
+pub fn encode_png_rgba(rgba_data: &[u8], width: u32, height: u32) -> Result<Vec<u8>, CoreError> {
     use image::RgbaImage;
     let img = RgbaImage::from_raw(width, height, rgba_data.to_vec())
         .ok_or(CoreError::Win32 { code: 0, context: "RgbaImage from_raw" })?;

@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::cell::RefCell;
+use std::sync::Mutex;
 use std::time::Duration;
 use tokio::time::timeout;
 use async_trait::async_trait;
@@ -80,18 +80,23 @@ pub struct GhostSession {
     locator_cache: LocatorCache,
     /// Reflection ring buffer: records recent grounding/action failures so the
     /// next VLM prompt can be prefixed with a negative hint.
-    /// RefCell is sound: GhostSession is !Send and all calls run on the single
-    /// block_on thread; no tokio::spawn moves this session across threads.
-    pub reflection: RefCell<crate::reflection::ReflectionBuffer>,
-    /// Cumulative grounding cascade telemetry. RefCell because `ground()` takes `&self`
-    /// (MCP handlers only have &GhostSession) but needs to mutate stats. Safe because
-    /// all session calls run on the single STA tokio block_on thread.
-    grounding_stats: RefCell<GroundingStats>,
+    /// Mutex rather than RefCell: the session is shared across concurrently
+    /// executing MCP request tasks. Held only for short push/read operations.
+    pub reflection: Mutex<crate::reflection::ReflectionBuffer>,
+    /// Cumulative grounding cascade telemetry. Mutex because `ground()` takes
+    /// `&self` from concurrent request tasks and needs to mutate stats.
+    grounding_stats: Mutex<GroundingStats>,
     /// Keeps COM initialized for the session lifetime — calls CoUninitialize on drop.
     _com_guard: ComGuard,
-    /// Persistent shell sessions (ghost_shell op=open/send/read/kill). RefCell is
-    /// sound for the same reason as the fields above: single STA block_on thread.
-    pub(crate) shells: RefCell<crate::shell::ShellRegistry>,
+    /// Persistent shell sessions (ghost_shell op=open/send/read/kill).
+    pub(crate) shells: Mutex<crate::shell::ShellRegistry>,
+    /// Browsers and tabs opened by this session (see `registries.rs`).
+    pub(crate) browsers: tokio::sync::Mutex<crate::registries::BrowserRegistry>,
+    /// Isolated desktops keyed by caller id. Windows only; a desktop's worker
+    /// thread outlives any single tool call.
+    #[cfg(windows)]
+    pub(crate) desktops:
+        tokio::sync::Mutex<std::collections::HashMap<String, Arc<ghost_core::DesktopSession>>>,
 }
 
 impl GhostSession {
@@ -124,10 +129,13 @@ impl GhostSession {
             tree,
             cache: Arc::new(UiaCache::new()),
             locator_cache: LocatorCache::new(),
-            reflection: RefCell::new(crate::reflection::ReflectionBuffer::default()),
-            grounding_stats: RefCell::new(GroundingStats::default()),
+            reflection: Mutex::new(crate::reflection::ReflectionBuffer::default()),
+            grounding_stats: Mutex::new(GroundingStats::default()),
             _com_guard: com_guard,
-            shells: RefCell::new(crate::shell::ShellRegistry::new()),
+            shells: Mutex::new(crate::shell::ShellRegistry::new()),
+            browsers: tokio::sync::Mutex::new(crate::registries::BrowserRegistry::default()),
+            #[cfg(windows)]
+            desktops: tokio::sync::Mutex::new(std::collections::HashMap::new()),
         })
     }
 
@@ -473,7 +481,7 @@ impl GhostSession {
         match self.locate_by_description_som(description).await {
             Ok(Some((sx, sy))) => {
                 let obs = crate::reflection::hash_obs(description);
-                self.reflection.borrow_mut().record_success(obs, format!("som '{description}' -> ({sx},{sy})"));
+                self.reflection.lock().unwrap().record_success(obs, format!("som '{description}' -> ({sx},{sy})"));
                 return Ok((sx, sy));
             }
             Ok(None) => { /* no marks or model picked none — fall back to coord regression */ }
@@ -517,7 +525,7 @@ impl GhostSession {
         // Prefix the description with a reflection hint if there are recent failures.
         // This steers the VLM away from repeating the same coordinate mistake.
         let augmented_description: String;
-        let effective_description = if let Some(hint) = self.reflection.borrow().failure_hint() {
+        let effective_description = if let Some(hint) = self.reflection.lock().unwrap().failure_hint() {
             augmented_description = format!("{hint}\n\nTarget: {description}");
             &augmented_description
         } else {
@@ -531,11 +539,11 @@ impl GhostSession {
         match coords {
             Some((vx, vy)) => {
                 let (sx, sy) = crop.to_screen(vx, vy);
-                self.reflection.borrow_mut().record_success(obs, format!("locate '{description}' -> ({sx},{sy})"));
+                self.reflection.lock().unwrap().record_success(obs, format!("locate '{description}' -> ({sx},{sy})"));
                 Ok((sx, sy))
             }
             None => {
-                self.reflection.borrow_mut().record_failure(obs, format!("locate '{description}'"), "not found");
+                self.reflection.lock().unwrap().record_failure(obs, format!("locate '{description}'"), "not found");
                 Err(GhostError::ElementNotFound {
                     query: format!("description={description}"),
                     screenshot: None,
@@ -656,7 +664,7 @@ impl GhostSession {
         let yolo_detector = ghost_ground::yolo::YoloDetector::from_env().ok();
 
         #[cfg(not(feature = "yolo"))]
-        let tiers: Vec<Box<dyn ghost_ground::engine::GroundingTier + '_>> = vec![
+        let tiers: Vec<Box<dyn ghost_ground::engine::GroundingTier + Send + Sync + '_>> = vec![
             Box::new(cache),
             Box::new(uia),
             Box::new(ocr),
@@ -664,8 +672,8 @@ impl GhostSession {
         ];
 
         #[cfg(feature = "yolo")]
-        let tiers: Vec<Box<dyn ghost_ground::engine::GroundingTier + '_>> = {
-            let mut t: Vec<Box<dyn ghost_ground::engine::GroundingTier + '_>> = vec![
+        let tiers: Vec<Box<dyn ghost_ground::engine::GroundingTier + Send + Sync + '_>> = {
+            let mut t: Vec<Box<dyn ghost_ground::engine::GroundingTier + Send + Sync + '_>> = vec![
                 Box::new(cache),
                 Box::new(uia),
                 Box::new(ocr),
@@ -685,7 +693,7 @@ impl GhostSession {
         // Merge stats into session's cumulative stats.
         {
             let call_stats = engine.stats();
-            let mut sess_stats = self.grounding_stats.borrow_mut();
+            let mut sess_stats = self.grounding_stats.lock().unwrap();
             sess_stats.instant_hits += call_stats.instant_hits;
             sess_stats.deliberate_hits += call_stats.deliberate_hits;
             sess_stats.total_misses += call_stats.total_misses;
@@ -710,7 +718,7 @@ impl GhostSession {
 
     /// Snapshot current grounding cascade telemetry (across all `ground()` calls this session).
     pub fn grounding_stats(&self) -> GroundingStats {
-        self.grounding_stats.borrow().clone()
+        self.grounding_stats.lock().unwrap().clone()
     }
 
     /// Local OCR + click. Polls until needle appears or timeout. Event-driven backoff.
@@ -1894,7 +1902,7 @@ struct SessionOpsDispatcher<'a> {
     session: &'a GhostSession,
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl<'a> OpsDispatcher for SessionOpsDispatcher<'a> {
     async fn dispatch(&self, op: &Op, _state: &mut IntentState) -> std::result::Result<(), IntentError> {
         match op {

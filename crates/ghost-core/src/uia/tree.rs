@@ -14,6 +14,7 @@ use windows::Win32::UI::WindowsAndMessaging::WindowFromPoint;
 use windows::Win32::System::Threading::{GetCurrentThreadId, AttachThreadInput};
 use super::element::{UiaElement, role_id_to_name, ElementDescriptor, INTERACTIVE_ROLES};
 use crate::error::CoreError;
+use crate::focus;
 
 /// Roles that are acceptable *substitutes* when no exact match exists.
 /// `By::Role("tab")` matches "tabitem"; `By::Role("list")` matches "listitem".
@@ -91,6 +92,14 @@ fn truncate_at_char_boundary(s: &mut String, max: usize) {
 pub struct UiaTree {
     automation: IUIAutomation,
 }
+
+// Safety: this process initializes COM with COINIT_MULTITHREADED (`init_com`).
+// CUIAutomation8 registers the "Both" threading model, so in the MTA its objects
+// are callable from any thread with no marshalling; AddRef/Release are atomic.
+// This is what lets the session be shared across concurrently executing MCP
+// request tasks. The one MTA hazard - COM event callbacks - is not used here.
+unsafe impl Send for UiaTree {}
+unsafe impl Sync for UiaTree {}
 
 impl UiaTree {
     pub fn new() -> Result<Self, CoreError> {
@@ -698,6 +707,8 @@ pub fn focus_window_under_point(x: i32, y: i32) -> Result<bool, CoreError> {
 }
 
 pub fn focus_window(name: &str) -> Result<(), CoreError> {
+    // Bringing a window to the foreground is by definition a screen-stealing action.
+    focus::require_foreground_allowed("focus_window")?;
     let name_lower = name.to_lowercase();
     let windows = list_windows()?;
     let win = windows.iter()
@@ -745,7 +756,12 @@ mod tests {
 
     #[test]
     fn focus_window_name_not_found_returns_process_not_found() {
+        // focus_window is a foreground action, so under the default background policy
+        // it is refused before the name lookup. Allow foreground for this unit, then
+        // a missing window still surfaces ProcessNotFound.
+        crate::focus::set_policy(crate::focus::FocusPolicy::Foreground);
         let result = focus_window("__ghost_nonexistent_window_xyzzy__");
+        crate::focus::set_policy(crate::focus::FocusPolicy::Background);
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(matches!(err, CoreError::ProcessNotFound { .. }),

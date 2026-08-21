@@ -3,6 +3,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use ghost_session::{GhostSession, Target, LocateMode};
+
+mod ext;
 use std::io::{BufRead, Write};
 use std::sync::OnceLock;
 
@@ -311,29 +313,61 @@ struct McpResponse {
     error: Option<Value>,
 }
 
-// current_thread flavor: the whole codebase's COM-STA safety invariant is that
-// every session call runs on the one block_on thread (see GhostSession RefCell
-// docs). The default multi-thread runtime only upheld that by the accident of
-// nothing calling tokio::spawn; this makes it a structural guarantee.
-// spawn_blocking still uses the separate blocking pool and is unaffected.
-#[tokio::main(flavor = "current_thread")]
-async fn main() {
+/// Compile-time proof that the session may be shared across request tasks. If a
+/// future change reintroduces a !Send field, this fails to build instead of the
+/// server quietly losing its concurrency.
+fn _assert_session_shareable() {
+    fn check<T: Send + Sync>() {}
+    check::<GhostSession>();
+}
+
+// Requests run as PARALLEL tasks against a shared session. The engine runs COM
+// in the multithreaded apartment (see ghost-core `init_com` for why that is
+// sound and measured, not assumed), so a 15s wait in one tab no longer stalls
+// an instant query queued behind it. Responses are written on completion and
+// correlated by JSON-RPC id, which is the protocol's contract; a single writer
+// task owns stdout so two responses can never interleave bytes.
+fn main() {
     // Physical-pixel coordinates. Must precede any window/DC use.
     crate::engine::system::dpi::ensure_process_dpi_aware();
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .init();
 
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .on_thread_start(|| {
+            // Every worker joins the MTA so UIA calls are legal from any task.
+            #[cfg(windows)]
+            let _ = crate::engine::uia::init_com_for_thread();
+        })
+        .build()
+        .expect("build tokio runtime");
+    runtime.block_on(async_main());
+}
+
+async fn async_main() {
     let session = match GhostSession::new() {
-        Ok(s) => s,
+        Ok(s) => std::sync::Arc::new(s),
         Err(e) => {
             eprintln!("Fatal: failed to init GhostSession: {}", e);
             std::process::exit(1);
         }
     };
 
-    let stdout = std::io::stdout();
-    let mut out = std::io::BufWriter::new(stdout.lock());
+    // Single writer: responses arrive from any request task, bytes never mix.
+    let (out_tx, mut out_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+    let writer = tokio::task::spawn_blocking(move || {
+        let stdout = std::io::stdout();
+        let mut out = std::io::BufWriter::new(stdout.lock());
+        while let Some(bytes) = out_rx.blocking_recv() {
+            let _ = out.write_all(&bytes);
+            let _ = out.write_all(b"\n");
+            // Flush per message: the client is waiting on this response to decide
+            // its next call, so buffering across messages only adds latency.
+            let _ = out.flush();
+        }
+    });
 
     // Stdin runs on a dedicated reader thread feeding a channel. Dispatch stays
     // serial (COM-STA invariant) but a ghost_stop request now sets the global
@@ -386,47 +420,44 @@ async fn main() {
         .expect("failed to spawn ghost-stdin-reader thread");
 
     while let Some(line) = rx.recv().await {
-        let line = line.as_str();
-        let req: McpRequest = match serde_json::from_str(line) {
+        let req: McpRequest = match serde_json::from_str(&line) {
             Ok(r) => r,
             Err(e) => {
-                let _ = writeln!(
-                    out,
-                    "{}",
-                    serde_json::to_string(&json!({
-                        "jsonrpc": "2.0",
-                        "id": null,
-                        "error": { "code": -32700i64, "message": format!("parse error: {}", e) }
-                    })).unwrap()
-                );
-                let _ = out.flush();
+                let msg = serde_json::to_vec(&json!({
+                    "jsonrpc": "2.0",
+                    "id": null,
+                    "error": { "code": -32700i64, "message": format!("parse error: {}", e) }
+                }))
+                .unwrap_or_else(|_| b"{}".to_vec());
+                let _ = out_tx.send(msg);
                 continue;
             }
         };
 
-        // notifications have no id — handle them but don't respond
-        let Some(id) = req.id else {
-            let _ = handle(&session, &req.method, req.params.as_ref()).await;
-            continue;
-        };
-
-        let result = handle(&session, &req.method, req.params.as_ref()).await;
-
-        let resp = match result {
-            Ok(v) => McpResponse { jsonrpc: "2.0", id, result: Some(v), error: None },
-            Err(e) => McpResponse {
-                jsonrpc: "2.0",
-                id,
-                result: None,
-                error: Some(json!({ "code": -32603i64, "message": e })),
-            },
-        };
-
-        let encoded = encode_response(&resp);
-        let _ = out.write_all(&encoded);
-        let _ = out.write_all(b"\n");
-        let _ = out.flush();
+        let session = session.clone();
+        let out_tx = out_tx.clone();
+        // Every request is its own task: a slow wait in one tool cannot delay
+        // another, and three tabs plus a desktop app can all be mid-operation.
+        tokio::spawn(async move {
+            let result = handle(&session, &req.method, req.params.as_ref()).await;
+            // Notifications have no id and get no response.
+            let Some(id) = req.id else { return };
+            let resp = match result {
+                Ok(v) => McpResponse { jsonrpc: "2.0", id, result: Some(v), error: None },
+                Err(e) => McpResponse {
+                    jsonrpc: "2.0",
+                    id,
+                    result: None,
+                    error: Some(json!({ "code": -32603i64, "message": e })),
+                },
+            };
+            let _ = out_tx.send(encode_response(&resp));
+        });
     }
+
+    // stdin closed: drop our sender and let in-flight responses drain.
+    drop(out_tx);
+    let _ = writer.await;
 }
 
 /// Detect a stop request on the raw wire line, before dispatch. Matches both
@@ -476,7 +507,7 @@ fn dispatch_tool<'a>(
     session: &'a GhostSession,
     name: &'a str,
     args: &'a Value,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = std::result::Result<Value, String>> + 'a>> {
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = std::result::Result<Value, String>> + Send + 'a>> {
     Box::pin(dispatch_tool_inner(session, name, args, false))
 }
 
@@ -485,8 +516,13 @@ fn dispatch_tool_inner<'a>(
     name: &'a str,
     args: &'a Value,
     in_run: bool, // prevent double-routing of ghost_run to avoid infinite recursion
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = std::result::Result<Value, String>> + 'a>> {
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = std::result::Result<Value, String>> + Send + 'a>> {
     Box::pin(async move {
+        // Extended surface (browsers/tabs, isolated desktops, focus policy) is
+        // self-contained in `ext`; everything else routes as before.
+        if ext::owns(name) {
+            return ext::dispatch(session, name, args).await;
+        }
         // Route lean verbs first, fall through to legacy handle_tool for all others.
         match name {
             "ghost_see" => handle_ghost_see(session, args).await,
@@ -2150,7 +2186,13 @@ fn lean_tools_schema() -> Value {
 
 /// Returns the lean tool list. Called by tools/list.
 fn tools_schema() -> Value {
-    lean_tools_schema()
+    // Lean verbs plus the extended surface (browsers/tabs, isolated desktops,
+    // focus policy). Legacy aliases stay dispatchable but unadvertised.
+    let mut tools = lean_tools_schema();
+    if let Some(arr) = tools.as_array_mut() {
+        arr.extend(ext::schemas());
+    }
+    tools
 }
 
 // Legacy full schema — kept for reference, NOT returned by tools/list.
@@ -2725,13 +2767,27 @@ mod tests {
 
     // T3.1 — lean tool surface tests
     #[test]
-    fn tools_schema_has_lean_count() {
+    fn tools_schema_is_lean_verbs_plus_extended_surface() {
         let tools = tools_schema();
         let list = tools.as_array().unwrap();
-        // 20 lean verbs: see, snapshot, find, act, key, scroll, drag, wait, query,
-        //   assert, run, screenshot, window, shell, clipboard, stats, reset, stop,
-        //   http_get, http_post
-        assert_eq!(list.len(), 20, "expected 20 lean verbs (see+snapshot+find+act+key+scroll+drag+wait+query+assert+run+screenshot+window+shell+clipboard+stats+reset+stop+http_get+http_post)");
+        // 20 lean verbs plus the extended surface (browsers/tabs, isolated
+        // desktops, focus policy). Asserting the composition rather than a
+        // magic number: the lean set stays exactly 20, and every ext schema
+        // is present exactly once.
+        let ext_count = ext::schemas().len();
+        assert_eq!(
+            list.len(),
+            20 + ext_count,
+            "expected 20 lean verbs + {ext_count} extended tools"
+        );
+        for t in ext::schemas() {
+            let name = t["name"].as_str().unwrap();
+            assert_eq!(
+                list.iter().filter(|x| x["name"] == name).count(),
+                1,
+                "extended tool {name} must be advertised exactly once"
+            );
+        }
     }
 
     #[test]

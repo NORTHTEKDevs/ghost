@@ -4,6 +4,7 @@ pub mod locator;
 pub mod element;
 pub mod reflection;
 pub mod session;
+pub mod registries;
 pub mod shell;
 pub mod tiers;
 pub mod vision;

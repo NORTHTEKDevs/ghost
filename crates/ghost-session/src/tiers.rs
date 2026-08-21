@@ -38,7 +38,7 @@ impl<'s> GroundingTier for CacheTier<'s> {
     fn locate<'a>(
         &'a self,
         target: &'a Target,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = TierResult> + 'a>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = TierResult> + Send + 'a>> {
         Box::pin(async move {
             let key = match target {
                 Target::Name(n) => {
@@ -131,7 +131,7 @@ impl<'s> GroundingTier for UiaTier<'s> {
     fn locate<'a>(
         &'a self,
         target: &'a Target,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = TierResult> + 'a>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = TierResult> + Send + 'a>> {
         Box::pin(async move {
             let found = match target {
                 Target::Name(n) => self.tree.find_by_name_fast(n),
@@ -188,7 +188,7 @@ impl<'s> GroundingTier for OcrTier<'s> {
     fn locate<'a>(
         &'a self,
         target: &'a Target,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = TierResult> + 'a>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = TierResult> + Send + 'a>> {
         Box::pin(async move {
             let needle = match target {
                 Target::Text(t) => t.as_str(),
@@ -232,7 +232,7 @@ impl<'s> GroundingTier for VlmTier<'s> {
     fn locate<'a>(
         &'a self,
         target: &'a Target,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = TierResult> + 'a>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = TierResult> + Send + 'a>> {
         Box::pin(async move {
             let description = match target {
                 Target::Description(d) => d.as_str(),
@@ -285,7 +285,7 @@ impl<'s> ghost_ground::engine::GroundingTier for YoloTier<'s> {
     fn locate<'a>(
         &'a self,
         target: &'a ghost_ground::types::Target,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ghost_ground::engine::TierResult> + 'a>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ghost_ground::engine::TierResult> + Send + 'a>> {
         Box::pin(async move {
             use ghost_ground::engine::TierResult;
             use ghost_ground::types::{Target, Grounded, Tier};

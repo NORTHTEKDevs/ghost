@@ -131,7 +131,7 @@ pub trait GroundingTier {
     fn locate<'a>(
         &'a self,
         target: &'a Target,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = TierResult> + 'a>>;
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = TierResult> + Send + 'a>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -151,7 +151,7 @@ pub trait GroundingTier {
 /// block_on thread; never move it to a different thread.
 pub struct GroundingEngine<'t> {
     /// Ordered list of tiers to try (first = highest priority).
-    tiers: Vec<Box<dyn GroundingTier + 't>>,
+    tiers: Vec<Box<dyn GroundingTier + Send + Sync + 't>>,
     /// Minimum confidence a tier result must have to be accepted.
     threshold: f32,
     /// Cumulative telemetry.
@@ -161,7 +161,7 @@ pub struct GroundingEngine<'t> {
 impl<'t> GroundingEngine<'t> {
     /// Create a new engine with the given tiers (in priority order) and a
     /// default confidence threshold of [`DEFAULT_THRESHOLD`].
-    pub fn new(tiers: Vec<Box<dyn GroundingTier + 't>>) -> Self {
+    pub fn new(tiers: Vec<Box<dyn GroundingTier + Send + Sync + 't>>) -> Self {
         Self {
             tiers,
             threshold: DEFAULT_THRESHOLD,
@@ -308,7 +308,7 @@ mod tests {
     }
 
     impl StubTier {
-        fn hit(tier: Tier, confidence: f32) -> (Box<dyn GroundingTier>, Arc<AtomicUsize>) {
+        fn hit(tier: Tier, confidence: f32) -> (Box<dyn GroundingTier + Send + Sync>, Arc<AtomicUsize>) {
             let calls = Arc::new(AtomicUsize::new(0));
             let calls2 = calls.clone();
             let rect = (0, 0, 100, 50);
@@ -320,13 +320,13 @@ mod tests {
             )
         }
 
-        fn miss(tier: Tier) -> (Box<dyn GroundingTier>, Arc<AtomicUsize>) {
+        fn miss(tier: Tier) -> (Box<dyn GroundingTier + Send + Sync>, Arc<AtomicUsize>) {
             let calls = Arc::new(AtomicUsize::new(0));
             let calls2 = calls.clone();
             (Box::new(StubTier { tier, result: TierResult::Miss, calls: calls2 }), calls)
         }
 
-        fn na(tier: Tier) -> Box<dyn GroundingTier> {
+        fn na(tier: Tier) -> Box<dyn GroundingTier + Send + Sync> {
             Box::new(StubTier {
                 tier,
                 result: TierResult::NotApplicable,
@@ -343,7 +343,7 @@ mod tests {
         fn locate<'a>(
             &'a self,
             _target: &'a Target,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = TierResult> + 'a>> {
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = TierResult> + Send + 'a>> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             let r = match &self.result {
                 TierResult::Hit(g) => TierResult::Hit(g.clone()),

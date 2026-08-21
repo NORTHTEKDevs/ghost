@@ -6,6 +6,11 @@
 #![cfg(windows)]
 
 pub mod error;
+pub mod focus;
+pub mod desktop;
+
+pub use focus::{policy as focus_policy, set_policy as set_focus_policy, FocusPolicy};
+pub use desktop::{DesktopSession, DesktopWindow};
 pub mod input;
 pub mod uia;
 pub mod capture;

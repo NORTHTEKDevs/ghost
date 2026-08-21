@@ -1,4 +1,5 @@
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
+use crate::focus;
 use crate::error::CoreError;
 use super::hotkey::is_stopped;
 
@@ -48,6 +49,7 @@ pub fn text_to_inputs(text: &str) -> Vec<INPUT> {
 /// Type a string into the focused application using Unicode input events.
 /// Checks STOP_FLAG between characters.
 pub fn type_text(text: &str) -> Result<(), CoreError> {
+    focus::require_foreground_allowed("type_text")?;
     for ch in text.chars() {
         if is_stopped() {
             return Err(CoreError::Win32 { code: 0, context: "stopped" });
@@ -97,6 +99,7 @@ pub fn press_key(vk: VIRTUAL_KEY) -> Result<(), CoreError> {
     if is_stopped() {
         return Err(CoreError::Win32 { code: 0, context: "stopped" });
     }
+    focus::require_foreground_allowed("press_key")?;
     let inputs = [key_event(vk, false), key_event(vk, true)];
     unsafe {
         let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
@@ -112,6 +115,7 @@ pub fn key_down(vk: VIRTUAL_KEY) -> Result<(), CoreError> {
     if is_stopped() {
         return Err(CoreError::Win32 { code: 0, context: "stopped" });
     }
+    focus::require_foreground_allowed("key_down")?;
     let inputs = [key_event(vk, false)];
     unsafe {
         let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
@@ -127,6 +131,7 @@ pub fn key_up(vk: VIRTUAL_KEY) -> Result<(), CoreError> {
     if is_stopped() {
         return Err(CoreError::Win32 { code: 0, context: "stopped" });
     }
+    focus::require_foreground_allowed("key_up")?;
     let inputs = [key_event(vk, true)];
     unsafe {
         let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);

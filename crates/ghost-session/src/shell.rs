@@ -269,12 +269,12 @@ impl GhostSession {
         let id = match args.get("id").and_then(|v| v.as_str()) {
             Some(s) if !s.trim().is_empty() => s.to_string(),
             _ => {
-                let mut reg = self.shells.borrow_mut();
+                let mut reg = self.shells.lock().unwrap();
                 reg.auto_id += 1;
                 format!("s{}", reg.auto_id)
             }
         };
-        if self.shells.borrow().sessions.contains_key(&id) {
+        if self.shells.lock().unwrap().sessions.contains_key(&id) {
             return Err(GhostError::Config(format!(
                 "ghost_shell op=open: session '{id}' already exists"
             )));
@@ -318,7 +318,7 @@ impl GhostSession {
             created: Instant::now(),
             pid,
         };
-        self.shells.borrow_mut().sessions.insert(id.clone(), session);
+        self.shells.lock().unwrap().sessions.insert(id.clone(), session);
         Ok(json!({ "ok": true, "id": id, "pid": pid }))
     }
 
@@ -339,14 +339,14 @@ impl GhostSession {
         // across an await point; reinsert (or drop, if killed) when done.
         let mut sess = self
             .shells
-            .borrow_mut()
+            .lock().unwrap()
             .sessions
             .remove(&id)
             .ok_or_else(|| GhostError::Config(format!("ghost_shell: no session '{id}'")))?;
 
         if sess.pending.is_some() {
             let pend = sess.pending;
-            self.shells.borrow_mut().sessions.insert(id.clone(), sess);
+            self.shells.lock().unwrap().sessions.insert(id.clone(), sess);
             return Err(GhostError::Config(format!(
                 "ghost_shell: session '{id}' is busy running command #{}; call op=read to drain it first",
                 pend.unwrap()
@@ -379,7 +379,7 @@ impl GhostSession {
 
         let mut sess = self
             .shells
-            .borrow_mut()
+            .lock().unwrap()
             .sessions
             .remove(&id)
             .ok_or_else(|| GhostError::Config(format!("ghost_shell: no session '{id}'")))?;
@@ -387,7 +387,7 @@ impl GhostSession {
         let nonce = match sess.pending {
             Some(n) => n,
             None => {
-                self.shells.borrow_mut().sessions.insert(id.clone(), sess);
+                self.shells.lock().unwrap().sessions.insert(id.clone(), sess);
                 return Ok(json!({ "ok": true, "id": id, "output": "", "busy": false, "note": "no command pending" }));
             }
         };
@@ -409,7 +409,7 @@ impl GhostSession {
             ReadOutcome::Done { output, exit_code } => {
                 sess.pending = None;
                 let (output, truncated) = cap_output(output);
-                self.shells.borrow_mut().sessions.insert(id.clone(), sess);
+                self.shells.lock().unwrap().sessions.insert(id.clone(), sess);
                 Ok(json!({
                     "ok": true, "id": id, "output": output,
                     "exit_code": exit_code, "truncated": truncated,
@@ -419,7 +419,7 @@ impl GhostSession {
             ReadOutcome::TimedOut { output } => {
                 sess.pending = Some(nonce);
                 let (output, truncated) = cap_output(output);
-                self.shells.borrow_mut().sessions.insert(id.clone(), sess);
+                self.shells.lock().unwrap().sessions.insert(id.clone(), sess);
                 Ok(json!({
                     "ok": false, "id": id, "output": output,
                     "truncated": truncated, "timed_out": true, "busy": true,
@@ -442,7 +442,7 @@ impl GhostSession {
     }
 
     fn shell_list(&self) -> Value {
-        let reg = self.shells.borrow();
+        let reg = self.shells.lock().unwrap();
         let sessions: Vec<Value> = reg
             .sessions
             .iter()
@@ -467,7 +467,7 @@ impl GhostSession {
             .to_string();
         let mut sess = self
             .shells
-            .borrow_mut()
+            .lock().unwrap()
             .sessions
             .remove(&id)
             .ok_or_else(|| GhostError::Config(format!("ghost_shell: no session '{id}'")))?;

@@ -1,5 +1,66 @@
 # Changelog
 
+## [0.19.0] - Background automation, browsers, isolated desktops, concurrency
+
+Merges the `feat/background-automation` line into the cross-platform 0.18 base.
+The differentiated claims - automate without touching the user's screen, run
+many agents at once with no contention - are now enforced, fast, and provable
+on demand.
+
+### Added
+
+- **`ghost-browser` crate + 19 `ghost_browser_*`/`ghost_tab_*` tools**: drive
+  individual browser tabs over CDP - Comet, Chrome, Edge, or Brave - without
+  the tab being visible or the window focused. Isolated launch per id (own
+  process/profile/port) or attach to the user's own browser. Includes the
+  fire-and-forget mouse-move fix (a background tab never composits, so awaiting
+  the move ack cost 5.01s per click; now ~1-3ms) and screenshot strategies for
+  non-compositing tabs.
+- **Focus policy** (`ghost-core::focus`): `background` (default) /
+  `prefer_background` / `foreground`. Every `SendInput` and
+  `SetForegroundWindow` path is gated and fails loudly instead of stealing the
+  cursor or foreground. Enforced by `tests/focus_enforcement.rs`;
+  `GHOST_FOCUS_POLICY` overrides.
+- **Isolated desktops + 12 `ghost_desktop_*` tools**: launch an app onto a
+  Windows desktop that is never displayed - the desktop-app equivalent of
+  headless. UIA, window messages, and PrintWindow capture all work there;
+  `SendInput` does not (OS boundary, documented and measured).
+- **Concurrent MCP dispatch**: requests run as parallel tasks against a shared
+  session. The engine moved from STA to the multithreaded COM apartment - sound
+  because UIA's client objects register the "Both" threading model and this
+  codebase uses no COM event callbacks (the EventBus is SetWinEventHook on its
+  own thread). Measured: a fast call completes in 0.4ms while a 2s call is in
+  flight; three concurrent `ghost_see` calls in 38ms. A compile-time assert
+  keeps `GhostSession: Send + Sync`.
+- **`ghost verify`**: the claims audit. Drives the real `ghost-mcp` server over
+  stdio through ten checks with hard timing budgets - background enforcement,
+  concurrent tabs without cross-talk, click/screenshot latency, a fast call
+  during a slow call, a second server running its own browser alongside,
+  emergency stop/resume, and an untouched foreground. Exit 1 on any failure.
+- `ghost_session_state`: foreground hwnd + cursor, so "nothing was disturbed"
+  is checkable before and after any batch of actions.
+
+### Fixed
+
+- **The emergency stop never fired.** `RegisterHotKey(None, ..)` binds the
+  hotkey to the calling thread's message queue, but the pump ran on a different
+  thread, so WM_HOTKEY arrived where nobody read it. Registration and pump now
+  share one thread.
+- **A second ghost process had no emergency stop at all** (hotkey already
+  registered elsewhere). The stop is now a named kernel event shared across the
+  session: one Ctrl+Alt+G stops every ghost process, `ghost_reset` resumes them
+  all, and hotkey ownership migrates if the owner exits. The event handle is
+  held for the process lifetime - a named kernel object dies with its last
+  handle, which previously destroyed the signal as it was sent.
+
+### Changed
+
+- `ghost-intent`'s `OpsDispatcher` and `ghost-ground`'s `GroundingTier` are now
+  `Send` futures (dispatchers/tiers must be `Sync`) so tool dispatch can be
+  spawned as tasks.
+- Session interior mutability moved from `RefCell` to `Mutex`
+  (reflection/grounding-stats/shells) for the shared-session model.
+
 ## [0.18.1] - 2026-08-02 - the fixes a fifth review round found
 
 Supersedes 0.18.0 for Linux users. Take this one: 0.18.0 shipped a resource
