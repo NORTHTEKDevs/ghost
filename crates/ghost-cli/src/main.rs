@@ -202,7 +202,10 @@ enum Command {
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    // Physical-pixel coordinates. Must precede any window/DC use.
+    // Physical-pixel coordinates. Must precede any window/DC use. Gated: on
+    // macOS `engine` has no `windows`/`linux` arm yet, so this path doesn't
+    // exist there (see docs/macos-build.md).
+    #[cfg(any(windows, target_os = "linux"))]
     crate::engine::system::dpi::ensure_process_dpi_aware();
     let cli = Cli::parse();
     if cli.verbose {
