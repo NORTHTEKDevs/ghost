@@ -3,7 +3,7 @@
 //! Tries tiers in order: Cache (T1) → UIA (T2) → OCR (T3) → [YOLO (T4)] → VLM (T5).
 //! First tier whose confidence ≥ threshold wins.
 //!
-//! # Design note — COM boundary
+//! # Design note - COM boundary
 //! The tier interfaces are `async` trait objects.  In production (ghost-session),
 //! the UIA and Cache tiers call COM; they live on the STA thread inside
 //! `ghost-session`'s single-threaded tokio runtime (the MCP event loop).
@@ -32,7 +32,7 @@ pub const CONFIDENCE_YOLO: f32 = 0.75;
 pub const CONFIDENCE_VLM: f32 = 0.60;
 
 // ---------------------------------------------------------------------------
-// LocateMode — Instant vs Deliberate dispatch
+// LocateMode - Instant vs Deliberate dispatch
 // ---------------------------------------------------------------------------
 
 /// Dispatch mode controlling which tiers are attempted.
@@ -94,7 +94,7 @@ impl GroundingStats {
 }
 
 // ---------------------------------------------------------------------------
-// TierResult — what a tier returns
+// TierResult - what a tier returns
 // ---------------------------------------------------------------------------
 
 /// Result from a single tier attempt.
@@ -109,7 +109,7 @@ pub enum TierResult {
 }
 
 // ---------------------------------------------------------------------------
-// Tier trait — implemented by ghost-session for real, by stubs in tests
+// Tier trait - implemented by ghost-session for real, by stubs in tests
 // ---------------------------------------------------------------------------
 
 /// A single grounding tier.  Implementations are in `ghost-session` (which
@@ -127,7 +127,8 @@ pub trait GroundingTier {
     fn tier(&self) -> Tier;
 
     /// Attempt to ground `target`.  Must not panic.
-    /// Called from an async context on the session's STA thread.
+    /// Called from an async context on a tokio worker thread joined to the MTA;
+    /// the returned future must be `Send` because requests are spawned in parallel.
     fn locate<'a>(
         &'a self,
         target: &'a Target,
@@ -287,7 +288,7 @@ impl<'t> GroundingEngine<'t> {
 }
 
 // ---------------------------------------------------------------------------
-// Tests — pure logic, no COM
+// Tests - pure logic, no COM
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
@@ -437,7 +438,7 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------------
-    // Instant mode — VLM excluded
+    // Instant mode - VLM excluded
     // ---------------------------------------------------------------------------
 
     #[test]
@@ -477,7 +478,7 @@ mod tests {
         let (vlm_hit, vlm_calls) = StubTier::hit(Tier::Vlm, CONFIDENCE_VLM);
         let mut engine = GroundingEngine::new(vec![cache_miss, uia_miss, vlm_hit]);
         let result = run(engine.locate(&name("btn"), LocateMode::InstantOnly));
-        assert!(result.is_none(), "InstantOnly should return None on local miss — no VLM escalation");
+        assert!(result.is_none(), "InstantOnly should return None on local miss - no VLM escalation");
         assert_eq!(vlm_calls.load(Ordering::SeqCst), 0, "VLM must never be called in InstantOnly mode");
     }
 
@@ -579,7 +580,7 @@ mod tests {
         run(engine.locate(&name("btn"), LocateMode::Deliberate));
 
         let stats = engine.stats();
-        // OCR was NotApplicable — should NOT appear in stats.
+        // OCR was NotApplicable - should NOT appear in stats.
         assert!(!stats.by_tier.contains_key("ocr"));
     }
 }

@@ -32,7 +32,7 @@ pub enum CoreError {
 
     #[error("Element not actionable in background mode: {what}")]
     NotActionableInBackground { what: &'static str },
-    #[error("'{action}' has no background path and the focus policy is 'background';              set policy to 'prefer_background' or 'foreground' to allow real input")]
+    #[error("'{action}' has no background path and the focus policy is 'background'; call ghost_set_focus_policy with 'prefer_background' or 'foreground' to allow real input")]
     NoBackgroundPath { action: &'static str },
 
     #[error("another ghost process held the foreground input lease for {ms}ms")]

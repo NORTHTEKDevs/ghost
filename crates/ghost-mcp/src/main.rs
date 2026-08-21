@@ -20,7 +20,7 @@ mod engine {
 
 
 // ---------------------------------------------------------------------------
-// T3.3 — progress notification emitter (progressToken-gated)
+// T3.3 - progress notification emitter (progressToken-gated)
 // ---------------------------------------------------------------------------
 
 /// Opaque token identifying a progress stream for a single tools/call invocation.
@@ -32,7 +32,7 @@ mod engine {
 /// would be forwarded to a proper channel-based emitter in a future streaming upgrade.
 /// Start/end progress events are emitted at the ghost_run step level for flows.
 ///
-/// Fields, noop(), and emit() are retained for the future streaming upgrade — not
+/// Fields, noop(), and emit() are retained for the future streaming upgrade - not
 /// yet wired into the live dispatch path.
 #[allow(dead_code)]
 struct ProgressEmitter {
@@ -54,7 +54,7 @@ impl ProgressEmitter {
     // (T3.3). The current MCP loop uses noop() but the emit infrastructure is retained
     // for the future channel-based emitter. All items suppressed as a unit.
     fn new(token: Option<Value>, writer: *mut dyn Write) -> Self {
-        // NOTE: this writer path is unexercised in the live dispatch — only noop() is
+        // NOTE: this writer path is unexercised in the live dispatch - only noop() is
         // used (T3.3 streaming limitation). Not tested; retained for future channel upgrade.
         Self { token, writer: Some(writer), progress: 0, total: None }
     }
@@ -92,7 +92,7 @@ impl ProgressEmitter {
 }
 
 // ---------------------------------------------------------------------------
-// T3.2 — structured result envelope
+// T3.2 - structured result envelope
 // ---------------------------------------------------------------------------
 
 /// Cheap foreground window info: {hwnd (isize), title (String)}.
@@ -191,17 +191,17 @@ fn foreground_info() -> Value {
 fn classify_error(msg: &str) -> (i64, Option<&'static str>) {
     let m = msg.to_lowercase();
     if m.contains("not found") || m.contains("elementnotfound") || m.contains("no element") {
-        (-32001, Some("element not found — call ghost_see to confirm the window is focused and the name/role are right, or retry ghost_find with mode=deliberate to escalate to the VLM"))
+        (-32001, Some("element not found - call ghost_see to confirm the window is focused and the name/role are right, or retry ghost_find with mode=deliberate to escalate to the VLM"))
     } else if m.contains("disabled") || m.contains("occluded") || m.contains("not interactable") {
-        (-32002, Some("element exists but isn't actionable (disabled or covered) — call ghost_see and check is_enabled/rect, or dismiss the covering element first"))
+        (-32002, Some("element exists but isn't actionable (disabled or covered) - call ghost_see and check is_enabled/rect, or dismiss the covering element first"))
     } else if m.contains("interrupted by emergency stop") || m.contains("stopped") {
-        (-32004, Some("automation was stopped — call ghost_reset before issuing more actions"))
+        (-32004, Some("automation was stopped - call ghost_reset before issuing more actions"))
     } else if m.contains("timeout") || m.contains("timed out") {
-        (-32003, Some("operation timed out — increase timeout_ms, or check for a blocking modal/dialog with ghost_see"))
+        (-32003, Some("operation timed out - increase timeout_ms, or check for a blocking modal/dialog with ghost_see"))
     } else if m.contains("minimized") {
-        (-32005, Some("target window is minimized — call ghost_window op=focus name=<title> to restore it first"))
+        (-32005, Some("target window is minimized - call ghost_window op=focus name=<title> to restore it first"))
     } else if m.contains("could not focus") || m.contains("focus") && m.contains("window") {
-        (-32006, Some("could not bring the target window to the foreground — confirm the title with ghost_window op=list"))
+        (-32006, Some("could not bring the target window to the foreground - confirm the title with ghost_window op=list"))
     } else {
         (-32000, None)
     }
@@ -260,7 +260,7 @@ fn validate_url(url: &str) -> std::result::Result<(), String> {
     let host = parsed.host_str().unwrap_or("");
     // Block obvious hostname aliases immediately (no DNS needed).
     if host == "localhost" {
-        return Err("URL targets localhost — blocked (SSRF prevention). Set GHOST_HTTP_ALLOW_PRIVATE=1 to allow".into());
+        return Err("URL targets localhost - blocked (SSRF prevention). Set GHOST_HTTP_ALLOW_PRIVATE=1 to allow".into());
     }
 
     // Parse the host as an IP address and block private ranges.
@@ -276,7 +276,7 @@ fn validate_url(url: &str) -> std::result::Result<(), String> {
             std::net::IpAddr::V6(v6) => {
                 v6.is_loopback()           // ::1
                 || v6.is_unspecified()     // ::
-                // fc00::/7 (unique local) — check first two bits
+                // fc00::/7 (unique local) - check first two bits
                 || (v6.octets()[0] & 0xfe) == 0xfc
                 // fe80::/10 (link-local)
                 || (v6.octets()[0] == 0xfe && (v6.octets()[1] & 0xc0) == 0x80)
@@ -284,7 +284,7 @@ fn validate_url(url: &str) -> std::result::Result<(), String> {
         };
         if blocked {
             return Err(format!(
-                "URL targets a private/reserved IP ({ip}) — blocked (SSRF prevention). Set GHOST_HTTP_ALLOW_PRIVATE=1 to allow"
+                "URL targets a private/reserved IP ({ip}) - blocked (SSRF prevention). Set GHOST_HTTP_ALLOW_PRIVATE=1 to allow"
             ));
         }
     }
@@ -371,7 +371,7 @@ async fn async_main() {
 
     // Stdin runs on a dedicated reader thread feeding a channel. Dispatch stays
     // serial (COM-STA invariant) but a ghost_stop request now sets the global
-    // stop flag THE MOMENT it arrives — previously the stop tool sat in the same
+    // stop flag THE MOMENT it arrives - previously the stop tool sat in the same
     // serial queue and could not preempt a long wait or an in-flight VLM call.
     let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(256);
     std::thread::Builder::new()
@@ -393,7 +393,7 @@ async fn async_main() {
                     }
                 };
                 if n > MAX_LINE {
-                    tracing::warn!(line_len = n, "stdin: oversized line ({n} bytes > {MAX_LINE}) — discarding");
+                    tracing::warn!(line_len = n, "stdin: oversized line ({n} bytes > {MAX_LINE}) - discarding");
                     continue;
                 }
                 let line = raw_line.trim_end_matches(['\n', '\r']);
@@ -541,6 +541,17 @@ fn dispatch_tool_inner<'a>(
     })
 }
 
+/// The `initialize` result. The version comes from the crate so it cannot drift
+/// from what was actually built - it was hardcoded to "0.16.0" and kept
+/// reporting that through 0.18.
+fn initialize_response() -> Value {
+    json!({
+        "protocolVersion": "2024-11-05",
+        "capabilities": { "tools": {} },
+        "serverInfo": { "name": "ghost", "version": env!("CARGO_PKG_VERSION") }
+    })
+}
+
 async fn handle(
     session: &GhostSession,
     method: &str,
@@ -550,13 +561,7 @@ async fn handle(
 
     match method {
         // MCP protocol handshake
-        "initialize" => {
-            Ok(json!({
-                "protocolVersion": "2024-11-05",
-                "capabilities": { "tools": {} },
-                "serverInfo": { "name": "ghost", "version": "0.16.0" }
-            }))
-        }
+        "initialize" => Ok(initialize_response()),
         "initialized" | "notifications/initialized" => Ok(json!({})),
         "tools/list" => {
             Ok(json!({ "tools": tools_schema() }))
@@ -575,7 +580,7 @@ async fn handle(
                     // the BufWriter outlives this function, and the server is single-threaded.
                     // We pass a noop emitter here to avoid the unsafe lifetime gymnastics
                     // required to pass the actual BufWriter through async boundaries.
-                    // Progress notifications are still structurally correct — they are emitted
+                    // Progress notifications are still structurally correct - they are emitted
                     // at the dispatch layer using a noop when no live writer reference is
                     // available at this call site. See docs: streaming limitation.
                     let _ = token; // token captured for future streaming upgrade
@@ -644,7 +649,7 @@ async fn handle_tool(
                 "name": grounded.name,
                 "has_rect": grounded.has_rect(),
                 // True when local tiers all missed and this call silently paid a
-                // network VLM round trip — the main hidden-latency source.
+                // network VLM round trip - the main hidden-latency source.
                 "escalated": escalated,
             }))
         }
@@ -670,7 +675,7 @@ async fn handle_tool(
         "ghost_screenshot" => {
             // Default: foreground window crop, max 768px, JPEG 75 quality.
             // Pass "full": true for a full-screen capture (downscaled JPEG by
-            // default — a native-res lossless PNG of a 4K display was a multi-MB
+            // default - a native-res lossless PNG of a 4K display was a multi-MB
             // encode+base64+stdio payload; pass max_dim=0 to force lossless PNG).
             if p.get("full").and_then(|v| v.as_bool()).unwrap_or(false) {
                 let want_lossless = p.get("max_dim").and_then(|v| v.as_u64()) == Some(0);
@@ -1159,7 +1164,7 @@ async fn handle_tool(
             }
 
             let (mode_label, mode) = parse_locate_mode(p);
-            // Optional window anchor — see ghost_find.
+            // Optional window anchor - see ghost_find.
             if let Some(window) = p["window"].as_str() {
                 session.ensure_window_foreground(window).await
                     .map_err(|e| format!("ghost_act: could not focus window '{window}': {e}"))?;
@@ -1200,10 +1205,10 @@ async fn handle_tool(
                     // Use existing act() which does find() → InvokePattern/SetValue.
                     session.act(by, action, text).await.map_err(|e| e.to_string())?
                 } else {
-                    // LOW (act invariant guard): this branch is currently unreachable —
+                    // LOW (act invariant guard): this branch is currently unreachable - 
                     // use_uia_path is only true when source is UIA/Cache, both of which
                     // require a Name/Role target, which always produces a by_for_uia.
-                    debug_assert!(false, "use_uia_path is true but by_for_uia is None — target/tier mismatch");
+                    debug_assert!(false, "use_uia_path is true but by_for_uia is None - target/tier mismatch");
                     return Err("internal error: UIA dispatch path selected but no UIA locator available".into());
                 }
             } else {
@@ -1310,7 +1315,7 @@ async fn find_nth(
 /// Coordinate-based action dispatch. Delegates to `session.act_at`, which anchors
 /// the OS foreground to the window under the point BEFORE any input and runs the
 /// same screen-delta verification as the UIA path (previously this path had no
-/// verification at all — silent no-ops looked like success).
+/// verification at all - silent no-ops looked like success).
 async fn act_at_coords(
     session: &GhostSession,
     x: i32,
@@ -1415,7 +1420,7 @@ fn snapshot_response(elements: &[crate::engine::uia::ElementDescriptor], p: &Val
     })
 }
 
-/// `ghost_snapshot(window?, actionable_only?)` — structured, agent-planning view of
+/// `ghost_snapshot(window?, actionable_only?)` - structured, agent-planning view of
 /// a window's UI: each element with an id, role, rect, center, and the actions it
 /// accepts. Far cheaper than a screenshot for an agent to reason over.
 async fn handle_ghost_snapshot(session: &GhostSession, args: &Value) -> std::result::Result<Value, String> {
@@ -1438,10 +1443,10 @@ fn screenshot_default_opts(p: &Value) -> (bool, u32, u8) {
 }
 
 // ---------------------------------------------------------------------------
-// T3.1 — Lean verb handlers (new verbs that delegate to existing dispatch arms)
+// T3.1 - Lean verb handlers (new verbs that delegate to existing dispatch arms)
 // ---------------------------------------------------------------------------
 
-/// `ghost_see(window?, mode=fast|full|delta)` — describe the screen.
+/// `ghost_see(window?, mode=fast|full|delta)` - describe the screen.
 /// mode=fast (default): describe_screen_fast (foreground only, 5-50x faster)
 /// mode=full: describe_screen (optionally scoped to window)
 /// mode=delta: describe_screen_delta
@@ -1460,7 +1465,7 @@ async fn handle_ghost_see(
     }
 }
 
-/// `ghost_key(keys)` — unified key input.
+/// `ghost_key(keys)` - unified key input.
 /// keys: "Ctrl+C" or "Ctrl+Shift+T" → parsed into modifiers + key → hotkey dispatch.
 /// Single named key (no `+`) → press dispatch. Special: "down:X" / "up:X" → key_down/key_up.
 async fn handle_ghost_key(
@@ -1470,7 +1475,7 @@ async fn handle_ghost_key(
     let keys = p["keys"].as_str().ok_or("ghost_key: missing 'keys' param")?;
 
     // Background mode: post a single key to a named window's focused control
-    // without taking foreground. Modifier combos are rejected — posting can't set
+    // without taking foreground. Modifier combos are rejected - posting can't set
     // the modifier state apps read (GetKeyState), so a combo would silently break.
     if p["background"].as_bool() == Some(true) {
         let window = p["window"].as_str()
@@ -1478,7 +1483,7 @@ async fn handle_ghost_key(
         let (mods, key) = parse_key_combo(keys)?;
         if !mods.is_empty() {
             // The common Ctrl+ editing shortcuts map to semantic messages that DO
-            // work in the background (WM_COPY/CUT/PASTE/UNDO, EM_SETSEL) — route
+            // work in the background (WM_COPY/CUT/PASTE/UNDO, EM_SETSEL) - route
             // those. Any other combo can't be posted reliably and is rejected.
             let is_ctrl_only = mods.len() == 1
                 && matches!(mods[0].to_lowercase().as_str(), "ctrl" | "control");
@@ -1503,7 +1508,7 @@ async fn handle_ghost_key(
         return session.key_background(window, &key).await.map_err(|e| e.to_string());
     }
 
-    // Keyboard SendInput routes to whichever window owns OS focus — which between
+    // Keyboard SendInput routes to whichever window owns OS focus - which between
     // MCP calls is usually the client's own terminal. With `window` given we focus
     // + confirm the target first and FAIL LOUDLY if it can't be confirmed, instead
     // of silently typing into the wrong app.
@@ -1550,15 +1555,15 @@ fn parse_key_combo(keys: &str) -> std::result::Result<(Vec<String>, String), Str
         (parts, key)
     };
     if key.is_empty() {
-        return Err(format!("ghost_key: malformed 'keys' value {keys:?} — missing key after modifiers"));
+        return Err(format!("ghost_key: malformed 'keys' value {keys:?} - missing key after modifiers"));
     }
     if modifiers.iter().any(|m| m.is_empty()) {
-        return Err(format!("ghost_key: malformed 'keys' value {keys:?} — empty modifier segment (e.g. 'Ctrl++Shift' is invalid)"));
+        return Err(format!("ghost_key: malformed 'keys' value {keys:?} - empty modifier segment (e.g. 'Ctrl++Shift' is invalid)"));
     }
     Ok((modifiers.into_iter().map(String::from).collect(), key.to_string()))
 }
 
-/// `ghost_wait(for=idle|text|event|cond|ms, ...)` — unified wait dispatch.
+/// `ghost_wait(for=idle|text|event|cond|ms, ...)` - unified wait dispatch.
 /// for=idle → wait_for_idle; for=text → click_and_wait_for_text; for=event → wait_for_event;
 /// for=cond → wait_until; for=ms (default) → wait.
 async fn handle_ghost_wait(
@@ -1584,7 +1589,7 @@ async fn handle_ghost_wait(
     }
 }
 
-/// `ghost_window(op=list|focus|state|launch)` — unified window management.
+/// `ghost_window(op=list|focus|state|launch)` - unified window management.
 async fn handle_ghost_window(
     session: &GhostSession,
     p: &Value,
@@ -1599,7 +1604,7 @@ async fn handle_ghost_window(
     }
 }
 
-/// `ghost_shell(op=run|open|send|read|list|kill, ...)` — shell control.
+/// `ghost_shell(op=run|open|send|read|list|kill, ...)` - shell control.
 /// Delegates to GhostSession::shell which owns the persistent-session registry.
 async fn handle_ghost_shell(
     session: &GhostSession,
@@ -1608,7 +1613,7 @@ async fn handle_ghost_shell(
     session.shell(p).await.map_err(|e| e.to_string())
 }
 
-/// `ghost_clipboard(op=get|set, text?)` — unified clipboard access.
+/// `ghost_clipboard(op=get|set, text?)` - unified clipboard access.
 async fn handle_ghost_clipboard(
     session: &GhostSession,
     p: &Value,
@@ -1621,7 +1626,7 @@ async fn handle_ghost_clipboard(
     }
 }
 
-/// `ghost_assert(predicate, target?, text?)` — thin assert wrapper.
+/// `ghost_assert(predicate, target?, text?)` - thin assert wrapper.
 /// predicate=text-present: OCR check for text presence.
 /// predicate=text-absent: OCR check for text absence.
 /// predicate=element-exists: ghost_find succeeds.
@@ -1651,7 +1656,7 @@ async fn handle_ghost_assert(
             let mode = parse_locate_mode(p).1;
             match session.ground(target, mode).await {
                 Ok(_) => Ok(json!({ "ok": true, "predicate": predicate, "passed": true })),
-                Err(e) => Err(format!("assert failed: element not found — {e}")),
+                Err(e) => Err(format!("assert failed: element not found - {e}")),
             }
         }
         "value-equals" | "value-contains" => {
@@ -1660,7 +1665,7 @@ async fn handle_ghost_assert(
             let expected = p["text"].as_str()
                 .ok_or("ghost_assert: value-equals/value-contains requires 'text'")?;
             let by = parse_by(p)?;
-            let el = session.find(by).await.map_err(|e| format!("assert failed: element not found — {e}"))?;
+            let el = session.find(by).await.map_err(|e| format!("assert failed: element not found - {e}"))?;
             let actual = el.get_text();
             let passed = if predicate == "value-equals" {
                 actual == expected
@@ -1705,7 +1710,7 @@ impl ValueIntoArray for Value {
     }
 }
 
-/// `ghost_run(steps|json_flow|script)` — T3.4 declarative flow runner.
+/// `ghost_run(steps|json_flow|script)` - T3.4 declarative flow runner.
 /// Accepts three input forms:
 ///   - `steps`: JSON array of {op, ...} objects (direct).
 ///   - `json_flow`: JSON-encoded string of the steps array.
@@ -1749,7 +1754,7 @@ async fn handle_ghost_run(
             .ok_or_else(|| format!("ghost_run: step {i} missing 'op'"))?;
 
         // last_err: the None initial value is not read on the Ok(break) path; that's
-        // intentional — the None is replaced by the Err path, and read in if !succeeded.
+        // intentional - the None is replaced by the Err path, and read in if !succeeded.
         #[allow(unused_assignments)]
         let mut last_err: Option<String> = None;
         let mut succeeded = false;
@@ -1813,7 +1818,7 @@ async fn handle_ghost_run(
 /// first segment is a step index. Returns the JSON value at that path, or None.
 /// Note: a numeric segment is tried as an array index (serde_json Index is
 /// array-only for integers), so an object key that is itself numeric isn't
-/// reachable — not an issue for the named-field UIA result shapes used here.
+/// reachable - not an issue for the named-field UIA result shapes used here.
 fn lookup_step_path(results: &[Value], path: &str) -> Option<Value> {
     let mut parts = path.split('.');
     let idx: usize = parts.next()?.parse().ok()?;
@@ -1880,7 +1885,7 @@ fn substitute_step_refs(v: &Value, results: &[Value]) -> Value {
     }
 }
 
-/// `ghost_query(schema?, region?)` — T3.5 structured screen extraction.
+/// `ghost_query(schema?, region?)` - T3.5 structured screen extraction.
 /// Strategy: UIA field-name matching first; for fields not found, one batched VLM
 /// call extracts them from a foreground screenshot. `unmatched` in the result lists
 /// fields neither UIA nor VLM could fill.
@@ -1913,7 +1918,7 @@ async fn handle_ghost_query(
         ))
     });
 
-    // Phase 1: UIA — for each field, find live elements whose accessible name
+    // Phase 1: UIA - for each field, find live elements whose accessible name
     // contains the field, then read the element's VALUE via get_text()
     // (ValuePattern), NOT its name. Names are field labels ("Email:"); values are
     // the content of edit/document controls. Reading get_text() returns the real
@@ -1994,7 +1999,7 @@ async fn handle_ghost_query(
 }
 
 // ---------------------------------------------------------------------------
-// Lean tools_schema — ~16 verbs advertised in tools/list.
+// Lean tools_schema - ~16 verbs advertised in tools/list.
 // All ~48 legacy tool names remain dispatchable via dispatch_tool (hidden aliases).
 // ---------------------------------------------------------------------------
 
@@ -2004,7 +2009,7 @@ fn lean_tools_schema() -> Value {
     json!([
         // --- Perception ---
         { "name": "ghost_see",
-          "description": "Describe the active screen. mode=fast (default, foreground elements, 5-50x faster), mode=full (full walk, scope with window=; unknown window is an ERROR listing open windows), mode=delta (changed elements since since_seq), mode=text (READ the visible text of a window/page — cheapest way to read content, no screenshot needed), mode=marks (DEBUG: the Set-of-Marks annotated screenshot the VLM sees when grounding by description), mode=selection (read the current text SELECTION of a name/role element via TextPattern, without clobbering the clipboard). Elements: off-screen/zero-area filtered, capped at 150 (limit). Text: capped at 20000 chars (limit).",
+          "description": "Describe the active screen. mode=fast (default, foreground elements, 5-50x faster), mode=full (full walk, scope with window=; unknown window is an ERROR listing open windows), mode=delta (changed elements since since_seq), mode=text (READ the visible text of a window/page - cheapest way to read content, no screenshot needed), mode=marks (DEBUG: the Set-of-Marks annotated screenshot the VLM sees when grounding by description), mode=selection (read the current text SELECTION of a name/role element via TextPattern, without clobbering the clipboard). Elements: off-screen/zero-area filtered, capped at 150 (limit). Text: capped at 20000 chars (limit).",
           "inputSchema": { "type": "object", "properties": {
               "mode": { "type": "string", "enum": ["fast", "full", "delta", "text", "marks", "selection"], "description": "fast=foreground elements (default), full=full tree, delta=changed only, text=readable text content, marks=annotated SoM debug image, selection=selected text of name/role element" },
               "window": { "type": "string", "description": "Partial title to scope the walk (mode=full|text)" },
@@ -2020,36 +2025,36 @@ fn lean_tools_schema() -> Value {
               "role": { "type": "string", "description": "Control type: button, edit, checkbox, list, menu, tab, toolbar" },
               "description": { "type": "string", "description": "Natural-language description for VLM grounding" },
               "text": { "type": "string", "description": "On-screen text for OCR-based location" },
-              "window": { "type": "string", "description": "Anchor: focus+confirm this window (title substring) before resolving — use for multi-window flows" },
+              "window": { "type": "string", "description": "Anchor: focus+confirm this window (title substring) before resolving - use for multi-window flows" },
               "index": { "type": "integer", "description": "Select the nth match (0-based) when several elements share the name/role; name+role AND-combine on this path; returns matches count" },
               "mode": { "type": "string", "enum": ["instant", "deliberate", "instant_only"], "description": "'instant' (default): local tiers, auto-escalates to VLM on miss. 'deliberate': VLM from first attempt. 'instant_only': no VLM." }
           }}},
         // --- Action ---
         { "name": "ghost_act",
-          "description": "Atomic find→focus→action in one call (eliminates cross-call focus race). Anchors OS foreground to the target's window before input and verifies via screen delta. Returns {ok, verified, focus_confirmed, source, confidence, center}; verified=false means the action dispatched but nothing visibly changed — check state with ghost_see before retrying. Supply name|role|description|text to identify target. Set background=true (with window+name/role) to drive an app WITHOUT taking foreground or moving the cursor (agent-harness mode).",
+          "description": "Atomic find→focus→action in one call (eliminates cross-call focus race). Anchors OS foreground to the target's window before input and verifies via screen delta. Returns {ok, verified, focus_confirmed, source, confidence, center}; verified=false means the action dispatched but nothing visibly changed - check state with ghost_see before retrying. Supply name|role|description|text to identify target. Set background=true (with window+name/role) to drive an app WITHOUT taking foreground or moving the cursor (agent-harness mode).",
           "inputSchema": { "type": "object", "required": ["action"], "properties": {
               "name": { "type": "string" }, "role": { "type": "string" },
               "description": { "type": "string" }, "text": { "type": "string" },
               "action": { "type": "string", "enum": ["click", "type", "double_click", "right_click", "hover"],
                           "description": "Action to perform" },
               "text_input": { "type": "string", "description": "Text to type when action=type (use this to avoid param collision with text-target)" },
-              "window": { "type": "string", "description": "Anchor: focus+confirm this window (title substring) before resolving/acting — use for multi-window flows. REQUIRED when background=true." },
+              "window": { "type": "string", "description": "Anchor: focus+confirm this window (title substring) before resolving/acting - use for multi-window flows. REQUIRED when background=true." },
               "background": { "type": "boolean", "description": "Background mode: act inside `window` WITHOUT bringing it to the foreground or moving the cursor (drive an app while the human keeps working). Uses posted window messages on real Win32 controls; supports click|type|double_click|right_click|hover. Returns {verified, focus_preserved, cursor_preserved}. Windowless UWP/WinUI/Chromium controls have no window handle: type/click fall back to UIA (which may activate the window, flagged in the response); double_click/right_click/hover require a windowed control and error otherwise. focus_preserved reports the truth." },
               "index": { "type": "integer", "description": "Act on the nth match (0-based) when several elements share the name/role" },
               "mode": { "type": "string", "enum": ["instant", "deliberate", "instant_only"] }
           }}},
         { "name": "ghost_key",
-          "description": "Key input. Single key: keys='Enter'. Combo: keys='Ctrl+C'. Hold/release: keys='down:Shift' / keys='up:Shift'. STRONGLY RECOMMENDED: pass window=<title substring> — keys go to whichever window owns OS focus (often the MCP client's own terminal between calls); with window set, the target is focused+confirmed first and the call fails loudly instead of typing into the wrong app.",
+          "description": "Key input. Single key: keys='Enter'. Combo: keys='Ctrl+C'. Hold/release: keys='down:Shift' / keys='up:Shift'. STRONGLY RECOMMENDED: pass window=<title substring> - keys go to whichever window owns OS focus (often the MCP client's own terminal between calls); with window set, the target is focused+confirmed first and the call fails loudly instead of typing into the wrong app.",
           "inputSchema": { "type": "object", "required": ["keys"], "properties": {
               "keys": { "type": "string", "description": "Key spec: 'Enter', 'Ctrl+C', 'Ctrl+Shift+T', 'down:Shift', 'up:Shift'" },
               "window": { "type": "string", "description": "Target window title substring. Focus is acquired+confirmed before sending; errors if it can't be. REQUIRED when background=true." },
-              "background": { "type": "boolean", "description": "Post keys to `window`'s focused control WITHOUT taking foreground or moving the cursor. Single keys (Enter/Tab/F5/arrows/char) plus the common editing shortcuts Ctrl+C/X/V/A/Z (dispatched as semantic WM_COPY/CUT/PASTE/UNDO/EM_SETSEL messages — reliable in background). Other modifier combos are rejected (posting can't set the modifier state apps read). Returns {focus_preserved, cursor_preserved}." }
+              "background": { "type": "boolean", "description": "Post keys to `window`'s focused control WITHOUT taking foreground or moving the cursor. Single keys (Enter/Tab/F5/arrows/char) plus the common editing shortcuts Ctrl+C/X/V/A/Z (dispatched as semantic WM_COPY/CUT/PASTE/UNDO/EM_SETSEL messages - reliable in background). Other modifier combos are rejected (posting can't set the modifier state apps read). Returns {focus_preserved, cursor_preserved}." }
           }}},
         { "name": "ghost_snapshot",
-          "description": "Structured, agent-planning view of a window's UI: every element with a stable id, name, role, rect, center, enabled flag, actionable flag, and the actions it accepts (click/type). `actionable` = interactable role AND currently enabled — so a greyed-out button reads actionable:false. Far cheaper than a screenshot to reason over; plan here, then ghost_act by name/role. Params: window? (title substring; omitted = foreground), actionable_only? (only enabled interactable elements), limit?.",
+          "description": "Structured, agent-planning view of a window's UI: every element with a stable id, name, role, rect, center, enabled flag, actionable flag, and the actions it accepts (click/type). `actionable` = interactable role AND currently enabled - so a greyed-out button reads actionable:false. Far cheaper than a screenshot to reason over; plan here, then ghost_act by name/role. Params: window? (title substring; omitted = foreground), actionable_only? (only enabled interactable elements), limit?.",
           "inputSchema": { "type": "object", "properties": {
               "window": { "type": "string", "description": "Window title substring; omitted = foreground window (faster)" },
-              "actionable_only": { "type": "boolean", "description": "Return only interactable elements (buttons/edits/links/...) — cuts noise for planning" },
+              "actionable_only": { "type": "boolean", "description": "Return only interactable elements (buttons/edits/links/...) - cuts noise for planning" },
               "limit": { "type": "integer", "description": "Max elements (default 150; 0 = unlimited)" }
           }}},
         { "name": "ghost_scroll",
@@ -2063,7 +2068,7 @@ fn lean_tools_schema() -> Value {
               "max_scrolls": { "type": "integer", "default": 20, "description": "Max scroll steps in 'until' mode" }
           }}},
         { "name": "ghost_drag",
-          "description": "Click-hold at a start point, move to an end point, release. Each endpoint may be raw coords (from_x/from_y, to_x/to_y) OR an element (from_name/from_role, to_name/to_role) resolved to its center — e.g. drag a list row onto another, or a slider handle.",
+          "description": "Click-hold at a start point, move to an end point, release. Each endpoint may be raw coords (from_x/from_y, to_x/to_y) OR an element (from_name/from_role, to_name/to_role) resolved to its center - e.g. drag a list row onto another, or a slider handle.",
           "inputSchema": { "type": "object", "properties": {
               "from_x": { "type": "integer" }, "from_y": { "type": "integer" },
               "to_x": { "type": "integer" }, "to_y": { "type": "integer" },
@@ -2100,7 +2105,7 @@ fn lean_tools_schema() -> Value {
               "region": { "type": "array", "items": { "type": "integer" }, "minItems": 4, "maxItems": 4, "description": "Optional [left,top,right,bottom] region for VLM screenshot crop" }
           }}},
         { "name": "ghost_assert",
-          "description": "Assert a predicate about screen state. Fails (error) if not satisfied. text-present/text-absent: OCR text check. element-exists: element found. value-equals/value-contains: the element's actual value (ValuePattern) equals/contains 'text' — the fill-then-verify check.",
+          "description": "Assert a predicate about screen state. Fails (error) if not satisfied. text-present/text-absent: OCR text check. element-exists: element found. value-equals/value-contains: the element's actual value (ValuePattern) equals/contains 'text' - the fill-then-verify check.",
           "inputSchema": { "type": "object", "required": ["predicate"], "properties": {
               "predicate": { "type": "string", "enum": ["text-present","text-absent","element-exists","value-equals","value-contains"] },
               "text": { "type": "string", "description": "Text to check (text-present/absent) or expected value (value-equals/contains)" },
@@ -2110,7 +2115,7 @@ fn lean_tools_schema() -> Value {
           }}},
         // --- Flow ---
         { "name": "ghost_run",
-          "description": "Execute a declarative step-by-step flow in one round-trip. Each step: {op, ...params}. Op is any lean verb or legacy tool name. Retries each step on failure (max_retries). CHAINING: a param value of \"${steps.N.path}\" is replaced with a field from step N's result before dispatch — e.g. {op:'find',name:'Save'} then {op:'ghost_click_at', x:'${steps.0.center.x}', y:'${steps.0.center.y}'}. A whole-string ref keeps its type (number stays number).",
+          "description": "Execute a declarative step-by-step flow in one round-trip. Each step: {op, ...params}. Op is any lean verb or legacy tool name. Retries each step on failure (max_retries). CHAINING: a param value of \"${steps.N.path}\" is replaced with a field from step N's result before dispatch - e.g. {op:'find',name:'Save'} then {op:'ghost_click_at', x:'${steps.0.center.x}', y:'${steps.0.center.y}'}. A whole-string ref keeps its type (number stays number).",
           "inputSchema": { "type": "object", "properties": {
               "steps": { "type": "array", "items": { "type": "object" }, "description": "Array of {op, ...params} steps (direct)" },
               "json_flow": { "type": "string", "description": "JSON-encoded steps array string" },
@@ -2195,7 +2200,7 @@ fn tools_schema() -> Value {
     tools
 }
 
-// Legacy full schema — kept for reference, NOT returned by tools/list.
+// Legacy full schema - kept for reference, NOT returned by tools/list.
 #[allow(dead_code)]
 fn legacy_tools_schema_full() -> Value {
     json!([
@@ -2223,7 +2228,7 @@ fn legacy_tools_schema_full() -> Value {
               "x": { "type": "integer" }, "y": { "type": "integer" }
           }}},
         { "name": "ghost_screenshot",
-          "description": "Capture a screenshot. Default: foreground window, max 768px longest edge, JPEG quality 75 — typically 20-100KB. Pass \"full\": true for a full-screen lossless PNG (1-5MB). Always includes size_bytes.",
+          "description": "Capture a screenshot. Default: foreground window, max 768px longest edge, JPEG quality 75 - typically 20-100KB. Pass \"full\": true for a full-screen lossless PNG (1-5MB). Always includes size_bytes.",
           "inputSchema": { "type": "object", "properties": {
               "full": { "type": "boolean", "description": "If true, capture the full screen as lossless PNG. Default false (foreground+JPEG)." }
           }}},
@@ -2441,7 +2446,7 @@ fn legacy_tools_schema_full() -> Value {
               "text": { "type": "string" }
           }}},
         { "name": "ghost_find_text_local",
-          "description": "Local OCR text search via Windows.Media.Ocr (free, on-device, ~50-200ms). Searches for `text` (case-insensitive contains) in foreground window or full screen. Returns first match center pixel. Use BEFORE ghost_locate_by_description for plain-text cases — no API call, no token cost.",
+          "description": "Local OCR text search via Windows.Media.Ocr (free, on-device, ~50-200ms). Searches for `text` (case-insensitive contains) in foreground window or full screen. Returns first match center pixel. Use BEFORE ghost_locate_by_description for plain-text cases - no API call, no token cost.",
           "inputSchema": { "type": "object", "required": ["text"], "properties": {
               "text": { "type": "string", "description": "Text to find (case-insensitive contains match)" },
               "foreground": { "type": "boolean", "default": true, "description": "Scope to foreground window (default true) vs full screen" }
@@ -2765,7 +2770,7 @@ mod tests {
         assert!(s.contains("\"jsonrpc\":\"2.0\""));
     }
 
-    // T3.1 — lean tool surface tests
+    // T3.1 - lean tool surface tests
     #[test]
     fn tools_schema_is_lean_verbs_plus_extended_surface() {
         let tools = tools_schema();
@@ -2838,7 +2843,7 @@ mod tests {
         }
     }
 
-    // T3.1 — every legacy name still recognized by dispatch (returns non-"unknown tool" error at most).
+    // T3.1 - every legacy name still recognized by dispatch (returns non-"unknown tool" error at most).
     // This is a pure routing test: we pass the name and check it reaches handle_tool,
     // not that it succeeds (success requires a live session).
     #[test]
@@ -2868,7 +2873,7 @@ mod tests {
         // would catch it. For a pure test without COM, we assert the list is non-empty
         // and that "ghost_unknown_xyz_9999" would be "unknown".
         assert!(!legacy_names.is_empty());
-        // Sentinel check — pure string operation.
+        // Sentinel check - pure string operation.
         let fake = "ghost_unknown_xyz_9999_notreal";
         // This confirms the routing table has a non-matching _ arm.
         let known = [
@@ -2887,7 +2892,7 @@ mod tests {
         ];
         assert!(!known.contains(&fake), "fake name must not be in known set");
         for name in &legacy_names {
-            assert!(known.contains(name), "legacy name '{}' not in dispatch routing table — back-compat broken", name);
+            assert!(known.contains(name), "legacy name '{}' not in dispatch routing table - back-compat broken", name);
         }
     }
 
@@ -2921,7 +2926,7 @@ mod tests {
 
     #[test]
     fn ghost_key_single_trailing_plus_is_error() {
-        // "Ctrl+" is a truncated combo (key forgotten) — must error, not become Ctrl+Plus.
+        // "Ctrl+" is a truncated combo (key forgotten) - must error, not become Ctrl+Plus.
         assert!(parse_key_combo("Ctrl+").is_err());
         assert!(parse_key_combo("Alt+").is_err());
     }
@@ -2968,7 +2973,7 @@ mod tests {
         assert_eq!(&keys[5..], "Shift");
     }
 
-    // T3.2 — structured result envelope
+    // T3.2 - structured result envelope
     #[test]
     fn wrap_envelope_success_has_ok_true() {
         let v = wrap_envelope(Ok(json!({"result": 42})));
@@ -2994,7 +2999,7 @@ mod tests {
         assert!(fg["title"].is_string(), "foreground.title must be a string");
     }
 
-    // T3.3 — progress emitter (pure, no I/O)
+    // T3.3 - progress emitter (pure, no I/O)
     #[test]
     fn progress_emitter_noop_does_nothing() {
         let mut e = ProgressEmitter::noop();
@@ -3023,17 +3028,19 @@ mod tests {
 
     #[test]
     fn initialize_response_has_protocol_version() {
-        let resp = json!({
-            "protocolVersion": "2024-11-05",
-            "capabilities": { "tools": {} },
-            "serverInfo": { "name": "ghost", "version": "0.16.0" }
-        });
+        // Assert against the real production value, not a literal rebuilt here:
+        // the old version of this test constructed its own json and asserted on
+        // that, so it kept passing while the server reported a stale 0.16.0.
+        let resp = initialize_response();
         assert_eq!(resp["protocolVersion"], "2024-11-05");
         assert!(resp["capabilities"]["tools"].is_object());
         assert_eq!(resp["serverInfo"]["name"], "ghost");
+        assert_eq!(resp["serverInfo"]["version"], env!("CARGO_PKG_VERSION"));
+        // Negative control: the stale hardcoded version must not come back.
+        assert_ne!(resp["serverInfo"]["version"], "0.16.0");
     }
 
-    // T0.5 — screenshot defaults
+    // T0.5 - screenshot defaults
     #[test]
     fn screenshot_opts_defaults_are_foreground_768_75() {
         let p = json!({});
@@ -3053,7 +3060,7 @@ mod tests {
         assert_eq!(qual, 75);
     }
 
-    // T0.1 — tools/call wrapping
+    // T0.1 - tools/call wrapping
     #[test]
     fn tools_call_success_wraps_in_content_text() {
         let v = wrap_tool_result(Ok(json!({"ok": true})));
@@ -3085,7 +3092,7 @@ mod tests {
             "error text should mention missing 'name'");
     }
 
-    // T2.6 — two-tier dispatch mode parsing
+    // T2.6 - two-tier dispatch mode parsing
     #[test]
     fn parse_locate_mode_defaults_to_instant() {
         let p = json!({});
@@ -3142,7 +3149,7 @@ mod tests {
         }
     }
 
-    // W4 — parse_target routing tests (pure, no COM)
+    // W4 - parse_target routing tests (pure, no COM)
     #[test]
     fn parse_target_name() {
         let p = json!({"name": "Submit"});
@@ -3266,7 +3273,7 @@ mod tests {
         assert!(variants.contains(&"instant_only"), "ghost_act mode enum must include instant_only");
     }
 
-    // HIGH-1: text_input param resolution — documented param wins, legacy text is fallback.
+    // HIGH-1: text_input param resolution - documented param wins, legacy text is fallback.
     #[test]
     fn ghost_act_text_input_param_resolution() {
         // text_input present → use text_input
@@ -3553,7 +3560,7 @@ mod tests {
         );
     }
 
-    // T0.2 — JSON-RPC errors have integer code
+    // T0.2 - JSON-RPC errors have integer code
     #[test]
     fn jsonrpc_error_has_integer_code() {
         let resp = McpResponse {

@@ -114,7 +114,7 @@ impl GroundingTier for AlwaysMissTier {
     fn locate<'a>(
         &'a self,
         _target: &'a Target,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = TierResult> + 'a>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = TierResult> + Send + 'a>> {
         Box::pin(async { TierResult::Miss })
     }
 }
@@ -127,7 +127,7 @@ impl GroundingTier for AlwaysHitTier {
     fn locate<'a>(
         &'a self,
         _target: &'a Target,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = TierResult> + 'a>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = TierResult> + Send + 'a>> {
         let confidence = self.1;
         let tier = self.0;
         Box::pin(async move {
@@ -144,7 +144,7 @@ impl GroundingTier for NotApplicableTier {
     fn locate<'a>(
         &'a self,
         _target: &'a Target,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = TierResult> + 'a>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = TierResult> + Send + 'a>> {
         Box::pin(async { TierResult::NotApplicable })
     }
 }
@@ -158,7 +158,7 @@ fn bench_engine(c: &mut Criterion) {
 
     // Scenario A: cache hit on first tier (best case, should be <0.1 ms)
     g.bench_function("cache_hit_first_tier", |b| {
-        let tiers: Vec<Box<dyn GroundingTier>> = vec![
+        let tiers: Vec<Box<dyn GroundingTier + Send + Sync>> = vec![
             Box::new(AlwaysHitTier(Tier::Cache, 0.95)),
             Box::new(AlwaysMissTier(Tier::Uia)),
             Box::new(AlwaysMissTier(Tier::Ocr)),
@@ -175,7 +175,7 @@ fn bench_engine(c: &mut Criterion) {
     // Scenario B: all instant tiers miss (falls to VLM escalation path, but no VLM tier
     // registered → returns None; exercises full tier iteration)
     g.bench_function("all_instant_miss_no_vlm", |b| {
-        let tiers: Vec<Box<dyn GroundingTier>> = vec![
+        let tiers: Vec<Box<dyn GroundingTier + Send + Sync>> = vec![
             Box::new(AlwaysMissTier(Tier::Cache)),
             Box::new(AlwaysMissTier(Tier::Uia)),
             Box::new(AlwaysMissTier(Tier::Ocr)),
@@ -191,7 +191,7 @@ fn bench_engine(c: &mut Criterion) {
 
     // Scenario C: tier ordering — NotApplicable skipped, then Miss, then Hit
     g.bench_function("tier_ordering_skip_na_then_hit", |b| {
-        let tiers: Vec<Box<dyn GroundingTier>> = vec![
+        let tiers: Vec<Box<dyn GroundingTier + Send + Sync>> = vec![
             Box::new(NotApplicableTier(Tier::Cache)),
             Box::new(AlwaysMissTier(Tier::Uia)),
             Box::new(AlwaysHitTier(Tier::Ocr, 0.70)),
@@ -207,7 +207,7 @@ fn bench_engine(c: &mut Criterion) {
 
     // Scenario D: coords bypass — no tier traversal at all
     g.bench_function("coords_bypass", |b| {
-        let tiers: Vec<Box<dyn GroundingTier>> = vec![
+        let tiers: Vec<Box<dyn GroundingTier + Send + Sync>> = vec![
             Box::new(AlwaysMissTier(Tier::Cache)),
         ];
         let mut engine = GroundingEngine::new(tiers);

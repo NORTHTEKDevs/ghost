@@ -132,10 +132,16 @@ pub fn on_isolated_desktop() -> bool {
 ///
 /// Threads bound to an isolated desktop are exempt, and that is not a loophole: the
 /// policy exists to protect *the user's* cursor, focus, and screen. A separate
-/// desktop has its own input queue and is not displayed, so real input there cannot
-/// reach the user's session at all. This is what lets ghost drive apps that expose no
-/// automation surface - games, canvas UIs, anything that only answers real input -
-/// with full fidelity and still never touch the screen.
+/// desktop has its own input queue and is not displayed, so input issued there
+/// cannot reach the user's session at all.
+///
+/// The exemption is about *policy*, not capability. `SendInput` still fails on a
+/// non-displayed desktop - Windows returns ERROR_ACCESS_DENIED off the input
+/// desktop, which is why `DesktopSession::real_input_supported()` is `false`. What
+/// the exemption buys is the message-queue input path (`BackgroundClicker`,
+/// `EditCommand`) running unguarded there. An app that answers *only* real
+/// hardware input - a game, some canvas UIs - cannot be driven on an isolated
+/// desktop; that case needs the `foreground` policy on the user's own desktop.
 pub fn require_foreground_allowed(action: &'static str) -> Result<(), CoreError> {
     if on_isolated_desktop() || foreground_allowed() {
         Ok(())
