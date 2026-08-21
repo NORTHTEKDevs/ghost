@@ -276,7 +276,15 @@ Add to Claude Desktop config (`%APPDATA%\Claude\claude_desktop_config.json`):
 }
 ```
 
-Works with any MCP client (Claude, Cursor, etc.) - 20 lean verbs advertised (legacy names stay dispatchable) covering see/snapshot/find/act/keys/scroll/drag/clipboard/screenshot/windows/shell/waits/query/run.
+Works with any MCP client (Claude, Cursor, etc.). 54 tools on Windows (legacy names
+stay dispatchable): 20 desktop verbs covering
+see/snapshot/find/act/keys/scroll/drag/clipboard/screenshot/windows/shell/waits/query/run,
+19 `ghost_browser_*` / `ghost_tab_*` tools, and 15 Windows-only tools for the focus
+policy and isolated desktops.
+
+Every tool runs on its own task, so a slow call does not block a fast one, and a
+second Ghost process can run alongside the first. Once it is mounted, run
+`ghost verify` to audit that on your own machine.
 
 ### Shell control (`ghost_shell`)
 
@@ -300,8 +308,10 @@ automation verbs fully usable.
 Desktop automation driven from an MCP client has a hostile focus environment: between tool
 calls, the client's own terminal usually retakes OS focus. Ghost is built for that:
 
-- **`ghost_act` is atomic** - find → bring the target's window to the foreground
-  (AttachThreadInput, confirmed) → act → verify via screen delta. One call, no cross-call race.
+- **`ghost_act` is atomic** - find → act → verify via screen delta. One call, no
+  cross-call race. Under the default `background` policy it drives the control in
+  place and never raises the window; raise the policy and it additionally brings the
+  target's window to the foreground first (AttachThreadInput, confirmed).
 - **Every action response is honest**: `verified` (did the screen actually change),
   `focus_confirmed` (was the right window foreground), and a `warning` when either is off - 
   never a blind `ok:true`. Check `verified` before re-issuing an action.
@@ -322,9 +332,17 @@ calls, the client's own terminal usually retakes OS focus. Ghost is built for th
 ## Background mode (agent-harness / computer-use)
 
 Agent harnesses (OpenClaw, Hermes/cua-driver, and any MCP client) mount a
-computer-use tool to let an LLM operate the desktop. Ghost is that tool for
-Windows - and it can act **without stealing your focus or moving your cursor**, so
-an agent drives an app while you keep working in another window.
+computer-use tool to let an LLM operate the desktop. Ghost is that tool - and it acts
+**without stealing your focus or moving your cursor**, so an agent drives an app
+while you keep working in another window.
+
+Since 0.19 this is the default and it is enforced. The process-wide focus policy
+starts at `background`, and every primitive that could only work by taking the real
+cursor or foreground window is gated behind it. There is no silent fallback: a call
+with no background path returns an error naming the action and the policy that would
+unblock it. Set `GHOST_FOCUS_POLICY` in the server env, or call
+`ghost_set_focus_policy` for a target that genuinely needs real input, and set it
+back afterwards. `ghost_focus_policy` reports the current setting.
 
 ```jsonc
 // Drive Calculator-in-the-background style call:
@@ -342,16 +360,29 @@ ghost_act { "background": true, "window": "Character Map",
   that isn't visible. Every response carries `verified`, `focus_preserved`,
   `cursor_preserved` - Ghost never claims a background action it can't confirm.
 - **Honest about the edge.** Windowless controls (UWP/WinUI/Chromium - no window
-  handle) can't be message-posted by *any* tool; there Ghost falls back to UIA
-  dispatch (which activates the window) and says so in the response. Classic Win32
-  line-of-business apps - the software that has no API and most needs automating - 
+  handle) can't be message-posted by *any* tool. Under the default policy Ghost
+  refuses those rather than reaching for the screen, and the error names the action
+  and the policy that would allow it; raise the policy and it falls back to UIA
+  dispatch, which activates the window, and says so in the response. Classic Win32
+  line-of-business apps - the software that has no API and most needs automating -
   drive cleanly in the background.
+- **Or give it a desktop of its own.** `ghost_desktop_*` runs an app on a separate
+  Windows desktop that is never displayed, so UIA, window messages and capture all
+  work on a window the user cannot see. Real `SendInput` still does not work there:
+  Windows refuses it off the input desktop, and making that desktop the input desktop
+  would put it on screen. An app that answers *only* real hardware input needs the
+  `foreground` policy on your own desktop.
 
 Supports `click`, `type`, `double_click`, `right_click`, and `hover` (posted mouse
 messages), plus `ghost_key background=true` for single keys (Enter/Tab/F-keys/char
-via `WM_KEYDOWN`/`WM_CHAR`). Modifier combos (Ctrl+C) are rejected in background - 
-posting can't set the modifier state apps read, so a combo would silently break;
-use foreground for those.
+via `WM_KEYDOWN`/`WM_CHAR`).
+
+The clipboard and edit combos work in the background too - Ctrl+C, Ctrl+X, Ctrl+V,
+Ctrl+Z and Ctrl+A are sent as the semantic messages an app actually implements
+(`WM_COPY`, `WM_CUT`, `WM_PASTE`, `WM_UNDO`, `EM_SETSEL`) rather than as a posted
+modifier that apps reading `GetKeyState` would ignore. Combos outside that set are
+rejected rather than silently dropped, because posting cannot set the modifier state
+those apps read; use the `foreground` policy for them.
 
 ## Vision is model-agnostic
 
@@ -367,6 +398,9 @@ Press **Ctrl+Alt+G** at any time to immediately halt all automation.
 - All queued actions are cancelled
 - Any held modifier keys (Shift, Ctrl, Alt) are released immediately
 - No stuck keys, no stuck modifier states
+- **Machine-wide since 0.19.** The stop is a named kernel event, so one press halts
+  every Ghost process on the machine, not just the one that happened to register the
+  hotkey. `ghost_reset` resumes service.
 
 ## Element Locators
 
@@ -399,16 +433,22 @@ Run with `ghost run flow.json`, `POST /run`, or `ghost_execute_intent` over MCP.
 
 ```
 ghost-cli     ghost-http     ghost-mcp     Rust SDK
-    \            |              /             |
-     \           |             /              |
-      +-----> ghost-session  <----------------+   ← safe Rust API
-                   |
-              ghost-core                         ← Win32 FFI: UIA, SendInput, DXGI
-                   |
-              Windows OS
+    \            |            /   |           |
+     \           |           /    |           |
+      +-----> ghost-session <-----|-----------+   ← safe Rust API
+              /           \       |
+      ghost-core      ghost-linux |               ← one cfg alias picks the engine
+          |                |      |
+    Win32 UIA,       AT-SPI2 over |               ← ghost-core: SendInput, DXGI/GDI
+    posted msgs      D-Bus, XTEST |               ← ghost-linux: portal / uinput
+          |                |      |
+      Windows OS        Linux     +-> ghost-browser  ← CDP over the DevTools port,
+                                                        engine-independent
 ```
 
-Supporting crates: `ghost-cache` (UIA snapshot + delta), `ghost-intent` (FSM + JSONLogic executor).
+Supporting crates: `ghost-cache` (UIA snapshot + delta), `ghost-intent` (FSM +
+JSONLogic executor), `ghost-ground` (the locator tier cascade), `ghost-platform`
+(the capability matrix reported per OS).
 
 ## Vision grounding (Set-of-Marks)
 
@@ -513,6 +553,8 @@ convert microbench: `cargo bench -p ghost-core --bench convert`. Older baselines
 - **Windows** 10 build 19041 or later
 - **Linux** with `at-spi2-core` and a desktop session (X11 or Wayland);
   `xdg-desktop-portal-gnome` additionally for Wayland input and capture
+- A Chromium-family browser (Chrome, Comet, Edge, or Brave) for the
+  `ghost_browser_*` / `ghost_tab_*` tools only; the desktop verbs need none
 - Rust stable (only for building from source)
 
 ## License
