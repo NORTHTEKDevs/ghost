@@ -248,13 +248,71 @@ impl DesktopSession {
         self.exec(move || scroll_window(hwnd, notches, horizontal))?
     }
 
-    /// Type into a window on this desktop, via its focused control.
+    /// Read the text of the input target inside `hwnd`, via WM_GETTEXT.
+    ///
+    /// This is the read-back that makes typing on an invisible desktop provable:
+    /// there is no screen to look at, so the control's own value is the evidence.
+    pub fn read_text(&self, hwnd: isize) -> Result<String, CoreError> {
+        self.exec(move || {
+            let target = crate::input::BackgroundClicker::text_target(hwnd)
+                .ok_or(CoreError::NoTextControl)?;
+            crate::input::BackgroundClicker::read_text(target).ok_or(CoreError::NoTextControl)
+        })?
+    }
+
+    /// Type into a window on this desktop, and prove it landed.
+    ///
+    /// Two things had to be fixed here, and both produced a silent `ok`:
+    ///
+    /// 1. Nothing on a desktop that is never displayed has ever held keyboard
+    ///    focus, so resolving by focus alone fell through to the top-level frame,
+    ///    which discards every WM_CHAR. Resolve a real text control instead.
+    /// 2. `WM_CHAR` is *posted* (asynchronous) while `WM_GETTEXT` is *sent*, and a
+    ///    sent message is serviced ahead of the queued ones - so an immediate
+    ///    read-back saw only the characters that happened to be processed already.
+    ///    Poll until the value stops changing rather than reading once.
+    ///
+    /// The read-back is the proof. If the value never changes, this errors instead
+    /// of claiming success.
     pub fn type_text(&self, hwnd: isize, text: &str) -> Result<(), CoreError> {
         let t = text.to_string();
         self.exec(move || {
-            let target = crate::input::BackgroundClicker::focused_control(hwnd);
+            let target = crate::input::BackgroundClicker::text_target(hwnd)
+                .ok_or(CoreError::NoTextControl)?;
+            let read = || crate::input::BackgroundClicker::read_text(target).unwrap_or_default();
+            let before = read();
             for ch in t.chars() {
                 crate::input::BackgroundClicker::send_char(target, ch)?;
+            }
+            if t.is_empty() {
+                return Ok(());
+            }
+            // Let the posted characters drain: stop as soon as the expected text is
+            // present, or when the value has held still across two reads.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(2000);
+            let mut last = read();
+            let mut stable = 0;
+            while std::time::Instant::now() < deadline {
+                if last.contains(&t) {
+                    return Ok(());
+                }
+                std::thread::sleep(std::time::Duration::from_millis(25));
+                let now = read();
+                if now == last {
+                    stable += 1;
+                    if stable >= 3 {
+                        break;
+                    }
+                } else {
+                    stable = 0;
+                    last = now;
+                }
+            }
+            if last == before {
+                return Err(CoreError::TypeNotVerified { text: t });
+            }
+            if !last.contains(&t) {
+                return Err(CoreError::TypePartial { wanted: t, got: last });
             }
             Ok::<(), CoreError>(())
         })?
@@ -264,7 +322,7 @@ impl DesktopSession {
         let k = key.to_string();
         self.exec(move || match crate::input::keyboard::name_to_vk(&k) {
             Some(vk) => {
-                let target = crate::input::BackgroundClicker::focused_control(hwnd);
+                let target = crate::input::BackgroundClicker::text_target(hwnd).unwrap_or(hwnd);
                 crate::input::BackgroundClicker::send_key(target, vk.0)
             }
             None => Err(CoreError::Win32 { code: 0, context: "unknown key name" }),
@@ -288,7 +346,8 @@ impl DesktopSession {
             })
             .ok_or(CoreError::Win32 { code: 0, context: "unsupported shortcut" })?;
         self.exec(move || {
-            let target = crate::input::BackgroundClicker::focused_control(hwnd);
+            let target = crate::input::BackgroundClicker::text_target(hwnd)
+                .ok_or(CoreError::NoTextControl)?;
             crate::input::BackgroundClicker::edit_command(target, cmd)
         })?
     }

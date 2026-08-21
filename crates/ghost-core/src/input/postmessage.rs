@@ -5,8 +5,9 @@ use windows::Win32::Foundation::{HWND, LPARAM, POINT, WPARAM};
 use windows::Win32::Graphics::Gdi::ScreenToClient;
 use windows::Win32::UI::Input::KeyboardAndMouse::{MapVirtualKeyW, MAPVK_VK_TO_VSC};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetGUIThreadInfo, GetWindowThreadProcessId, IsWindow, PostMessageW, SendMessageTimeoutW,
-    GUITHREADINFO, SEND_MESSAGE_TIMEOUT_FLAGS, WM_LBUTTONDOWN, WM_LBUTTONUP,
+    EnumChildWindows, GetClassNameW, GetGUIThreadInfo, GetWindowThreadProcessId, IsWindow,
+    IsWindowVisible, PostMessageW, SendMessageTimeoutW, GUITHREADINFO, SEND_MESSAGE_TIMEOUT_FLAGS,
+    WM_LBUTTONDOWN, WM_LBUTTONUP,
 };
 
 // Message constants not re-exported by the enabled `windows` features.
@@ -22,16 +23,23 @@ const WM_RBUTTONUP: u32 = 0x0205;
 const MK_LBUTTON: usize = 0x0001;
 const MK_RBUTTON: usize = 0x0002;
 const SMTO_ABORTIFHUNG: u32 = 0x0002;
-// Standard edit/clipboard command messages — how the common Ctrl+ shortcuts
+// Standard edit/clipboard command messages - how the common Ctrl+ shortcuts
 // actually work under the hood.
 const WM_CUT: u32 = 0x0300;
 const WM_COPY: u32 = 0x0301;
 const WM_PASTE: u32 = 0x0302;
 const WM_UNDO: u32 = 0x0304;
 const EM_SETSEL: u32 = 0x00B1;
+const WM_GETTEXT: u32 = 0x000D;
+const WM_GETTEXTLENGTH: u32 = 0x000E;
+
+/// Window classes that accept text through the standard edit messages.
+/// Matched case-insensitively as a prefix, which covers RICHEDIT50W, RichEdit20W
+/// and friends without listing every version.
+const TEXT_CLASS_PREFIXES: [&str; 4] = ["edit", "richedit", "textbox", "scintilla"];
 
 /// A background-safe edit/clipboard command, dispatched as a semantic window
-/// message instead of a raw modifier+key combo (which posting can't do — apps
+/// message instead of a raw modifier+key combo (which posting can't do - apps
 /// read the real keyboard state for modifiers).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditCommand {
@@ -89,7 +97,7 @@ impl BackgroundClicker {
     /// Post a left-click pair to `hwnd` at a SCREEN point, converting to the
     /// window's client coordinates first. Use this when the resolved handle is a
     /// container/ancestor window (list, tree, toolbar) rather than a control that
-    /// owns its own client area — the element's screen-space centre maps to the
+    /// owns its own client area - the element's screen-space centre maps to the
     /// correct client point via ScreenToClient, whereas a size-derived offset
     /// would land in the container's corner.
     pub fn click_screen(hwnd_raw: isize, screen_x: i32, screen_y: i32) -> Result<(), CoreError> {
@@ -116,7 +124,7 @@ impl BackgroundClicker {
         }
     }
 
-    /// Post a double-click (down, up, dblclk, up) at a SCREEN point — no cursor,
+    /// Post a double-click (down, up, dblclk, up) at a SCREEN point - no cursor,
     /// no foreground. `hwnd_raw` is the control/container window handle.
     pub fn double_click_screen(hwnd_raw: isize, screen_x: i32, screen_y: i32) -> Result<(), CoreError> {
         let hwnd = hwnd_of(hwnd_raw);
@@ -133,7 +141,7 @@ impl BackgroundClicker {
         Ok(())
     }
 
-    /// Post a right-click (rbutton down, up) at a SCREEN point — no cursor,
+    /// Post a right-click (rbutton down, up) at a SCREEN point - no cursor,
     /// no foreground.
     pub fn right_click_screen(hwnd_raw: isize, screen_x: i32, screen_y: i32) -> Result<(), CoreError> {
         let hwnd = hwnd_of(hwnd_raw);
@@ -148,7 +156,7 @@ impl BackgroundClicker {
         Ok(())
     }
 
-    /// Post a mouse-move (hover) at a SCREEN point — no cursor, no foreground.
+    /// Post a mouse-move (hover) at a SCREEN point - no cursor, no foreground.
     /// Note: many controls only reveal hover state under a real cursor; a posted
     /// WM_MOUSEMOVE reaches the control's message queue but won't move the OS
     /// cursor, so visual hover effects may not appear.
@@ -162,7 +170,7 @@ impl BackgroundClicker {
         Ok(())
     }
 
-    /// Click a standard button-class control via BM_CLICK — the cleanest
+    /// Click a standard button-class control via BM_CLICK - the cleanest
     /// non-activating way to press a real Win32 button (no cursor, no foreground).
     /// SendMessageTimeout with ABORTIFHUNG so a wedged target can't block us.
     pub fn button_click(hwnd_raw: isize) -> Result<(), CoreError> {
@@ -185,7 +193,7 @@ impl BackgroundClicker {
     }
 
     /// Dispatch a clipboard/edit command (Copy/Cut/Paste/Undo/SelectAll) to a
-    /// control as a semantic window message — background-safe (no foreground, no
+    /// control as a semantic window message - background-safe (no foreground, no
     /// cursor) and, unlike posting Ctrl+<key>, reliable because it doesn't depend
     /// on the modifier keyboard state apps read via GetKeyState. Uses a synchronous
     /// bounded send so a following clipboard read sees the result.
@@ -237,10 +245,106 @@ impl BackgroundClicker {
         }
     }
 
+    /// The window class of `hwnd`, lowercased. Empty when it cannot be read.
+    fn class_name(hwnd: HWND) -> String {
+        let mut buf = [0u16; 256];
+        let n = unsafe { GetClassNameW(hwnd, &mut buf) };
+        if n <= 0 {
+            return String::new();
+        }
+        String::from_utf16_lossy(&buf[..n as usize]).to_lowercase()
+    }
+
+    /// True when `hwnd` is a control that accepts the standard edit messages.
+    fn is_text_control(hwnd: HWND) -> bool {
+        let class = Self::class_name(hwnd);
+        TEXT_CLASS_PREFIXES.iter().any(|p| class.starts_with(p))
+    }
+
+    unsafe extern "system" fn collect_text_control(hwnd: HWND, lparam: LPARAM) -> windows::Win32::Foundation::BOOL {
+        let found = &mut *(lparam.0 as *mut Option<isize>);
+        if found.is_none() && IsWindowVisible(hwnd).as_bool() && Self::is_text_control(hwnd) {
+            *found = Some(hwnd.0 as isize);
+            return false.into(); // stop enumerating
+        }
+        true.into()
+    }
+
+    /// First visible descendant of `root` that accepts text through the standard
+    /// edit messages, if any.
+    pub fn first_text_control(root_raw: isize) -> Option<isize> {
+        let root = hwnd_of(root_raw);
+        if !unsafe { IsWindow(root) }.as_bool() {
+            return None;
+        }
+        if Self::is_text_control(root) {
+            return Some(root_raw);
+        }
+        let mut found: Option<isize> = None;
+        unsafe {
+            let _ = EnumChildWindows(
+                root,
+                Some(Self::collect_text_control),
+                LPARAM(&mut found as *mut Option<isize> as isize),
+            );
+        }
+        found
+    }
+
+    /// Where posted keystrokes should actually go for `window_hwnd_raw`.
+    ///
+    /// `focused_control` alone is not enough. A window on an isolated desktop has
+    /// never been activated, so its GUI thread holds no focus and that function
+    /// falls back to the top-level frame - which is not a text control and silently
+    /// discards every WM_CHAR. Posting there returned `Ok` while doing nothing,
+    /// which is the blind success this whole codebase exists to avoid. So: use the
+    /// focused control when there genuinely is one, otherwise find a real text
+    /// control, and if neither exists say so rather than posting into the void.
+    pub fn text_target(window_hwnd_raw: isize) -> Option<isize> {
+        let focused = Self::focused_control(window_hwnd_raw);
+        if focused != window_hwnd_raw && unsafe { IsWindow(hwnd_of(focused)) }.as_bool() {
+            return Some(focused);
+        }
+        Self::first_text_control(window_hwnd_raw)
+    }
+
+    /// Read a control's text with WM_GETTEXT. This is the read-back that turns a
+    /// posted keystroke into a proven one.
+    pub fn read_text(hwnd_raw: isize) -> Option<String> {
+        let hwnd = hwnd_of(hwnd_raw);
+        if !unsafe { IsWindow(hwnd) }.as_bool() {
+            return None;
+        }
+        unsafe {
+            let len = SendMessageTimeoutW(
+                hwnd,
+                WM_GETTEXTLENGTH,
+                WPARAM(0),
+                LPARAM(0),
+                SEND_MESSAGE_TIMEOUT_FLAGS(SMTO_ABORTIFHUNG),
+                1000,
+                None,
+            );
+            let len = len.0 as usize;
+            let mut buf = vec![0u16; len + 1];
+            SendMessageTimeoutW(
+                hwnd,
+                WM_GETTEXT,
+                WPARAM(buf.len()),
+                LPARAM(buf.as_mut_ptr() as isize),
+                SEND_MESSAGE_TIMEOUT_FLAGS(SMTO_ABORTIFHUNG),
+                1000,
+                None,
+            );
+            let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+            Some(String::from_utf16_lossy(&buf[..end]))
+        }
+    }
+
     /// Post a single virtual-key press (WM_KEYDOWN + WM_KEYUP) to `hwnd` WITHOUT
     /// foreground or cursor movement. Works for un-modified keys (Enter, Tab,
     /// Escape, arrows, F-keys, Delete, single chars). NOTE: modifier combos
-    /// (Ctrl+C, Alt+F4) are NOT reliable via posted messages — apps read the real
+    /// (Ctrl+C, Alt+F4) are NOT reliable via posted messages - apps read the real
     /// keyboard state (GetKeyState) for modifiers, which posting doesn't set; the
     /// caller rejects combos in background mode instead of sending a broken combo.
     pub fn send_key(hwnd_raw: isize, vk: u16) -> Result<(), CoreError> {
@@ -251,7 +355,7 @@ impl BackgroundClicker {
             }
             let scan = (MapVirtualKeyW(vk as u32, MAPVK_VK_TO_VSC) & 0xFF) as isize;
             // Extended-key bit (24) is REQUIRED for the enhanced-keyboard nav cluster
-            // (arrows, Home/End, PageUp/Down, Insert/Delete) — without it apps that
+            // (arrows, Home/End, PageUp/Down, Insert/Delete) - without it apps that
             // branch on the extended flag mistake them for numpad keys.
             let ext = matches!(vk, 0x21 | 0x22 | 0x23 | 0x24 | 0x25 | 0x26 | 0x27 | 0x28 | 0x2D | 0x2E) as isize;
             let base = (scan << 16) | 1 | (ext << 24);
@@ -261,7 +365,7 @@ impl BackgroundClicker {
                 .map_err(|e| CoreError::ComInit(format!("PostMessage KEYDOWN: {e}")))?;
             // We post directly (no message pump to run TranslateMessage), so EDIT
             // controls won't insert \r/\t or delete-on-backspace from WM_KEYDOWN
-            // alone — synthesize the WM_CHAR they expect for these three keys.
+            // alone - synthesize the WM_CHAR they expect for these three keys.
             let ch: Option<u16> = match vk {
                 0x0D => Some(b'\r' as u16), // VK_RETURN
                 0x09 => Some(b'\t' as u16), // VK_TAB
@@ -278,7 +382,7 @@ impl BackgroundClicker {
         Ok(())
     }
 
-    /// Post a character (WM_CHAR) to `hwnd` — for text a virtual key can't express
+    /// Post a character (WM_CHAR) to `hwnd` - for text a virtual key can't express
     /// directly. No foreground, no cursor.
     pub fn send_char(hwnd_raw: isize, ch: char) -> Result<(), CoreError> {
         let hwnd = hwnd_of(hwnd_raw);
@@ -314,7 +418,7 @@ impl BackgroundClicker {
             );
             // WM_SETTEXT returns TRUE on success; a 0 function return means the
             // send timed out. On timeout the OS may STILL deliver the queued
-            // message later using this lParam pointer — so we must NOT free the
+            // message later using this lParam pointer - so we must NOT free the
             // buffer, or the delayed WM_SETTEXT reads freed memory in our own
             // process. Leak it (a small one-time leak per hung send) to stay sound.
             if ret.0 == 0 {

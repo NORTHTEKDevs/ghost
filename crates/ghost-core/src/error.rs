@@ -35,6 +35,15 @@ pub enum CoreError {
     #[error("'{action}' has no background path and the focus policy is 'background'; call ghost_set_focus_policy with 'prefer_background' or 'foreground' to allow real input")]
     NoBackgroundPath { action: &'static str },
 
+    #[error("no message-postable text control in that window; on an isolated desktop there is no real keyboard input to fall back to, so this target cannot be typed into. Drive it on the user's desktop with the 'foreground' focus policy instead")]
+    NoTextControl,
+
+    #[error("typed {text:?} but the control's value did not change; the keystrokes did not land")]
+    TypeNotVerified { text: String },
+
+    #[error("typed {wanted:?} but the control only holds {got:?}; the target accepted some input and dropped the rest")]
+    TypePartial { wanted: String, got: String },
+
     #[error("another ghost process held the foreground input lease for {ms}ms")]
     ForegroundBusy { ms: u32 },
 

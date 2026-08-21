@@ -63,10 +63,12 @@ Ship it three ways:
 The MCP surface is 20 desktop verbs, 19 `ghost_browser_*` / `ghost_tab_*` tools for
 driving individual browser tabs in the background (Chrome, Comet, Edge, Brave), and
 15 Windows-only tools: the focus policy plus `ghost_desktop_*`, which runs an app on
-an isolated Windows desktop the user never sees. On an isolated desktop UIA, window
-messages and capture all work; real `SendInput` does not, because Windows refuses it
-off the input desktop. The desktop verbs and the browser tools build on Linux as
-well; the focus policy and isolated desktops are Windows-only.
+an isolated Windows desktop the user never sees. UIA and capture work fully there.
+Input is limited to what an app accepts by window message: real `SendInput` does not
+work off the input desktop because Windows refuses it, and typing is proven by
+reading the control's value back, so a target that drops posted characters returns an
+error rather than a false success. The desktop verbs and the browser tools build on
+Linux as well; the focus policy and isolated desktops are Windows-only.
 
 No Claude required. No browser required. No CDP. It drives apps through the OS's
 own automation and input APIs, so it works with native apps that have no API and
@@ -394,13 +396,16 @@ local server needs only the base URL). No vendor lock-in.
 
 ## Emergency Stop
 
-Press **Ctrl+Alt+G** at any time to immediately halt all automation.
+Press **Ctrl+Alt+G** at any time to immediately halt every acting call. Read-only
+queries (`ghost_see`, `ghost_snapshot`, `ghost_window` list) keep answering, so you
+can still inspect what happened while everything is stopped.
 - All queued actions are cancelled
 - Any held modifier keys (Shift, Ctrl, Alt) are released immediately
 - No stuck keys, no stuck modifier states
-- **Machine-wide since 0.19.** The stop is a named kernel event, so one press halts
-  every Ghost process on the machine, not just the one that happened to register the
-  hotkey. `ghost_reset` resumes service.
+- **Session-wide since 0.19.** The stop is a named kernel event
+  (`Local\ghost-emergency-stop-event`), so one press halts every Ghost process in
+  your logon session, not just the one that happened to register the hotkey.
+  `ghost_reset` resumes service, again for all of them.
 
 ## Element Locators
 
