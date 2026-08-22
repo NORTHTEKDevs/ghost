@@ -23,12 +23,15 @@ use ghost_session::{By, GhostSession, LocateMode, Target};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-/// The platform engine: `ghost-core` on Windows, `ghost-linux` on Linux.
+/// The platform engine: `ghost-core` on Windows, `ghost-linux` on Linux,
+/// `ghost-macos` on macOS (see docs/macos-build.md).
 mod engine {
     #[cfg(windows)]
     pub use ghost_core::*;
     #[cfg(target_os = "linux")]
     pub use ghost_linux::*;
+    #[cfg(target_os = "macos")]
+    pub use ghost_macos::*;
 }
 
 

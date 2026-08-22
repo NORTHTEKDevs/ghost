@@ -16,6 +16,8 @@ mod engine {
     pub use ghost_core::*;
     #[cfg(target_os = "linux")]
     pub use ghost_linux::*;
+    #[cfg(target_os = "macos")]
+    pub use ghost_macos::*;
 }
 
 

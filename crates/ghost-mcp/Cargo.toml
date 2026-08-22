@@ -31,3 +31,6 @@ windows = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ghost-linux = { path = "../ghost-linux" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+ghost-macos = { path = "../ghost-macos" }

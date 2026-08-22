@@ -1,0 +1,25 @@
+[package]
+name = "ghost-macos"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Ghost's macOS engine surface: the same module tree as ghost-core/ghost-linux (uia, input, capture, system, process, ocr, error) so ghost-session compiles on macOS. Pure Rust, no native Accessibility/CGEvent/ScreenCaptureKit backend yet -- every capability that would need one returns an honest Unsupported error instead of a native implementation. See docs/macos-build.md."
+keywords = ["automation", "macos", "accessibility"]
+categories = ["os::macos-apis"]
+repository = "https://github.com/NORTHTEKDevs/ghost"
+
+# Deliberately NOT target-gated: the whole crate is gated at the root
+# (`#![cfg(target_os = "macos")]` in lib.rs) so it compiles to nothing on other
+# hosts, the same trick ghost-core uses with `#![cfg(windows)]`. That means
+# `cargo check --workspace` on any host stays green regardless of this crate's
+# contents, while `cargo check --target aarch64-apple-darwin -p ghost-macos`
+# actually type-checks the real module tree. Every dependency below is pure
+# Rust with no C build-script step, which is what makes that second check
+# possible to run from a machine with no macOS SDK: no `cc` is ever invoked.
+[dependencies]
+thiserror = { workspace = true }
+serde = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

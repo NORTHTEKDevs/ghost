@@ -23,6 +23,8 @@ mod engine {
     pub use ghost_core::*;
     #[cfg(target_os = "linux")]
     pub use ghost_linux::*;
+    #[cfg(target_os = "macos")]
+    pub use ghost_macos::*;
 }
 
 
@@ -282,7 +284,11 @@ async fn h_tools() -> Json<Value> {
 
 #[tokio::main]
 async fn main() {
-    // Physical-pixel coordinates. Must precede any window/DC use.
+    // Physical-pixel coordinates. Must precede any window/DC use. Gated: the
+    // macOS engine has no dpi module (there is no Win32-style DPI-awareness
+    // declaration on macOS -- the windowing model handles this itself), so
+    // this path doesn't exist there (see docs/macos-build.md).
+    #[cfg(any(windows, target_os = "linux"))]
     engine::system::dpi::ensure_process_dpi_aware();
     tracing_subscriber::fmt().with_writer(std::io::stderr).init();
     let cli = Cli::parse();

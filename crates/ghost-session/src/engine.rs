@@ -17,9 +17,20 @@
 //! Window handles are `isize` on both platforms (`0` means none). On Windows
 //! that is an `HWND`; on Linux it is an interned AT-SPI `(bus name, object
 //! path)` pair.
+//!
+//! - **macOS** -> [`ghost_macos`]: the same module tree with every
+//!   OS-independent piece (the emergency-stop flag, role-id tables, the
+//!   act-then-verify delta math, process launch) ported for real, and every
+//!   capability that would need AXUIElement/CGEvent/ScreenCaptureKit
+//!   returning `CoreError::Unsupported` honestly instead of a native
+//!   implementation. See `docs/macos-build.md` and
+//!   `crates/ghost-macos/src/lib.rs`.
 
 #[cfg(windows)]
 pub use ghost_core::*;
 
 #[cfg(target_os = "linux")]
 pub use ghost_linux::*;
+
+#[cfg(target_os = "macos")]
+pub use ghost_macos::*;
