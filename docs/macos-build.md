@@ -1,6 +1,26 @@
 # Ghost on macOS
 
-**Status: does not build yet.** This is the honest starting point, not a
+**Status (21 Aug 2026): the known blocker is removed; the first real build on
+a Mac is the remaining test.** `crates/ghost-macos` now provides the engine
+`ghost-session` was missing, and `engine.rs` has a macOS arm. Verified from
+Windows: `cargo check --target aarch64-apple-darwin -p ghost-macos` and its
+`--all-targets` API-surface proof both pass, and `cargo check --workspace` on
+Windows is unbroken. What could NOT be verified here is `ghost-session` itself
+compiling for macOS, because cross-compiling the full workspace needs a
+macOS-targeting `cc` for `ring`/`blake3` that this machine does not have --
+so **run `cargo build --workspace` on the Mac and report what happens.**
+
+Expect: browser automation (CDP) and `ghost_shell` to work, because they are
+architecturally platform-neutral. Expect screen automation NOT to work --
+element discovery, click, type, screenshot and OCR all return an explicit
+"unsupported on macOS" error rather than pretending, and that is the
+multi-week AXUIElement/CGEvent work described below.
+
+---
+
+### Original analysis (kept because it is still the accurate map)
+
+**Status when this was written: does not build yet.** This is the honest starting point, not a
 gap to paper over. `ghost-platform` (the cross-platform contract) and the
 pure-Rust support crates compile cleanly for macOS today; `ghost-session`,
 `ghost-cli` (`ghost`), `ghost-mcp` and `ghost-http` do not, for one precise,
