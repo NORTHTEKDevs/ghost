@@ -94,6 +94,11 @@ mod live {
 
     static GLOBAL_BUS: OnceLock<&'static EventBus> = OnceLock::new();
 
+    /// The wait timed out without the sequence advancing (named so the
+    /// signature matches the Windows engine and avoids `Result<_, ()>`).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct WaitTimeout;
+
     impl EventBus {
         pub fn global() -> &'static EventBus {
             GLOBAL_BUS.get_or_init(|| {
@@ -115,7 +120,7 @@ mod live {
         /// not yet subscribe to AT-SPI focus signals, this normally runs to its
         /// deadline and the caller falls back to polling -- the same path
         /// Windows takes when no event arrives.
-        pub async fn wait_for_change(&self, since_seq: u64, timeout_ms: u64) -> Result<u64, ()> {
+        pub async fn wait_for_change(&self, since_seq: u64, timeout_ms: u64) -> Result<u64, WaitTimeout> {
             let deadline =
                 std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
             loop {
@@ -124,7 +129,7 @@ mod live {
                     return Ok(now);
                 }
                 if std::time::Instant::now() >= deadline {
-                    return Err(());
+                    return Err(WaitTimeout);
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(20)).await;
             }

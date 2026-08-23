@@ -22,6 +22,11 @@ pub struct EventBus {
     notify: Notify,
 }
 
+/// The wait timed out without the sequence advancing (named so the signature
+/// avoids `Result<_, ()>`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WaitTimeout;
+
 static GLOBAL_BUS: OnceLock<&'static EventBus> = OnceLock::new();
 
 impl EventBus {
@@ -40,7 +45,7 @@ impl EventBus {
         self.notify.notify_waiters();
     }
 
-    pub async fn wait_for_change(&self, since_seq: u64, timeout_ms: u64) -> Result<u64, ()> {
+    pub async fn wait_for_change(&self, since_seq: u64, timeout_ms: u64) -> Result<u64, WaitTimeout> {
         let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms);
         loop {
             let now = self.seq();
@@ -49,11 +54,11 @@ impl EventBus {
             }
             let remaining = deadline.saturating_duration_since(std::time::Instant::now());
             if remaining.is_zero() {
-                return Err(());
+                return Err(WaitTimeout);
             }
             match timeout(remaining, self.notify.notified()).await {
                 Ok(()) => continue,
-                Err(_) => return Err(()),
+                Err(_) => return Err(WaitTimeout),
             }
         }
     }
