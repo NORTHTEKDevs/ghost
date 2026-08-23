@@ -1,5 +1,8 @@
-use std::sync::{Mutex, atomic::{AtomicBool, AtomicUsize, Ordering}};
 use crate::error::CoreError;
+use std::sync::{
+    atomic::{AtomicBool, AtomicUsize, Ordering},
+    Mutex,
+};
 
 // ---------------------------------------------------------------------------
 // GDI BitBlt fallback capture
@@ -18,8 +21,8 @@ struct ScreenDcGuard(windows::Win32::Graphics::Gdi::HDC);
 impl Drop for ScreenDcGuard {
     fn drop(&mut self) {
         unsafe {
-            use windows::Win32::Graphics::Gdi::ReleaseDC;
             use windows::Win32::Foundation::HWND;
+            use windows::Win32::Graphics::Gdi::ReleaseDC;
             let _ = ReleaseDC(HWND(std::ptr::null_mut()), self.0);
         }
     }
@@ -39,7 +42,7 @@ impl Drop for BitmapGuard {
     fn drop(&mut self) {
         unsafe {
             use windows::Win32::Graphics::Gdi::{DeleteObject, HGDIOBJ};
-            let _ = DeleteObject(HGDIOBJ(self.0.0));
+            let _ = DeleteObject(HGDIOBJ(self.0 .0));
         }
     }
 }
@@ -57,7 +60,10 @@ fn primary_screen_size() -> Result<(usize, usize), CoreError> {
     let width = unsafe { GetSystemMetrics(SM_CXSCREEN) } as usize;
     let height = unsafe { GetSystemMetrics(SM_CYSCREEN) } as usize;
     if width == 0 || height == 0 {
-        return Err(CoreError::Win32 { code: 0, context: "GDI GetSystemMetrics returned 0" });
+        return Err(CoreError::Win32 {
+            code: 0,
+            context: "GDI GetSystemMetrics returned 0",
+        });
     }
     Ok((width, height))
 }
@@ -66,12 +72,18 @@ fn primary_screen_size() -> Result<(usize, usize), CoreError> {
 /// Left/top can be negative when a secondary monitor sits left of / above the primary.
 pub fn virtual_screen_bounds() -> (i32, i32, i32, i32) {
     use windows::Win32::UI::WindowsAndMessaging::{
-        GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
+        GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
+        SM_YVIRTUALSCREEN,
     };
     unsafe {
         let l = GetSystemMetrics(SM_XVIRTUALSCREEN);
         let t = GetSystemMetrics(SM_YVIRTUALSCREEN);
-        (l, t, l + GetSystemMetrics(SM_CXVIRTUALSCREEN), t + GetSystemMetrics(SM_CYVIRTUALSCREEN))
+        (
+            l,
+            t,
+            l + GetSystemMetrics(SM_CXVIRTUALSCREEN),
+            t + GetSystemMetrics(SM_CYVIRTUALSCREEN),
+        )
     }
 }
 
@@ -82,8 +94,7 @@ pub fn virtual_screen_bounds() -> (i32, i32, i32, i32) {
 /// returns a huge region instead of erroring. Pure + unit-tested.
 pub fn rect_within(rect: (i32, i32, i32, i32), bounds: (i32, i32, i32, i32)) -> bool {
     let (l, t, r, b) = rect;
-    r > l && b > t
-        && l >= bounds.0 && t >= bounds.1 && r <= bounds.2 && b <= bounds.3
+    r > l && b > t && l >= bounds.0 && t >= bounds.1 && r <= bounds.2 && b <= bounds.3
 }
 
 /// True if `rect` lies entirely on the primary monitor — the fast DXGI path
@@ -107,7 +118,10 @@ pub fn rect_on_primary(rect: (i32, i32, i32, i32)) -> bool {
 /// virtual-screen bounds. Slower than DXGI (~30-100ms) but the only path for
 /// off-primary windows until per-output duplication lands.
 pub fn capture_virtual_rect_gdi(
-    l: i32, t: i32, r: i32, b: i32,
+    l: i32,
+    t: i32,
+    r: i32,
+    b: i32,
 ) -> Result<(Vec<u8>, usize, usize), CoreError> {
     let (vl, vt, vr, vb) = virtual_screen_bounds();
     let l = l.max(vl);
@@ -115,7 +129,10 @@ pub fn capture_virtual_rect_gdi(
     let r = r.min(vr);
     let b = b.min(vb);
     if r <= l || b <= t {
-        return Err(CoreError::Win32 { code: 0, context: "capture_virtual_rect_gdi: rect outside virtual screen" });
+        return Err(CoreError::Win32 {
+            code: 0,
+            context: "capture_virtual_rect_gdi: rect outside virtual screen",
+        });
     }
     capture_rect_gdi(l, t, (r - l) as usize, (b - t) as usize)
 }
@@ -129,33 +146,45 @@ fn capture_rect_gdi(
     height: usize,
 ) -> Result<(Vec<u8>, usize, usize), CoreError> {
     unsafe {
-        use windows::Win32::Graphics::Gdi::{
-            CreateCompatibleBitmap, CreateCompatibleDC, SelectObject, BitBlt, GetDIBits,
-            BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, SRCCOPY, BI_RGB, HGDIOBJ,
-        };
         use windows::Win32::Foundation::HWND;
+        use windows::Win32::Graphics::Gdi::{
+            BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, GetDIBits, SelectObject,
+            BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HGDIOBJ, SRCCOPY,
+        };
 
         if width == 0 || height == 0 {
-            return Err(CoreError::Win32 { code: 0, context: "capture_rect_gdi: zero-sized rect" });
+            return Err(CoreError::Win32 {
+                code: 0,
+                context: "capture_rect_gdi: zero-sized rect",
+            });
         }
 
         let raw_screen_dc = windows::Win32::Graphics::Gdi::GetDC(HWND(std::ptr::null_mut()));
         if raw_screen_dc.is_invalid() {
-            return Err(CoreError::Win32 { code: 0, context: "GDI GetDC failed" });
+            return Err(CoreError::Win32 {
+                code: 0,
+                context: "GDI GetDC failed",
+            });
         }
         // RAII: screen DC is released on all paths from here.
         let screen_dc = ScreenDcGuard(raw_screen_dc);
 
         let raw_mem_dc = CreateCompatibleDC(screen_dc.0);
         if raw_mem_dc.is_invalid() {
-            return Err(CoreError::Win32 { code: 0, context: "GDI CreateCompatibleDC failed" });
+            return Err(CoreError::Win32 {
+                code: 0,
+                context: "GDI CreateCompatibleDC failed",
+            });
         }
         // RAII: mem DC deleted on all paths from here.
         let mem_dc = MemDcGuard(raw_mem_dc);
 
         let raw_bmp = CreateCompatibleBitmap(screen_dc.0, width as i32, height as i32);
         if raw_bmp.is_invalid() {
-            return Err(CoreError::Win32 { code: 0, context: "GDI CreateCompatibleBitmap failed" });
+            return Err(CoreError::Win32 {
+                code: 0,
+                context: "GDI CreateCompatibleBitmap failed",
+            });
         }
         // RAII: bitmap deleted on all paths from here.
         let bmp = BitmapGuard(raw_bmp);
@@ -166,12 +195,22 @@ fn capture_rect_gdi(
 
         // Select our bitmap into the mem DC; save the old one so we can restore it
         // before deleting the DC (required by GDI contract).
-        let old_gdi = SelectObject(mem_dc.0, HGDIOBJ(bmp.0.0));
+        let old_gdi = SelectObject(mem_dc.0, HGDIOBJ(bmp.0 .0));
         // Restore the original bitmap on drop so DeleteDC is safe.
         // We do this inline after GetDIBits rather than in a Drop because we need
         // the bmp handle to still be alive at restore time.
 
-        let blit_result = BitBlt(mem_dc.0, 0, 0, width as i32, height as i32, screen_dc.0, src_x, src_y, SRCCOPY);
+        let blit_result = BitBlt(
+            mem_dc.0,
+            0,
+            0,
+            width as i32,
+            height as i32,
+            screen_dc.0,
+            src_x,
+            src_y,
+            SRCCOPY,
+        );
 
         // Read pixels regardless of BitBlt result (partial data is better than nothing).
         let mut bmi = BITMAPINFO {
@@ -207,10 +246,16 @@ fn capture_rect_gdi(
         // bmp and mem_dc and screen_dc are all dropped (freed) here when this scope exits.
 
         if blit_result.is_err() {
-            return Err(CoreError::Win32 { code: 0, context: "GDI BitBlt failed" });
+            return Err(CoreError::Win32 {
+                code: 0,
+                context: "GDI BitBlt failed",
+            });
         }
         if scanlines == 0 {
-            return Err(CoreError::Win32 { code: 0, context: "GDI GetDIBits returned 0 scanlines" });
+            return Err(CoreError::Win32 {
+                code: 0,
+                context: "GDI GetDIBits returned 0 scanlines",
+            });
         }
 
         // BGRA (GDI) → RGBA
@@ -231,47 +276,65 @@ fn capture_rect_gdi(
 pub fn capture_window_printwindow(hwnd_raw: isize) -> Result<(Vec<u8>, usize, usize), CoreError> {
     unsafe {
         use windows::Win32::Foundation::{HWND, RECT};
-        use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
-        use windows::Win32::Storage::Xps::{PrintWindow, PRINT_WINDOW_FLAGS};
         use windows::Win32::Graphics::Gdi::{
-            CreateCompatibleBitmap, CreateCompatibleDC, SelectObject, GetDIBits,
-            BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, BI_RGB, HGDIOBJ,
+            CreateCompatibleBitmap, CreateCompatibleDC, GetDIBits, SelectObject, BITMAPINFO,
+            BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HGDIOBJ,
         };
+        use windows::Win32::Storage::Xps::{PrintWindow, PRINT_WINDOW_FLAGS};
+        use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
 
         let hwnd = HWND(hwnd_raw as *mut core::ffi::c_void);
         if hwnd.is_invalid() {
-            return Err(CoreError::Win32 { code: 0, context: "capture_window_printwindow: invalid hwnd" });
+            return Err(CoreError::Win32 {
+                code: 0,
+                context: "capture_window_printwindow: invalid hwnd",
+            });
         }
         let mut r = RECT::default();
         if GetWindowRect(hwnd, &mut r).is_err() {
-            return Err(CoreError::Win32 { code: 0, context: "PrintWindow: GetWindowRect failed" });
+            return Err(CoreError::Win32 {
+                code: 0,
+                context: "PrintWindow: GetWindowRect failed",
+            });
         }
         let width = (r.right - r.left).max(0) as usize;
         let height = (r.bottom - r.top).max(0) as usize;
         if width == 0 || height == 0 {
-            return Err(CoreError::Win32 { code: 0, context: "PrintWindow: zero-sized window" });
+            return Err(CoreError::Win32 {
+                code: 0,
+                context: "PrintWindow: zero-sized window",
+            });
         }
 
         let raw_screen_dc = windows::Win32::Graphics::Gdi::GetDC(HWND(std::ptr::null_mut()));
         if raw_screen_dc.is_invalid() {
-            return Err(CoreError::Win32 { code: 0, context: "PrintWindow: GetDC failed" });
+            return Err(CoreError::Win32 {
+                code: 0,
+                context: "PrintWindow: GetDC failed",
+            });
         }
         let screen_dc = ScreenDcGuard(raw_screen_dc);
 
         let raw_mem_dc = CreateCompatibleDC(screen_dc.0);
         if raw_mem_dc.is_invalid() {
-            return Err(CoreError::Win32 { code: 0, context: "PrintWindow: CreateCompatibleDC failed" });
+            return Err(CoreError::Win32 {
+                code: 0,
+                context: "PrintWindow: CreateCompatibleDC failed",
+            });
         }
         let mem_dc = MemDcGuard(raw_mem_dc);
 
         let raw_bmp = CreateCompatibleBitmap(screen_dc.0, width as i32, height as i32);
         if raw_bmp.is_invalid() {
-            return Err(CoreError::Win32 { code: 0, context: "PrintWindow: CreateCompatibleBitmap failed" });
+            return Err(CoreError::Win32 {
+                code: 0,
+                context: "PrintWindow: CreateCompatibleBitmap failed",
+            });
         }
         let bmp = BitmapGuard(raw_bmp);
 
         let mut bgra = vec![0u8; width * height * 4];
-        let old_gdi = SelectObject(mem_dc.0, HGDIOBJ(bmp.0.0));
+        let old_gdi = SelectObject(mem_dc.0, HGDIOBJ(bmp.0 .0));
 
         // PW_RENDERFULLCONTENT (0x2): render the full content, including DirectX/
         // composited surfaces that the plain PW_CLIENTONLY path misses.
@@ -294,17 +357,28 @@ pub fn capture_window_printwindow(hwnd_raw: isize) -> Result<(Vec<u8>, usize, us
             bmiColors: [Default::default()],
         };
         let scanlines = GetDIBits(
-            mem_dc.0, bmp.0, 0, height as u32,
-            Some(bgra.as_mut_ptr() as *mut _), &mut bmi, DIB_RGB_COLORS,
+            mem_dc.0,
+            bmp.0,
+            0,
+            height as u32,
+            Some(bgra.as_mut_ptr() as *mut _),
+            &mut bmi,
+            DIB_RGB_COLORS,
         );
 
         let _ = SelectObject(mem_dc.0, old_gdi);
 
         if !printed.as_bool() {
-            return Err(CoreError::Win32 { code: 0, context: "PrintWindow returned FALSE" });
+            return Err(CoreError::Win32 {
+                code: 0,
+                context: "PrintWindow returned FALSE",
+            });
         }
         if scanlines == 0 {
-            return Err(CoreError::Win32 { code: 0, context: "PrintWindow: GetDIBits returned 0 scanlines" });
+            return Err(CoreError::Win32 {
+                code: 0,
+                context: "PrintWindow: GetDIBits returned 0 scanlines",
+            });
         }
         let rgba = bgra_to_rgba(&bgra, width, height, width * 4);
         Ok((rgba, width, height))
@@ -343,7 +417,11 @@ struct CaptureContext {
     /// Cached duplication session. None means it must be (re-)acquired.
     duplication: Option<windows::Win32::Graphics::Dxgi::IDXGIOutputDuplication>,
     /// Cached staging texture and its dimensions. None until first frame.
-    staging: Option<(windows::Win32::Graphics::Direct3D11::ID3D11Texture2D, usize, usize)>,
+    staging: Option<(
+        windows::Win32::Graphics::Direct3D11::ID3D11Texture2D,
+        usize,
+        usize,
+    )>,
     /// Last successfully captured frame. Returned on DXGI_ERROR_WAIT_TIMEOUT so
     /// callers never block longer than the reduced AcquireNextFrame timeout.
     last_frame: Option<(Vec<u8>, usize, usize)>,
@@ -404,14 +482,19 @@ pub fn capture_screen_full_rgba() -> Result<(Vec<u8>, usize, usize), CoreError> 
 /// that region (skips converting/cloning the whole frame — ~20x cheaper convert
 /// for a small window, see benches/convert.rs). Caller must pass an on-primary
 /// rect (off-primary goes through the GDI virtual path in capture_region_raw).
-pub fn capture_screen_region_fast(rect: (i32, i32, i32, i32)) -> Result<(Vec<u8>, usize, usize), CoreError> {
+pub fn capture_screen_region_fast(
+    rect: (i32, i32, i32, i32),
+) -> Result<(Vec<u8>, usize, usize), CoreError> {
     let (w, h) = primary_screen_size()?;
     let l = rect.0.max(0) as usize;
     let t = rect.1.max(0) as usize;
     let r = (rect.2.max(0) as usize).min(w);
     let b = (rect.3.max(0) as usize).min(h);
     if r <= l || b <= t {
-        return Err(CoreError::Win32 { code: 0, context: "capture_screen_region_fast: degenerate rect" });
+        return Err(CoreError::Win32 {
+            code: 0,
+            context: "capture_screen_region_fast: degenerate rect",
+        });
     }
     let mut guard = CAPTURE_STATE.lock().unwrap_or_else(|e| e.into_inner());
     if guard.is_none() {
@@ -519,9 +602,13 @@ fn encode_region(
             let scale = target as f32 / long_edge as f32;
             let nw = ((w as f32) * scale).round().max(1.0) as u32;
             let nh = ((h as f32) * scale).round().max(1.0) as u32;
-            let img = image::RgbaImage::from_raw(w as u32, h as u32, rgba)
-                .ok_or(CoreError::Win32 { code: 0, context: "RgbaImage from_raw" })?;
-            let resized = image::imageops::resize(&img, nw, nh, image::imageops::FilterType::Triangle);
+            let img =
+                image::RgbaImage::from_raw(w as u32, h as u32, rgba).ok_or(CoreError::Win32 {
+                    code: 0,
+                    context: "RgbaImage from_raw",
+                })?;
+            let resized =
+                image::imageops::resize(&img, nw, nh, image::imageops::FilterType::Triangle);
             (resized.into_raw(), nw, nh)
         } else {
             (rgba, w as u32, h as u32)
@@ -538,10 +625,10 @@ fn encode_region(
 
 fn init_capture_state() -> Result<CaptureContext, CoreError> {
     unsafe {
+        use windows::core::Interface;
         use windows::Win32::Graphics::Direct3D::*;
         use windows::Win32::Graphics::Direct3D11::*;
         use windows::Win32::Graphics::Dxgi::*;
-        use windows::core::Interface;
 
         let mut device: Option<ID3D11Device> = None;
         let mut context: Option<ID3D11DeviceContext> = None;
@@ -555,25 +642,43 @@ fn init_capture_state() -> Result<CaptureContext, CoreError> {
             Some(&mut device),
             None,
             Some(&mut context),
-        ).map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "D3D11CreateDevice" })?;
+        )
+        .map_err(|e| CoreError::Win32 {
+            code: e.code().0 as u32,
+            context: "D3D11CreateDevice",
+        })?;
 
-        let device = device.ok_or(CoreError::Win32 { code: 0, context: "D3D11 device null" })?;
-        let context = context.ok_or(CoreError::Win32 { code: 0, context: "D3D11 context null" })?;
+        let device = device.ok_or(CoreError::Win32 {
+            code: 0,
+            context: "D3D11 device null",
+        })?;
+        let context = context.ok_or(CoreError::Win32 {
+            code: 0,
+            context: "D3D11 context null",
+        })?;
 
-        let dxgi_device: IDXGIDevice = device.cast()
-            .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "IDXGIDevice cast" })?;
-        let adapter = dxgi_device.GetAdapter()
-            .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "GetAdapter" })?;
-        let output: IDXGIOutput = adapter.EnumOutputs(0)
-            .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "EnumOutputs" })?;
-        let output1: IDXGIOutput1 = output.cast()
-            .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "IDXGIOutput1 cast" })?;
+        let dxgi_device: IDXGIDevice = device.cast().map_err(|e| CoreError::Win32 {
+            code: e.code().0 as u32,
+            context: "IDXGIDevice cast",
+        })?;
+        let adapter = dxgi_device.GetAdapter().map_err(|e| CoreError::Win32 {
+            code: e.code().0 as u32,
+            context: "GetAdapter",
+        })?;
+        let output: IDXGIOutput = adapter.EnumOutputs(0).map_err(|e| CoreError::Win32 {
+            code: e.code().0 as u32,
+            context: "EnumOutputs",
+        })?;
+        let output1: IDXGIOutput1 = output.cast().map_err(|e| CoreError::Win32 {
+            code: e.code().0 as u32,
+            context: "IDXGIOutput1 cast",
+        })?;
 
         Ok(CaptureContext {
             device,
             context,
             output1,
-            duplication: None,  // acquired lazily on first capture_rgba call
+            duplication: None, // acquired lazily on first capture_rgba call
             staging: None,
             last_frame: None,
             #[cfg(test)]
@@ -591,13 +696,22 @@ unsafe fn acquire_duplication(ctx: &mut CaptureContext) -> Result<(), CoreError>
     // Drop any stale duplication before creating a new one.
     ctx.duplication = None;
     ctx.staging = None;
-    let dup: IDXGIOutputDuplication = ctx.output1.DuplicateOutput(&ctx.device)
-        .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "DuplicateOutput" })?;
+    let dup: IDXGIOutputDuplication =
+        ctx.output1
+            .DuplicateOutput(&ctx.device)
+            .map_err(|e| CoreError::Win32 {
+                code: e.code().0 as u32,
+                context: "DuplicateOutput",
+            })?;
     ctx.duplication = Some(dup);
     #[cfg(test)]
-    { ctx.reacquire_count += 1; }
+    {
+        ctx.reacquire_count += 1;
+    }
     #[cfg(not(test))]
-    { ctx._reacquire_count += 1; }
+    {
+        ctx._reacquire_count += 1;
+    }
     Ok(())
 }
 
@@ -634,7 +748,10 @@ fn capture_rgba_cropped(
         if !n.is_multiple_of(DXGI_REPROBE_INTERVAL) {
             return gdi_fallback();
         }
-        tracing::debug!(gdi_captures = n, "re-probing DXGI after sticky black-frame flag");
+        tracing::debug!(
+            gdi_captures = n,
+            "re-probing DXGI after sticky black-frame flag"
+        );
         DXGI_ALWAYS_BLACK.store(false, Ordering::Relaxed);
     }
     let result = match unsafe { capture_rgba_inner(ctx, true, crop) } {
@@ -693,9 +810,9 @@ unsafe fn capture_rgba_inner(
     allow_retry: bool,
     crop: Option<(usize, usize, usize, usize)>, // clamped l,t,r,b in monitor px
 ) -> Result<(Vec<u8>, usize, usize), CoreError> {
+    use windows::core::Interface;
     use windows::Win32::Graphics::Direct3D11::*;
     use windows::Win32::Graphics::Dxgi::*;
-    use windows::core::Interface;
 
     // Ensure duplication is acquired.
     if ctx.duplication.is_none() {
@@ -720,10 +837,15 @@ unsafe fn capture_rgba_inner(
                         // current monitor size) — they can differ if resolution
                         // changed since the last full capture. Degenerate → Err so
                         // capture_rgba_cropped falls back to a fresh GDI region.
-                        let l = l.min(cw); let t = t.min(ch);
-                        let r = r.min(cw); let b = b.min(ch);
+                        let l = l.min(cw);
+                        let t = t.min(ch);
+                        let r = r.min(cw);
+                        let b = b.min(ch);
                         if r <= l || b <= t {
-                            return Err(CoreError::Win32 { code: 0, context: "cached-frame crop degenerate after re-clamp" });
+                            return Err(CoreError::Win32 {
+                                code: 0,
+                                context: "cached-frame crop degenerate after re-clamp",
+                            });
                         }
                         Ok((crop_rgba(cached, cw, l, t, r - l, b - t), r - l, b - t))
                     }
@@ -731,7 +853,10 @@ unsafe fn capture_rgba_inner(
                 };
             }
             // No prior frame; re-try once with a fresh acquire (session just started).
-            return Err(CoreError::Win32 { code: hr.0 as u32, context: "AcquireNextFrame timeout, no cached frame" });
+            return Err(CoreError::Win32 {
+                code: hr.0 as u32,
+                context: "AcquireNextFrame timeout, no cached frame",
+            });
         }
         // Access-lost / invalid-call (wedged): drop + recreate + retry once.
         let is_access_error = hr == DXGI_ERROR_ACCESS_LOST
@@ -741,16 +866,24 @@ unsafe fn capture_rgba_inner(
             acquire_duplication(ctx)?;
             return capture_rgba_inner(ctx, false, crop);
         }
-        return Err(CoreError::Win32 { code: hr.0 as u32, context: "AcquireNextFrame" });
+        return Err(CoreError::Win32 {
+            code: hr.0 as u32,
+            context: "AcquireNextFrame",
+        });
     }
 
     // Frame acquired — RAII guard ensures ReleaseFrame runs on every exit path below.
     let dup_ref = ctx.duplication.as_ref().unwrap();
     let _frame_guard = FrameGuard(dup_ref);
 
-    let resource = resource.ok_or(CoreError::Win32 { code: 0, context: "frame resource null" })?;
-    let texture: ID3D11Texture2D = resource.cast()
-        .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "texture cast" })?;
+    let resource = resource.ok_or(CoreError::Win32 {
+        code: 0,
+        context: "frame resource null",
+    })?;
+    let texture: ID3D11Texture2D = resource.cast().map_err(|e| CoreError::Win32 {
+        code: e.code().0 as u32,
+        context: "texture cast",
+    })?;
 
     let mut desc = D3D11_TEXTURE2D_DESC::default();
     texture.GetDesc(&mut desc);
@@ -771,22 +904,37 @@ unsafe fn capture_rgba_inner(
             ..desc
         };
         let mut new_staging: Option<ID3D11Texture2D> = None;
-        ctx.device.CreateTexture2D(&staging_desc, None, Some(&mut new_staging))
-            .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "CreateTexture2D staging" })?;
-        let s = new_staging.ok_or(CoreError::Win32 { code: 0, context: "staging texture null" })?;
+        ctx.device
+            .CreateTexture2D(&staging_desc, None, Some(&mut new_staging))
+            .map_err(|e| CoreError::Win32 {
+                code: e.code().0 as u32,
+                context: "CreateTexture2D staging",
+            })?;
+        let s = new_staging.ok_or(CoreError::Win32 {
+            code: 0,
+            context: "staging texture null",
+        })?;
         ctx.staging = Some((s, width, height));
     }
     let (staging, _, _) = ctx.staging.as_ref().unwrap();
 
-    let resource_view: ID3D11Resource = texture.cast()
-        .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "texture resource cast" })?;
-    let staging_view: ID3D11Resource = staging.cast()
-        .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "staging resource cast" })?;
+    let resource_view: ID3D11Resource = texture.cast().map_err(|e| CoreError::Win32 {
+        code: e.code().0 as u32,
+        context: "texture resource cast",
+    })?;
+    let staging_view: ID3D11Resource = staging.cast().map_err(|e| CoreError::Win32 {
+        code: e.code().0 as u32,
+        context: "staging resource cast",
+    })?;
     ctx.context.CopyResource(&staging_view, &resource_view);
 
     let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-    ctx.context.Map(&staging_view, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
-        .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "Map" })?;
+    ctx.context
+        .Map(&staging_view, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
+        .map_err(|e| CoreError::Win32 {
+            code: e.code().0 as u32,
+            context: "Map",
+        })?;
 
     let pitch = mapped.RowPitch as usize;
     let data = std::slice::from_raw_parts(mapped.pData as *const u8, pitch * height);
@@ -801,7 +949,10 @@ unsafe fn capture_rgba_inner(
             let b = b.min(height);
             if r <= l || b <= t {
                 ctx.context.Unmap(&staging_view, 0);
-                return Err(CoreError::Win32 { code: 0, context: "capture crop rect degenerate after clamp" });
+                return Err(CoreError::Win32 {
+                    code: 0,
+                    context: "capture crop rect degenerate after clamp",
+                });
             }
             let (cw, ch) = (r - l, b - t);
             let rgba = bgra_to_rgba_region(data, pitch, l, t, cw, ch);
@@ -830,10 +981,10 @@ pub fn bgra_to_rgba(data: &[u8], width: usize, height: usize, pitch: usize) -> V
         for x in 0..width {
             let src = y * pitch + x * 4;
             let dst = (y * width + x) * 4;
-            rgba[dst]     = data[src + 2]; // R <- B
+            rgba[dst] = data[src + 2]; // R <- B
             rgba[dst + 1] = data[src + 1]; // G <- G
-            rgba[dst + 2] = data[src];     // B <- R
-            rgba[dst + 3] = 255;           // A
+            rgba[dst + 2] = data[src]; // B <- R
+            rgba[dst + 3] = 255; // A
         }
     }
     rgba
@@ -846,7 +997,12 @@ pub fn bgra_to_rgba(data: &[u8], width: usize, height: usize, pitch: usize) -> V
 /// tiny fraction of the frame instead of the whole thing. The caller must
 /// ensure the rect lies within the frame bounds.
 pub fn bgra_to_rgba_region(
-    data: &[u8], pitch: usize, src_x: usize, src_y: usize, cw: usize, ch: usize,
+    data: &[u8],
+    pitch: usize,
+    src_x: usize,
+    src_y: usize,
+    cw: usize,
+    ch: usize,
 ) -> Vec<u8> {
     let mut rgba = vec![0u8; cw * ch * 4];
     for y in 0..ch {
@@ -855,10 +1011,10 @@ pub fn bgra_to_rgba_region(
         for x in 0..cw {
             let src = row_src + x * 4;
             let dst = row_dst + x * 4;
-            rgba[dst]     = data[src + 2]; // R <- B
+            rgba[dst] = data[src + 2]; // R <- B
             rgba[dst + 1] = data[src + 1]; // G
-            rgba[dst + 2] = data[src];     // B <- R
-            rgba[dst + 3] = 255;           // A
+            rgba[dst + 2] = data[src]; // B <- R
+            rgba[dst + 3] = 255; // A
         }
     }
     rgba
@@ -881,26 +1037,44 @@ pub fn crop_rgba(full: &[u8], full_w: usize, l: usize, t: usize, cw: usize, ch: 
 /// Encode tightly-packed RGBA bytes as PNG. Exported for testing.
 pub fn encode_png_rgba(rgba_data: &[u8], width: u32, height: u32) -> Result<Vec<u8>, CoreError> {
     use image::RgbaImage;
-    let img = RgbaImage::from_raw(width, height, rgba_data.to_vec())
-        .ok_or(CoreError::Win32 { code: 0, context: "RgbaImage from_raw" })?;
+    let img = RgbaImage::from_raw(width, height, rgba_data.to_vec()).ok_or(CoreError::Win32 {
+        code: 0,
+        context: "RgbaImage from_raw",
+    })?;
     let mut png_bytes = Vec::new();
-    img.write_to(&mut std::io::Cursor::new(&mut png_bytes), image::ImageFormat::Png)
-        .map_err(|_| CoreError::Win32 { code: 0, context: "PNG encode" })?;
+    img.write_to(
+        &mut std::io::Cursor::new(&mut png_bytes),
+        image::ImageFormat::Png,
+    )
+    .map_err(|_| CoreError::Win32 {
+        code: 0,
+        context: "PNG encode",
+    })?;
     Ok(png_bytes)
 }
 
 /// Encode tightly-packed RGBA bytes as JPEG with the given quality (0-100).
 /// JPEG is lossy and discards alpha; alpha channel is dropped.
-pub(crate) fn encode_jpeg_rgba(rgba_data: &[u8], width: u32, height: u32, quality: u8) -> Result<Vec<u8>, CoreError> {
-    use image::RgbaImage;
+pub(crate) fn encode_jpeg_rgba(
+    rgba_data: &[u8],
+    width: u32,
+    height: u32,
+    quality: u8,
+) -> Result<Vec<u8>, CoreError> {
     use image::codecs::jpeg::JpegEncoder;
-    let img = RgbaImage::from_raw(width, height, rgba_data.to_vec())
-        .ok_or(CoreError::Win32 { code: 0, context: "RgbaImage from_raw" })?;
+    use image::RgbaImage;
+    let img = RgbaImage::from_raw(width, height, rgba_data.to_vec()).ok_or(CoreError::Win32 {
+        code: 0,
+        context: "RgbaImage from_raw",
+    })?;
     let rgb = image::DynamicImage::ImageRgba8(img).to_rgb8();
     let mut buf = Vec::new();
     let mut enc = JpegEncoder::new_with_quality(&mut buf, quality);
     enc.encode(rgb.as_raw(), width, height, image::ExtendedColorType::Rgb8)
-        .map_err(|_| CoreError::Win32 { code: 0, context: "JPEG encode" })?;
+        .map_err(|_| CoreError::Win32 {
+            code: 0,
+            context: "JPEG encode",
+        })?;
     Ok(buf)
 }
 
@@ -924,19 +1098,67 @@ pub fn capture_region_marked_jpeg(
     } else {
         1.0
     };
-    let mut img = image::RgbaImage::from_raw(rw, rh, rgba)
-        .ok_or(CoreError::Win32 { code: 0, context: "SoM RgbaImage from_raw" })?;
+    let mut img = image::RgbaImage::from_raw(rw, rh, rgba).ok_or(CoreError::Win32 {
+        code: 0,
+        context: "SoM RgbaImage from_raw",
+    })?;
     if scale < 1.0 {
         let nw = ((rw as f32 * scale).round() as u32).max(1);
         let nh = ((rh as f32 * scale).round() as u32).max(1);
         img = image::imageops::resize(&img, nw, nh, image::imageops::FilterType::Triangle);
     }
     // Scale mark positions into the (possibly downscaled) image space, then draw.
-    let scaled: Vec<super::marks::Mark> = marks_native.iter().map(|m| super::marks::Mark {
-        label: m.label,
-        x: (m.x as f32 * scale).round() as i32,
-        y: (m.y as f32 * scale).round() as i32,
-    }).collect();
+    let scaled: Vec<super::marks::Mark> = marks_native
+        .iter()
+        .map(|m| super::marks::Mark {
+            label: m.label,
+            x: (m.x as f32 * scale).round() as i32,
+            y: (m.y as f32 * scale).round() as i32,
+        })
+        .collect();
+    super::marks::draw_marks(&mut img, &scaled);
+    let (fw, fh) = (img.width(), img.height());
+    encode_jpeg_rgba(img.as_raw(), fw, fh, quality)
+}
+
+/// Occlusion-proof Set-of-Marks capture for a specific window.
+///
+/// Renders the window's own surface via PrintWindow - the image is correct
+/// even when the window is completely covered - and draws badges at
+/// window-relative positions. This is what lets description grounding target
+/// a background window: the VLM sees the TARGET, not whatever happens to be
+/// covering it.
+pub fn capture_window_marked_jpeg(
+    hwnd_raw: isize,
+    marks_client: &[super::marks::Mark],
+    max_dim: u32,
+    quality: u8,
+) -> Result<Vec<u8>, CoreError> {
+    let (rgba, w, h) = capture_window_printwindow(hwnd_raw)?;
+    let (rw, rh) = (w as u32, h as u32);
+    let long_edge = rw.max(rh);
+    let scale = if max_dim > 0 && long_edge > max_dim {
+        max_dim as f32 / long_edge as f32
+    } else {
+        1.0
+    };
+    let mut img = image::RgbaImage::from_raw(rw, rh, rgba).ok_or(CoreError::Win32 {
+        code: 0,
+        context: "SoM window RgbaImage from_raw",
+    })?;
+    if scale < 1.0 {
+        let nw = ((rw as f32 * scale).round() as u32).max(1);
+        let nh = ((rh as f32 * scale).round() as u32).max(1);
+        img = image::imageops::resize(&img, nw, nh, image::imageops::FilterType::Triangle);
+    }
+    let scaled: Vec<super::marks::Mark> = marks_client
+        .iter()
+        .map(|m| super::marks::Mark {
+            label: m.label,
+            x: (m.x as f32 * scale).round() as i32,
+            y: (m.y as f32 * scale).round() as i32,
+        })
+        .collect();
     super::marks::draw_marks(&mut img, &scaled);
     let (fw, fh) = (img.width(), img.height());
     encode_jpeg_rgba(img.as_raw(), fw, fh, quality)
@@ -959,10 +1181,10 @@ mod tests {
     #[test]
     fn rect_within_rejects_inverted_rects() {
         let bounds = (0, 0, 1920, 1080);
-        assert!(!rect_within((50, 0, -1, 100), bounds));  // negative right (the wrap-bug trigger)
+        assert!(!rect_within((50, 0, -1, 100), bounds)); // negative right (the wrap-bug trigger)
         assert!(!rect_within((50, 100, 60, 20), bounds)); // bottom < top
         assert!(!rect_within((100, 0, 100, 50), bounds)); // zero width
-        assert!(!rect_within((0, 50, 50, 50), bounds));   // zero height
+        assert!(!rect_within((0, 50, 50, 50), bounds)); // zero height
     }
 
     #[test]
@@ -977,8 +1199,14 @@ mod tests {
     fn virtual_bounds_contains_primary() {
         // Virtual screen must always contain the primary (0,0)-(w,h).
         let (vl, vt, vr, vb) = virtual_screen_bounds();
-        assert!(vl <= 0 && vt <= 0, "virtual origin should be <= (0,0): {vl},{vt}");
-        assert!(vr > 0 && vb > 0, "virtual extent should be positive: {vr},{vb}");
+        assert!(
+            vl <= 0 && vt <= 0,
+            "virtual origin should be <= (0,0): {vl},{vt}"
+        );
+        assert!(
+            vr > 0 && vb > 0,
+            "virtual extent should be positive: {vr},{vb}"
+        );
     }
 
     #[test]
@@ -1005,7 +1233,7 @@ mod tests {
         // Blue in BGRA = [0xFF, 0x00, 0x00, 0xFF]
         let bgra = vec![
             0x00u8, 0x00, 0xFF, 0xFF, // pixel 0: BGRA red
-            0xFF,   0x00, 0x00, 0xFF, // pixel 1: BGRA blue
+            0xFF, 0x00, 0x00, 0xFF, // pixel 1: BGRA blue
         ];
         let rgba = bgra_to_rgba(&bgra, 2, 1, 8);
         assert_eq!(&rgba[0..4], &[0xFF, 0x00, 0x00, 0xFF]); // RGBA red
@@ -1023,8 +1251,14 @@ mod tests {
     fn bgra_to_rgba_with_row_padding() {
         // 1x2 image, pitch=8 (4 bytes padding per row after 1 pixel)
         let mut bgra = vec![0u8; 16]; // 2 rows * 8 bytes pitch
-        bgra[0] = 0x10; bgra[1] = 0x20; bgra[2] = 0x30; bgra[3] = 0xFF; // row 0
-        bgra[8] = 0x40; bgra[9] = 0x50; bgra[10] = 0x60; bgra[11] = 0xFF; // row 1
+        bgra[0] = 0x10;
+        bgra[1] = 0x20;
+        bgra[2] = 0x30;
+        bgra[3] = 0xFF; // row 0
+        bgra[8] = 0x40;
+        bgra[9] = 0x50;
+        bgra[10] = 0x60;
+        bgra[11] = 0xFF; // row 1
         let rgba = bgra_to_rgba(&bgra, 1, 2, 8);
         assert_eq!(&rgba[0..4], &[0x30, 0x20, 0x10, 0xFF]); // row 0 RGBA
         assert_eq!(&rgba[4..8], &[0x60, 0x50, 0x40, 0xFF]); // row 1 RGBA
@@ -1038,18 +1272,26 @@ mod tests {
         for y in 0..h {
             for x in 0..w {
                 let s = y * pitch + x * 4;
-                bgra[s] = (x * 10) as u8;       // B
-                bgra[s + 1] = (y * 20) as u8;   // G
-                bgra[s + 2] = (x + y) as u8;    // R
+                bgra[s] = (x * 10) as u8; // B
+                bgra[s + 1] = (y * 20) as u8; // G
+                bgra[s + 2] = (x + y) as u8; // R
                 bgra[s + 3] = 0xFF;
             }
         }
         let full = bgra_to_rgba(&bgra, w, h, pitch);
         // For every sub-rect, region-convert must equal full-then-crop.
-        for &(l, t, cw, ch) in &[(0usize, 0usize, 8usize, 6usize), (2, 1, 4, 3), (5, 4, 3, 2), (0, 5, 1, 1)] {
+        for &(l, t, cw, ch) in &[
+            (0usize, 0usize, 8usize, 6usize),
+            (2, 1, 4, 3),
+            (5, 4, 3, 2),
+            (0, 5, 1, 1),
+        ] {
             let region = bgra_to_rgba_region(&bgra, pitch, l, t, cw, ch);
             let cropped = crop_rgba(&full, w, l, t, cw, ch);
-            assert_eq!(region, cropped, "region convert must equal full-then-crop for rect ({l},{t},{cw},{ch})");
+            assert_eq!(
+                region, cropped,
+                "region convert must equal full-then-crop for rect ({l},{t},{cw},{ch})"
+            );
         }
     }
 
@@ -1059,7 +1301,10 @@ mod tests {
         let rgba = vec![0xFF, 0x00, 0x00, 0xFF];
         let png = encode_png_rgba(&rgba, 1, 1).unwrap();
         // PNG magic bytes: 0x89 P N G \r \n 0x1A \n
-        assert_eq!(&png[0..8], &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+        assert_eq!(
+            &png[0..8],
+            &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
+        );
     }
 
     #[test]
@@ -1087,8 +1332,8 @@ mod tests {
     #[test]
     fn dxgi_error_constants_have_correct_values() {
         use windows::Win32::Graphics::Dxgi::{
-            DXGI_ERROR_ACCESS_LOST, DXGI_ERROR_ACCESS_DENIED,
-            DXGI_ERROR_WAIT_TIMEOUT, DXGI_ERROR_INVALID_CALL,
+            DXGI_ERROR_ACCESS_DENIED, DXGI_ERROR_ACCESS_LOST, DXGI_ERROR_INVALID_CALL,
+            DXGI_ERROR_WAIT_TIMEOUT,
         };
         // 0x887A0026 and 0x887A002B are the canonical DXGI access-lost HRESULTs.
         assert_eq!(DXGI_ERROR_ACCESS_LOST.0 as u32, 0x887A_0026);
@@ -1162,8 +1407,10 @@ mod tests {
         let guard = CAPTURE_STATE.lock().unwrap();
         if let Some(ctx) = guard.as_ref() {
             // reacquire_count should be 1 (one initial acquire, no re-acquires).
-            assert_eq!(ctx.reacquire_count, 1,
-                "expected exactly 1 duplication acquire; repeated captures must reuse the session");
+            assert_eq!(
+                ctx.reacquire_count, 1,
+                "expected exactly 1 duplication acquire; repeated captures must reuse the session"
+            );
         }
     }
 }

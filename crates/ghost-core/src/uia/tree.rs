@@ -1,20 +1,18 @@
-use windows::Win32::UI::Accessibility::*;
-use windows::Win32::System::Com::CoCreateInstance;
-use windows::Win32::System::Com::CLSCTX_INPROC_SERVER;
-use windows::Win32::Foundation::{BOOL, HWND, LPARAM, WPARAM, TRUE, FALSE};
-use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetForegroundWindow, GetWindowTextW, IsWindowVisible, IsIconic,
-    PostMessageW, SetForegroundWindow, ShowWindow, GetWindowThreadProcessId,
-    BringWindowToTop, GetAncestor,
-    SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, WM_CLOSE,
-    GA_ROOT,
-};
-use windows::Win32::Foundation::POINT;
-use windows::Win32::UI::WindowsAndMessaging::WindowFromPoint;
-use windows::Win32::System::Threading::{GetCurrentThreadId, AttachThreadInput};
-use super::element::{UiaElement, role_id_to_name, ElementDescriptor, INTERACTIVE_ROLES};
+use super::element::{role_id_to_name, ElementDescriptor, UiaElement, INTERACTIVE_ROLES};
 use crate::error::CoreError;
 use crate::focus;
+use windows::Win32::Foundation::POINT;
+use windows::Win32::Foundation::{BOOL, FALSE, HWND, LPARAM, TRUE, WPARAM};
+use windows::Win32::System::Com::CoCreateInstance;
+use windows::Win32::System::Com::CLSCTX_INPROC_SERVER;
+use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+use windows::Win32::UI::Accessibility::*;
+use windows::Win32::UI::WindowsAndMessaging::WindowFromPoint;
+use windows::Win32::UI::WindowsAndMessaging::{
+    BringWindowToTop, EnumWindows, GetAncestor, GetForegroundWindow, GetWindowTextW,
+    GetWindowThreadProcessId, IsIconic, IsWindowVisible, PostMessageW, SetForegroundWindow,
+    ShowWindow, GA_ROOT, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, WM_CLOSE,
+};
 
 /// Roles that are acceptable *substitutes* when no exact match exists.
 /// `By::Role("tab")` matches "tabitem"; `By::Role("list")` matches "listitem".
@@ -68,8 +66,18 @@ const DESCRIBE_NODE_BUDGET: usize = 6000;
 
 /// Roles whose accessible NAME carries visible text content.
 const TEXT_NAME_ROLES: &[&str] = &[
-    "text", "hyperlink", "listitem", "treeitem", "tabitem", "menuitem",
-    "button", "checkbox", "radiobutton", "combobox", "dataitem", "headeritem",
+    "text",
+    "hyperlink",
+    "listitem",
+    "treeitem",
+    "tabitem",
+    "menuitem",
+    "button",
+    "checkbox",
+    "radiobutton",
+    "combobox",
+    "dataitem",
+    "headeritem",
 ];
 
 /// Roles whose ValuePattern (get_text) carries the content.
@@ -104,22 +112,21 @@ unsafe impl Sync for UiaTree {}
 impl UiaTree {
     pub fn new() -> Result<Self, CoreError> {
         unsafe {
-            let automation: IUIAutomation = CoCreateInstance(
-                &CUIAutomation8,
-                None,
-                CLSCTX_INPROC_SERVER,
-            ).map_err(|e| CoreError::ComInit(e.to_string()))?;
+            let automation: IUIAutomation =
+                CoCreateInstance(&CUIAutomation8, None, CLSCTX_INPROC_SERVER)
+                    .map_err(|e| CoreError::ComInit(e.to_string()))?;
             Ok(Self { automation })
         }
     }
-
 
     /// Find first element whose name contains `name` (case-insensitive).
     /// Slow path: walks the entire desktop tree. Prefer `find_by_name_fast`.
     pub fn find_by_name(&self, name: &str) -> Result<Option<UiaElement>, CoreError> {
         let name_lower = name.to_lowercase();
         unsafe {
-            let root = self.automation.GetRootElement()
+            let root = self
+                .automation
+                .GetRootElement()
                 .map_err(|e| CoreError::ComInit(e.to_string()))?;
             // Acquire the walker once for the whole search (was N+1 COM proxies).
             let walker = self.get_walker()?;
@@ -132,7 +139,9 @@ impl UiaTree {
     /// Slow path: walks the entire desktop tree. Prefer `find_by_role_fast`.
     pub fn find_by_role(&self, role: &str) -> Result<Option<UiaElement>, CoreError> {
         unsafe {
-            let root = self.automation.GetRootElement()
+            let root = self
+                .automation
+                .GetRootElement()
                 .map_err(|e| CoreError::ComInit(e.to_string()))?;
             let walker = self.get_walker()?;
             let mut budget = SEARCH_NODE_BUDGET;
@@ -144,10 +153,16 @@ impl UiaTree {
     }
 
     /// Scoped name search: walks only the subtree rooted at `hwnd`.
-    pub fn find_by_name_in_hwnd(&self, hwnd: isize, name: &str) -> Result<Option<UiaElement>, CoreError> {
+    pub fn find_by_name_in_hwnd(
+        &self,
+        hwnd: isize,
+        name: &str,
+    ) -> Result<Option<UiaElement>, CoreError> {
         let name_lower = name.to_lowercase();
         unsafe {
-            let root = self.automation.ElementFromHandle(HWND(hwnd as *mut _))
+            let root = self
+                .automation
+                .ElementFromHandle(HWND(hwnd as *mut _))
                 .map_err(|e| CoreError::ComInit(e.to_string()))?;
             let walker = self.get_walker()?;
             let mut budget = SEARCH_NODE_BUDGET;
@@ -155,10 +170,33 @@ impl UiaTree {
         }
     }
 
-    /// Scoped role search: walks only the subtree rooted at `hwnd`.
-    pub fn find_by_role_in_hwnd(&self, hwnd: isize, role: &str) -> Result<Option<UiaElement>, CoreError> {
+    /// Collect up to `cap` elements from the subtree rooted at `hwnd`,
+    /// regardless of name/role - the element inventory for window-scoped
+    /// Set-of-Marks. Bounded by the same node budget as the filtered walks.
+    pub fn collect_in_hwnd(&self, hwnd: isize, cap: usize) -> Result<Vec<UiaElement>, CoreError> {
         unsafe {
-            let root = self.automation.ElementFromHandle(HWND(hwnd as *mut _))
+            let root = self
+                .automation
+                .ElementFromHandle(HWND(hwnd as *mut _))
+                .map_err(|e| CoreError::ComInit(e.to_string()))?;
+            let walker = self.get_walker()?;
+            let mut out = Vec::new();
+            let mut budget = SEARCH_NODE_BUDGET;
+            self.collect_matching(&root, None, None, &walker, 0, &mut budget, cap, &mut out)?;
+            Ok(out)
+        }
+    }
+
+    /// Scoped role search: walks only the subtree rooted at `hwnd`.
+    pub fn find_by_role_in_hwnd(
+        &self,
+        hwnd: isize,
+        role: &str,
+    ) -> Result<Option<UiaElement>, CoreError> {
+        unsafe {
+            let root = self
+                .automation
+                .ElementFromHandle(HWND(hwnd as *mut _))
                 .map_err(|e| CoreError::ComInit(e.to_string()))?;
             let walker = self.get_walker()?;
             let mut budget = SEARCH_NODE_BUDGET;
@@ -197,7 +235,8 @@ impl UiaTree {
     }
 
     unsafe fn get_walker(&self) -> Result<IUIAutomationTreeWalker, CoreError> {
-        self.automation.ControlViewWalker()
+        self.automation
+            .ControlViewWalker()
             .map_err(|e| CoreError::ComInit(e.to_string()))
     }
 
@@ -287,7 +326,9 @@ impl UiaTree {
             if fg.is_invalid() {
                 return self.describe_screen(None);
             }
-            let root = self.automation.ElementFromHandle(fg)
+            let root = self
+                .automation
+                .ElementFromHandle(fg)
                 .map_err(|e| CoreError::ComInit(e.to_string()))?;
             // Acquire walker once for the entire collect pass.
             let walker = self.get_walker()?;
@@ -312,11 +353,15 @@ impl UiaTree {
         window_name: Option<&str>,
     ) -> Result<IUIAutomationElement, CoreError> {
         let Some(wname) = window_name else {
-            return self.automation.GetRootElement()
+            return self
+                .automation
+                .GetRootElement()
                 .map_err(|e| CoreError::ComInit(e.to_string()));
         };
         let wname_lower = wname.to_lowercase();
-        let desktop = self.automation.GetRootElement()
+        let desktop = self
+            .automation
+            .GetRootElement()
             .map_err(|e| CoreError::ComInit(e.to_string()))?;
         let mut child = walker.GetFirstChildElement(&desktop).ok();
         while let Some(c) = child {
@@ -332,17 +377,23 @@ impl UiaTree {
         let win = list_windows()?
             .into_iter()
             .find(|w| w.name.to_lowercase().contains(&wname_lower))
-            .ok_or_else(|| CoreError::ProcessNotFound { name: wname.to_string() })?;
+            .ok_or_else(|| CoreError::ProcessNotFound {
+                name: wname.to_string(),
+            })?;
         if win.state == "minimized" {
             // Element coords of a minimized window are garbage (-32000).
             return Err(CoreError::WindowMinimized { name: win.name });
         }
-        self.automation.ElementFromHandle(HWND(win.hwnd as *mut _))
+        self.automation
+            .ElementFromHandle(HWND(win.hwnd as *mut _))
             .map_err(|e| CoreError::ComInit(e.to_string()))
     }
 
     /// Return structured list of interactive elements. Optionally scoped to a window by partial name.
-    pub fn describe_screen(&self, window_name: Option<&str>) -> Result<Vec<ElementDescriptor>, CoreError> {
+    pub fn describe_screen(
+        &self,
+        window_name: Option<&str>,
+    ) -> Result<Vec<ElementDescriptor>, CoreError> {
         unsafe {
             // Acquire walker once — used for both the window-title scan and the collect pass.
             let walker = self.get_walker()?;
@@ -371,12 +422,23 @@ impl UiaTree {
         }
         let name_lower = name.map(|n| n.to_lowercase());
         unsafe {
-            let root = self.automation.ElementFromHandle(HWND(hwnd as *mut _))
+            let root = self
+                .automation
+                .ElementFromHandle(HWND(hwnd as *mut _))
                 .map_err(|e| CoreError::ComInit(e.to_string()))?;
             let walker = self.get_walker()?;
             let mut out = Vec::new();
             let mut budget = SEARCH_NODE_BUDGET;
-            self.collect_matching(&root, name_lower.as_deref(), role, &walker, 0, &mut budget, cap, &mut out)?;
+            self.collect_matching(
+                &root,
+                name_lower.as_deref(),
+                role,
+                &walker,
+                0,
+                &mut budget,
+                cap,
+                &mut out,
+            )?;
             Ok(out)
         }
     }
@@ -434,7 +496,8 @@ impl UiaTree {
             let root = self.resolve_scope_root(&walker, window_name)?;
             let mut out = String::new();
             let mut budget = TEXT_NODE_BUDGET;
-            let truncated = self.collect_text_rec(&root, &walker, 0, &mut budget, max_chars, &mut out)?;
+            let truncated =
+                self.collect_text_rec(&root, &walker, 0, &mut budget, max_chars, &mut out)?;
             Ok((out, truncated))
         }
     }
@@ -459,7 +522,11 @@ impl UiaTree {
         let role = role_id_to_name(el.control_type());
         let piece = if TEXT_VALUE_ROLES.contains(&role) {
             let t = el.get_text();
-            if t.is_empty() { el.name() } else { t }
+            if t.is_empty() {
+                el.name()
+            } else {
+                t
+            }
         } else if TEXT_NAME_ROLES.contains(&role) {
             el.name()
         } else {
@@ -607,7 +674,13 @@ unsafe extern "system" fn enum_windows_proc(hwnd: HWND, lparam: LPARAM) -> BOOL 
     GetWindowThreadProcessId(hwnd, Some(&mut pid));
     let state = if iconic { "minimized" } else { "normal" };
     let list = &mut *(lparam.0 as *mut Vec<WindowInfo>);
-    list.push(WindowInfo { name, pid, focused, hwnd: hwnd.0 as isize, state });
+    list.push(WindowInfo {
+        name,
+        pid,
+        focused,
+        hwnd: hwnd.0 as isize,
+        state,
+    });
     TRUE
 }
 
@@ -711,12 +784,17 @@ pub fn focus_window(name: &str) -> Result<(), CoreError> {
     focus::require_foreground_allowed("focus_window")?;
     let name_lower = name.to_lowercase();
     let windows = list_windows()?;
-    let win = windows.iter()
+    let win = windows
+        .iter()
         .find(|w| w.name.to_lowercase().contains(&name_lower))
-        .ok_or_else(|| CoreError::ProcessNotFound { name: name.to_string() })?;
+        .ok_or_else(|| CoreError::ProcessNotFound {
+            name: name.to_string(),
+        })?;
     let confirmed = ensure_foreground(win.hwnd, 600)?;
     if !confirmed {
-        return Err(CoreError::FocusFailed { window: name.to_string() });
+        return Err(CoreError::FocusFailed {
+            window: name.to_string(),
+        });
     }
     Ok(())
 }
@@ -724,15 +802,24 @@ pub fn focus_window(name: &str) -> Result<(), CoreError> {
 pub fn set_window_state(name: &str, state: WindowState) -> Result<(), CoreError> {
     let name_lower = name.to_lowercase();
     let windows = list_windows()?;
-    let win = windows.iter()
+    let win = windows
+        .iter()
         .find(|w| w.name.to_lowercase().contains(&name_lower))
-        .ok_or_else(|| CoreError::ProcessNotFound { name: name.to_string() })?;
+        .ok_or_else(|| CoreError::ProcessNotFound {
+            name: name.to_string(),
+        })?;
     let hwnd = HWND(win.hwnd as *mut _);
     unsafe {
         match state {
-            WindowState::Maximize => { let _ = ShowWindow(hwnd, SW_MAXIMIZE); }
-            WindowState::Minimize => { let _ = ShowWindow(hwnd, SW_MINIMIZE); }
-            WindowState::Restore => { let _ = ShowWindow(hwnd, SW_RESTORE); }
+            WindowState::Maximize => {
+                let _ = ShowWindow(hwnd, SW_MAXIMIZE);
+            }
+            WindowState::Minimize => {
+                let _ = ShowWindow(hwnd, SW_MINIMIZE);
+            }
+            WindowState::Restore => {
+                let _ = ShowWindow(hwnd, SW_RESTORE);
+            }
             WindowState::Close => {
                 let _ = PostMessageW(hwnd, WM_CLOSE, WPARAM(0), LPARAM(0));
             }
@@ -747,10 +834,22 @@ mod tests {
 
     #[test]
     fn window_state_from_str_parses_all_variants() {
-        assert!(matches!(WindowState::from_str("maximize"), Some(WindowState::Maximize)));
-        assert!(matches!(WindowState::from_str("minimize"), Some(WindowState::Minimize)));
-        assert!(matches!(WindowState::from_str("restore"), Some(WindowState::Restore)));
-        assert!(matches!(WindowState::from_str("close"), Some(WindowState::Close)));
+        assert!(matches!(
+            WindowState::from_str("maximize"),
+            Some(WindowState::Maximize)
+        ));
+        assert!(matches!(
+            WindowState::from_str("minimize"),
+            Some(WindowState::Minimize)
+        ));
+        assert!(matches!(
+            WindowState::from_str("restore"),
+            Some(WindowState::Restore)
+        ));
+        assert!(matches!(
+            WindowState::from_str("close"),
+            Some(WindowState::Close)
+        ));
         assert!(WindowState::from_str("invalid").is_none());
     }
 
@@ -764,8 +863,11 @@ mod tests {
         crate::focus::set_policy(crate::focus::FocusPolicy::Background);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(matches!(err, CoreError::ProcessNotFound { .. }),
-            "expected ProcessNotFound, got: {:?}", err);
+        assert!(
+            matches!(err, CoreError::ProcessNotFound { .. }),
+            "expected ProcessNotFound, got: {:?}",
+            err
+        );
     }
 
     #[test]
@@ -799,7 +901,10 @@ mod tests {
         // panic or return Err — it should return Ok(false) (no window found there).
         // This exercises the invalid-HWND code path without a live window.
         let result = focus_window_under_point(-99999, -99999);
-        assert!(result.is_ok(), "focus_window_under_point must not error on off-screen coord");
+        assert!(
+            result.is_ok(),
+            "focus_window_under_point must not error on off-screen coord"
+        );
         // May be Ok(true) if somehow a window exists there, but most likely Ok(false).
     }
 
@@ -807,7 +912,10 @@ mod tests {
     #[test]
     fn focus_window_under_point_large_negative_returns_ok() {
         let result = focus_window_under_point(i32::MIN, i32::MIN);
-        assert!(result.is_ok(), "focus_window_under_point must not error on i32::MIN coords");
+        assert!(
+            result.is_ok(),
+            "focus_window_under_point must not error on i32::MIN coords"
+        );
     }
 
     // LOW-9: ensure_foreground must not panic on the current foreground window.
@@ -822,8 +930,16 @@ mod tests {
             return;
         }
         let result = ensure_foreground(hwnd.0 as isize, 0);
-        assert!(result.is_ok(), "ensure_foreground must not panic or error: {:?}", result);
-        assert_eq!(result.unwrap(), true, "already-foreground window should return Ok(true)");
+        assert!(
+            result.is_ok(),
+            "ensure_foreground must not panic or error: {:?}",
+            result
+        );
+        assert_eq!(
+            result.unwrap(),
+            true,
+            "already-foreground window should return Ok(true)"
+        );
     }
 
     #[test]
@@ -844,8 +960,6 @@ mod tests {
         truncate_at_char_boundary(&mut s4, 100);
         assert_eq!(s4, "short");
     }
-
-
 
     #[test]
     fn interactive_roles_cover_winui_command_bar_controls() {
@@ -877,5 +991,4 @@ mod tests {
         assert!(role_alias_matches("list", "listitem"));
         assert!(!role_alias_matches("button", "edit"));
     }
-
 }

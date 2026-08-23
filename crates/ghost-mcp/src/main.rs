@@ -1120,12 +1120,17 @@ async fn handle_tool(
         }
         "ghost_locate_by_description" => {
             let description = p["description"].as_str().ok_or("missing param: description")?;
+            if let Some(window) = p["window"].as_str() {
+                let (x, y, hwnd) = session.locate_by_description_in(window, description).await.map_err(|e| e.to_string())?;
+                return Ok(json!({ "x": x, "y": y, "hwnd": hwnd, "window": window }));
+            }
             let (x, y) = session.locate_by_description(description).await.map_err(|e| e.to_string())?;
             Ok(json!({ "x": x, "y": y }))
         }
         "ghost_click_by_description" => {
             let description = p["description"].as_str().ok_or("missing param: description")?;
-            session.click_by_description(description).await.map_err(|e| e.to_string())?;
+            let window = p["window"].as_str();
+            session.click_by_description_in(window, description).await.map_err(|e| e.to_string())?;
             Ok(json!({ "ok": true }))
         }
         "ghost_type_by_description" => {
@@ -2486,12 +2491,14 @@ fn legacy_tools_schema_full() -> Value {
         { "name": "ghost_locate_by_description",
           "description": "Vision fallback: locate a UI element by natural-language description (e.g. 'the blue Submit button'). Captures foreground window, asks vision model for center pixel. Requires NVIDIA_API_KEY (free at build.nvidia.com) or ANTHROPIC_API_KEY. Use GHOST_VISION_PROVIDER=nvidia|anthropic to override. Use only when UIA-based ghost_find misses (canvas-rendered UIs, custom-drawn controls). [required_env: NVIDIA_API_KEY or ANTHROPIC_API_KEY]",
           "inputSchema": { "type": "object", "required": ["description"], "properties": {
-              "description": { "type": "string", "description": "Natural-language description of the target element" }
+              "description": { "type": "string", "description": "Natural-language description of the target element" },
+              "window": { "type": "string", "description": "Scope grounding to this window (partial title). Uses the window's OWN rendered surface, so it works even when the window is covered. Recommended over foreground grounding." }
           }}},
         { "name": "ghost_click_by_description",
-          "description": "Vision fallback locate + click in one MCP round-trip. Requires NVIDIA_API_KEY or ANTHROPIC_API_KEY (same as ghost_locate_by_description). [required_env: NVIDIA_API_KEY or ANTHROPIC_API_KEY]",
+          "description": "Vision fallback locate + click in one MCP round-trip. Pass window to ground against a covered/background window's own surface and post the click to it (no focus steal). Requires NVIDIA_API_KEY or ANTHROPIC_API_KEY (same as ghost_locate_by_description). [required_env: NVIDIA_API_KEY or ANTHROPIC_API_KEY]",
           "inputSchema": { "type": "object", "required": ["description"], "properties": {
-              "description": { "type": "string" }
+              "description": { "type": "string" },
+              "window": { "type": "string", "description": "Scope grounding + click to this window (partial title); works when the window is occluded" }
           }}},
         { "name": "ghost_type_by_description",
           "description": "Vision fallback locate + click + type. For form fields with unstable UIA names. Requires NVIDIA_API_KEY or ANTHROPIC_API_KEY. [required_env: NVIDIA_API_KEY or ANTHROPIC_API_KEY]",

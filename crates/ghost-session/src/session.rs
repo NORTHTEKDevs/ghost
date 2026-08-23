@@ -474,6 +474,76 @@ impl GhostSession {
         }
     }
 
+    /// Set-of-Marks for a NAMED window, occlusion-proof.
+    ///
+    /// The foreground variant above breaks exactly when the product promises
+    /// most: an agent drives a background window that is COVERED, so the
+    /// screen pixels inside its rect belong to whatever is on top. This
+    /// variant renders the target window's own surface (PrintWindow) and marks
+    /// the elements of ITS subtree - the VLM sees the intended target even
+    /// when the user cannot. Returns element centres in SCREEN coordinates so
+    /// downstream dispatch is unchanged.
+    async fn locate_by_description_som_in_window(
+        &self,
+        window: &str,
+        description: &str,
+    ) -> Result<Option<(i32, i32, isize)>> {
+        let windows_list = core_list_windows().map_err(GhostError::Core)?;
+        let ql = window.to_lowercase();
+        let win = windows_list.iter()
+            .find(|x| x.name.to_lowercase().contains(&ql))
+            .ok_or_else(|| GhostError::Vision(format!("no window matching '{window}'")))?
+            .clone();
+        let hwnd = win.hwnd;
+        let rect = crate::engine::system::window_rect(hwnd)
+            .ok_or_else(|| GhostError::Vision(format!("window '{window}' has no rect")))?;
+        let els = self.tree.collect_in_hwnd(hwnd, 200).map_err(GhostError::Core)?;
+        const MAX_MARKS: usize = 50;
+        // Named elements first: the SoM prompt leans on accessible labels for
+        // disambiguation, and a raw subtree walk front-loads anonymous
+        // container panes that would burn the whole mark budget.
+        let mut named: Vec<(crate::engine::uia::element::BoundingRect, String)> = Vec::new();
+        let mut unnamed: Vec<crate::engine::uia::element::BoundingRect> = Vec::new();
+        for e in &els {
+            let Some(r) = e.bounding_rect() else { continue };
+            if r.right <= r.left || r.bottom <= r.top { continue; }
+            let cx = (r.left + r.right) / 2;
+            let cy = (r.top + r.bottom) / 2;
+            if cx < rect.0 || cy < rect.1 || cx > rect.2 || cy > rect.3 { continue; }
+            let n = e.name();
+            if n.trim().is_empty() { unnamed.push(r); } else { named.push((r, n)); }
+        }
+        let mut candidates: Vec<(i32, i32, i32, i32)> = Vec::new();
+        let mut labels: Vec<String> = Vec::new();
+        for (r, n) in named.into_iter().take(MAX_MARKS) {
+            candidates.push((r.left, r.top, r.right, r.bottom));
+            labels.push(n);
+        }
+        for r in unnamed.into_iter().take(MAX_MARKS.saturating_sub(candidates.len())) {
+            candidates.push((r.left, r.top, r.right, r.bottom));
+            labels.push(String::new());
+        }
+        if candidates.is_empty() {
+            return Ok(None);
+        }
+        let marks: Vec<crate::engine::capture::Mark> = candidates.iter().enumerate().map(|(i, c)| {
+            crate::engine::capture::Mark { label: (i + 1) as u32, x: c.0 - rect.0, y: c.1 - rect.1 }
+        }).collect();
+        let jpeg = tokio::task::spawn_blocking(move || {
+            crate::engine::capture::capture_window_marked_jpeg(hwnd, &marks, 1400, 82)
+        })
+        .await
+        .map_err(|e| GhostError::Core(crate::engine::error::CoreError::WorkerPanic(e.to_string())))?
+        .map_err(GhostError::Core)?;
+        match crate::vision::vision_pick_mark(description, &jpeg, &labels).await? {
+            Some(idx) => {
+                let (l, t, r, b) = candidates[idx - 1];
+                Ok(Some(((l + r) / 2, (t + b) / 2, hwnd)))
+            }
+            None => Ok(None),
+        }
+    }
+
     #[tracing::instrument(skip(self), fields(desc = %description))]
     pub async fn locate_by_description(&self, description: &str) -> Result<(i32, i32)> {
         // Prefer Set-of-Marks: pick a real detected element by number (exact rect)
@@ -553,8 +623,57 @@ impl GhostSession {
     }
 
     /// Vision fallback + click. One round-trip for "click the blue Submit button".
+    /// Locate by description scoped to a named window (occlusion-proof SoM).
+    /// Returns screen centre plus the window's hwnd for downstream dispatch.
+    pub async fn locate_by_description_in(
+        &self,
+        window: &str,
+        description: &str,
+    ) -> Result<(i32, i32, isize)> {
+        match self.locate_by_description_som_in_window(window, description).await? {
+            Some(hit) => Ok(hit),
+            None => Err(GhostError::ElementNotFound {
+                query: format!("description '{description}' in window '{window}'"),
+                screenshot: None,
+            }),
+        }
+    }
+
     pub async fn click_by_description(&self, description: &str) -> Result<()> {
+        self.click_by_description_in(None, description).await
+    }
+
+    /// Click by natural-language description, optionally scoped to a named
+    /// window. With `window`, grounding uses that window's OWN rendered surface
+    /// (occlusion-proof) and the click is posted to it - no focus, no cursor.
+    pub async fn click_by_description_in(
+        &self,
+        window: Option<&str>,
+        description: &str,
+    ) -> Result<()> {
+        if let Some(w) = window {
+            let (x, y, hwnd) = match self.locate_by_description_som_in_window(w, description).await? {
+                Some(hit) => hit,
+                None => return Err(GhostError::ElementNotFound {
+                    query: format!("description '{description}' in window '{w}'"),
+                    screenshot: None,
+                }),
+            };
+            if self.is_background_only() {
+                self.click_at_background(x, y, Some(hwnd)).await?;
+            } else {
+                self.click_at(x, y).await?;
+            }
+            return Ok(());
+        }
         let (x, y) = self.locate_by_description(description).await?;
+        // Under the enforced background policy the grounded point is posted to
+        // the window that owns it (with UIA Invoke fallback) instead of moving
+        // the real cursor - same dispatch every other anchored verb uses.
+        if self.is_background_only() {
+            self.click_at_background(x, y, None).await?;
+            return Ok(());
+        }
         self.click_at(x, y).await
     }
 
@@ -813,11 +932,34 @@ impl GhostSession {
             _ => None,
         };
         // Posted messages had no observable effect: resolve the element under
-        // the point through UIA and invoke it. Honest fallback - the response
-        // says which path won and whether focus survived it.
+        // the point and invoke it. When the target window is pinned (hwnd
+        // override), hit-testing MUST stay inside that window's subtree -
+        // screen-space ElementFromPoint returns the TOPMOST element at the
+        // point, which for an occluded window is the covering app, not the
+        // target. Walk the pinned subtree and take the smallest element whose
+        // rect contains the point (deepest match). Honest fallback - the
+        // response says which path won and whether focus survived it.
         let mut note: Option<String> = None;
         if verified != Some(true) {
-            let hit = self.tree.element_from_point(x, y).ok().flatten();
+            let hit = if hwnd_override.is_some() {
+                let els = self.tree.collect_in_hwnd(hwnd, 200).unwrap_or_default();
+                let mut best: Option<crate::engine::uia::element::UiaElement> = None;
+                let mut best_area = i64::MAX;
+                for el in els {
+                    if let Some(r) = el.bounding_rect() {
+                        if x >= r.left && x <= r.right && y >= r.top && y <= r.bottom {
+                            let area = (r.right - r.left) as i64 * (r.bottom - r.top) as i64;
+                            if area < best_area {
+                                best_area = area;
+                                best = Some(el);
+                            }
+                        }
+                    }
+                }
+                best
+            } else {
+                self.tree.element_from_point(x, y).ok().flatten()
+            };
             if let Some(el) = hit {
                 match crate::engine::uia::patterns::invoke_ex(&el, false) {
                     Ok(()) => {
@@ -2239,3 +2381,4 @@ mod act_result_tests {
         assert!(out["verified"].is_null());
     }
 }
+
