@@ -771,6 +771,7 @@ impl GhostSession {
     /// with InvokePattern instead - flagged in `note`, since Invoke may activate
     /// the window. `verified` stays null when nothing could render; never a
     /// blind success.
+    #[cfg(windows)]
     pub async fn click_at_background(&self, x: i32, y: i32, hwnd_override: Option<isize>) -> Result<serde_json::Value> {
         if is_stopped() { return Err(GhostError::Stopped); }
         use windows::Win32::Foundation::POINT;
@@ -853,6 +854,16 @@ impl GhostSession {
             obj.insert("note".into(), serde_json::Value::String(n));
         }
         Ok(out)
+    }
+
+    /// Posted-message coordinate clicks are a Win32 mechanism (WM_LBUTTONDOWN
+    /// to the window owning the point); other platforms report the gap instead
+    /// of faking it, consistent with the capability matrix.
+    #[cfg(not(windows))]
+    pub async fn click_at_background(&self, _x: i32, _y: i32, _hwnd_override: Option<isize>) -> Result<serde_json::Value> {
+        Err(GhostError::Vision(
+            "click_at background is Windows-only (posted WM_LBUTTONDOWN); use the foreground path on this platform".into(),
+        ))
     }
 
     /// Capture the primary monitor as PNG bytes.
@@ -1060,8 +1071,16 @@ impl GhostSession {
     /// True when the process focus policy forbids touching the real cursor /
     /// foreground window (the default). Callers use this to route window-anchored
     /// find/act to the background machinery instead of demanding focus.
+    /// The policy machinery is Windows-only; other platforms have no enforced
+    /// background mode yet, so nothing needs rerouting there.
+    #[cfg(windows)]
     pub fn is_background_only(&self) -> bool {
         crate::engine::focus::is_background_only()
+    }
+
+    #[cfg(not(windows))]
+    pub fn is_background_only(&self) -> bool {
+        false
     }
 
     /// Resolve an element inside a named window WITHOUT focusing anything.
