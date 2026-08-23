@@ -754,6 +754,107 @@ impl GhostSession {
         crate::engine::input::mouse::click(x, y).map_err(GhostError::Core)
     }
 
+    /// Click at screen coordinates WITHOUT taking the cursor or foreground.
+    ///
+    /// Posts WM_LBUTTONDOWN/UP to the window that owns the point - the same
+    /// non-activating mechanism the named-element background click uses.
+    /// `hwnd_override` pins the target window explicitly: coordinates come from
+    /// UIA bounding rects, which are valid even when the window is OCCLUDED, but
+    /// WindowFromPoint only sees the topmost window - so a chained
+    /// find -> click_at flow must pass the found element's hwnd through, or the
+    /// click lands in whatever covers it.
+    ///
+    /// Verified by an occlusion-proof PrintWindow before/after delta scoped to a
+    /// small ROI around the point. When the posted messages had no pixel effect
+    /// (WinUI/UWP apps route input through their pointer pipeline, not window
+    /// messages), the element under the point is resolved via UIA and driven
+    /// with InvokePattern instead - flagged in `note`, since Invoke may activate
+    /// the window. `verified` stays null when nothing could render; never a
+    /// blind success.
+    pub async fn click_at_background(&self, x: i32, y: i32, hwnd_override: Option<isize>) -> Result<serde_json::Value> {
+        if is_stopped() { return Err(GhostError::Stopped); }
+        use windows::Win32::Foundation::POINT;
+        use windows::Win32::UI::WindowsAndMessaging::WindowFromPoint;
+        let hwnd = match hwnd_override {
+            Some(h) if h != 0 => h,
+            _ => unsafe { WindowFromPoint(POINT { x, y }).0 as isize },
+        };
+        if hwnd == 0 {
+            return Err(GhostError::Vision(format!(
+                "click_at background: no window at ({x},{y})"
+            )));
+        }
+        let fg_before = crate::engine::system::foreground_window();
+        let cur_before = crate::engine::system::cursor_pos();
+        let before = crate::engine::capture::capture_window_printwindow(hwnd).ok();
+        // ROI: a small patch centred on the point, window-relative.
+        let (wl, wt) = crate::engine::system::window_rect(hwnd)
+            .map(|(l, t, _, _)| (l, t))
+            .unwrap_or((0, 0));
+        crate::engine::input::BackgroundClicker::click_screen(hwnd, x, y)
+            .map_err(GhostError::Core)?;
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        let after = crate::engine::capture::capture_window_printwindow(hwnd).ok();
+        let mut verified: Option<bool> = match (&before, &after) {
+            (Some((b, bw, bh)), Some((a, aw, ah))) if bw == aw && bh == ah && !b.is_empty() => {
+                let rl = ((x - wl - 24).max(0)) as usize;
+                let rt = ((y - wt - 24).max(0)) as usize;
+                let rw = 48usize.min(bw.saturating_sub(rl));
+                let rh = 48usize.min(bh.saturating_sub(rt));
+                if rw == 0 || rh == 0 {
+                    Some(compute_verification(b, a, *bw, *bh, true).changed)
+                } else {
+                    let bc = crate::engine::capture::screen::crop_rgba(b, *bw, rl, rt, rw, rh);
+                    let ac = crate::engine::capture::screen::crop_rgba(a, *aw, rl, rt, rw, rh);
+                    Some(compute_verification(&bc, &ac, rw, rh, true).changed)
+                }
+            }
+            _ => None,
+        };
+        // Posted messages had no observable effect: resolve the element under
+        // the point through UIA and invoke it. Honest fallback - the response
+        // says which path won and whether focus survived it.
+        let mut note: Option<String> = None;
+        if verified != Some(true) {
+            let hit = self.tree.element_from_point(x, y).ok().flatten();
+            if let Some(el) = hit {
+                match crate::engine::uia::patterns::invoke_ex(&el, false) {
+                    Ok(()) => {
+                        tokio::time::sleep(Duration::from_millis(60)).await;
+                        let after2 = crate::engine::capture::capture_window_printwindow(hwnd).ok();
+                        verified = match (&after, &after2) {
+                            (Some((b, bw, bh)), Some((a, aw, ah))) if bw == aw && bh == ah => {
+                                Some(compute_verification(b, a, *bw, *bh, true).changed)
+                            }
+                            _ => verified,
+                        };
+                        note = Some("posted messages had no effect; clicked via UIA Invoke (windowless control) - the window may have activated".into());
+                    }
+                    Err(_) => {
+                        note = Some("posted messages had no pixel effect and the element under the point exposes no Invoke pattern - read state to confirm".into());
+                    }
+                }
+            } else {
+                note = Some("posted messages had no pixel effect and no element resolved under the point - read state to confirm".into());
+            }
+        }
+        let focus_preserved = fg_before == crate::engine::system::foreground_window();
+        let cursor_preserved = cursor_unchanged(cur_before, crate::engine::system::cursor_pos());
+        let mut out = serde_json::json!({
+            "ok": true,
+            "mode": "background",
+            "action": "click_at",
+            "x": x, "y": y,
+            "verified": verified,
+            "focus_preserved": focus_preserved,
+            "cursor_preserved": cursor_preserved,
+        });
+        if let (Some(obj), Some(n)) = (out.as_object_mut(), note) {
+            obj.insert("note".into(), serde_json::Value::String(n));
+        }
+        Ok(out)
+    }
+
     /// Capture the primary monitor as PNG bytes.
     /// HIGH-2: runs on a spawn_blocking thread so the DXGI wait (up to 50ms) never
     /// blocks a tokio worker. D3D11/DXGI objects are MTA-safe behind the global Mutex.
@@ -954,6 +1055,106 @@ impl GhostSession {
             .await
             .map_err(|e| GhostError::Core(crate::engine::error::CoreError::WorkerPanic(e.to_string())))?
             .map_err(GhostError::Core)
+    }
+
+    /// True when the process focus policy forbids touching the real cursor /
+    /// foreground window (the default). Callers use this to route window-anchored
+    /// find/act to the background machinery instead of demanding focus.
+    pub fn is_background_only(&self) -> bool {
+        crate::engine::focus::is_background_only()
+    }
+
+    /// Resolve an element inside a named window WITHOUT focusing anything.
+    ///
+    /// The background counterpart of a grounded `find`: under the default
+    /// `background` policy an anchored lookup must scope to the target window's
+    /// UIA subtree rather than demand foreground - raising the window is exactly
+    /// what the policy exists to refuse. Returns the same shape the grounding
+    /// cascade reports (centre, rect, source), so MCP responses stay uniform.
+    pub async fn find_background(&self, window: &str, by: By, index: Option<usize>) -> Result<serde_json::Value> {
+        if is_stopped() { return Err(GhostError::Stopped); }
+        // A just-launched app may not appear in the window list for a few hundred
+        // milliseconds. Poll briefly instead of failing on the first enumeration -
+        // an anchored lookup that races a launch should wait, not error.
+        let deadline = std::time::Instant::now() + Duration::from_millis(2000);
+        let win = loop {
+            let windows_list = core_list_windows().map_err(GhostError::Core)?;
+            let ql = window.to_lowercase();
+            let found = windows_list.iter()
+                .find(|x| x.name.to_lowercase().contains(&ql))
+                .cloned();
+            if let Some(w) = found {
+                break w;
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(GhostError::Vision(format!(
+                    "no window matching '{window}'"
+                )));
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        };
+        // Description targets need vision grounding (a network VLM round trip on
+        // pixels) - not available without a screen-facing path; say so plainly.
+        if matches!(by, By::Description(_)) {
+            return Err(GhostError::Vision(format!(
+                "description targets need vision grounding; desc={}",
+                match &by { By::Description(d) => d.as_str(), _ => "" }
+            )));
+        }
+        let (name_filter, role_filter): (Option<&str>, Option<&str>) = match &by {
+            By::Name(n) => (Some(n), None),
+            By::Role(r) => (None, Some(r)),
+            _ => (None, None),
+        };
+        // Walk the window's subtree once. The cap bounds the walk, not the
+        // reported count - `matches` must reflect every hit so index
+        // disambiguation is honest about how many there are. A just-launched
+        // app's UIA tree also populates asynchronously, so retry briefly on
+        // zero matches before declaring the element absent.
+        let cap = index.map_or(10, |i| (i + 1).max(50));
+        let name_filter = name_filter.map(|s| s.to_string());
+        let role_filter = role_filter.map(|s| s.to_string());
+        let el_deadline = std::time::Instant::now() + Duration::from_millis(1500);
+        let matches = loop {
+            let m = self.tree
+                .find_all_in_hwnd(win.hwnd, name_filter.as_deref(), role_filter.as_deref(), cap)
+                .map_err(GhostError::Core)?;
+            if !m.is_empty() || std::time::Instant::now() >= el_deadline {
+                break m;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        };
+        let total = matches.len();
+        let el = match index {
+            Some(i) => matches.get(i).ok_or_else(|| GhostError::ElementNotFound {
+                query: format!("{by:?} index {i} in window '{window}' (found {total} matches)"),
+                screenshot: None,
+            })?,
+            None => matches.first().ok_or_else(|| GhostError::ElementNotFound {
+                query: format!("{by:?} in window '{window}'"),
+                screenshot: None,
+            })?,
+        };
+        let name = el.name();
+        let rect = el.bounding_rect().map(|r| (r.left, r.top, r.right, r.bottom));
+        let (center, rect4) = match rect {
+            Some((l, t, r, b)) => (((l + r) / 2, (t + b) / 2), (l, t, r, b)),
+            None => ((0, 0), (0, 0, 0, 0)),
+        };
+        Ok(serde_json::json!({
+            "center": { "x": center.0, "y": center.1 },
+            "rect": { "left": rect4.0, "top": rect4.1, "right": rect4.2, "bottom": rect4.3 },
+            "source": "uia",
+            "confidence": 1.0,
+            "dispatch_mode": "background",
+            "name": name,
+            "has_rect": rect.is_some(),
+            "escalated": false,
+            "matches": total,
+            "index": index,
+            "window": win.name,
+            "hwnd": win.hwnd,
+        }))
     }
 
     /// List all visible top-level windows.

@@ -27,7 +27,13 @@ pub struct BrowserRegistry {
 fn sanitize_id(id: &str) -> String {
     let cleaned: String = id
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     if cleaned.is_empty() {
         "default".to_string()
@@ -54,10 +60,11 @@ impl GhostSession {
     /// genuinely has no background path, and set it back afterwards.
     #[cfg(windows)]
     pub fn set_focus_policy(&self, policy: &str) -> Result<&'static str> {
-        let p = ghost_core::focus::FocusPolicy::from_str(policy)
-            .ok_or_else(|| GhostError::Intent(format!(
+        let p: ghost_core::focus::FocusPolicy = policy.parse().map_err(|_| {
+            GhostError::Intent(format!(
                 "unknown focus policy '{policy}'; use background, prefer_background, or foreground"
-            )))?;
+            ))
+        })?;
         ghost_core::focus::set_policy(p);
         Ok(p.as_str())
     }
@@ -75,11 +82,12 @@ impl GhostSession {
         mode: &str,
         which: Option<&str>,
     ) -> Result<serde_json::Value> {
-        let mode = ghost_browser::LaunchMode::from_str(mode)
-            .unwrap_or(ghost_browser::LaunchMode::Headless);
+        let mode: ghost_browser::LaunchMode =
+            mode.parse().unwrap_or(ghost_browser::LaunchMode::Headless);
         let executable = match which {
             Some(name) => Some(
-                ghost_browser::find_named_browser(name).map_err(|e| GhostError::Intent(e.to_string()))?,
+                ghost_browser::find_named_browser(name)
+                    .map_err(|e| GhostError::Intent(e.to_string()))?,
             ),
             None => None,
         };
@@ -102,7 +110,11 @@ impl GhostSession {
             "browser": which.unwrap_or("default"),
             "mode": format!("{mode:?}").to_lowercase(),
         });
-        self.browsers.lock().await.browsers.insert(id.to_string(), Arc::new(browser));
+        self.browsers
+            .lock()
+            .await
+            .browsers
+            .insert(id.to_string(), Arc::new(browser));
         Ok(info)
     }
 
@@ -113,7 +125,11 @@ impl GhostSession {
             .await
             .map_err(|e| GhostError::Intent(e.to_string()))?;
         let info = serde_json::json!({ "id": id, "port": browser.port(), "attached": true });
-        self.browsers.lock().await.browsers.insert(id.to_string(), Arc::new(browser));
+        self.browsers
+            .lock()
+            .await
+            .browsers
+            .insert(id.to_string(), Arc::new(browser));
         Ok(info)
     }
 
@@ -129,7 +145,10 @@ impl GhostSession {
     /// disconnected but left running - they belong to the user.
     pub async fn browser_close(&self, id: &str) -> Result<()> {
         let browser = self.browser_handle(id).await?;
-        browser.close().await.map_err(|e| GhostError::Intent(e.to_string()))?;
+        browser
+            .close()
+            .await
+            .map_err(|e| GhostError::Intent(e.to_string()))?;
         let mut reg = self.browsers.lock().await;
         reg.browsers.remove(id);
         let prefix = format!("{id}/");
@@ -149,7 +168,10 @@ impl GhostSession {
     /// tab or its window to the front.
     pub async fn tab_open(&self, browser_id: &str, url: &str) -> Result<String> {
         let browser = self.browser_handle(browser_id).await?;
-        let tab = browser.new_tab(url).await.map_err(|e| GhostError::Intent(e.to_string()))?;
+        let tab = browser
+            .new_tab(url)
+            .await
+            .map_err(|e| GhostError::Intent(e.to_string()))?;
         let target_id = tab.target_id().to_string();
         self.browsers
             .lock()
@@ -167,7 +189,10 @@ impl GhostSession {
         }
         let browser = self.browser_handle(browser_id).await?;
         let tab = Arc::new(
-            browser.tab(target_id).await.map_err(|e| GhostError::Intent(e.to_string()))?,
+            browser
+                .tab(target_id)
+                .await
+                .map_err(|e| GhostError::Intent(e.to_string()))?,
         );
         self.browsers.lock().await.tabs.insert(key, tab.clone());
         Ok(tab)
@@ -179,7 +204,11 @@ impl GhostSession {
             .close_tab(target_id)
             .await
             .map_err(|e| GhostError::Intent(e.to_string()))?;
-        self.browsers.lock().await.tabs.remove(&format!("{browser_id}/{target_id}"));
+        self.browsers
+            .lock()
+            .await
+            .tabs
+            .remove(&format!("{browser_id}/{target_id}"));
         Ok(())
     }
 
@@ -214,7 +243,10 @@ impl GhostSession {
             "desktop": d.name(),
             "real_input_supported": d.real_input_supported(),
         });
-        self.desktops.lock().await.insert(id.to_string(), Arc::new(d));
+        self.desktops
+            .lock()
+            .await
+            .insert(id.to_string(), Arc::new(d));
         Ok(info)
     }
 
@@ -240,12 +272,19 @@ impl GhostSession {
 
     #[cfg(windows)]
     pub async fn desktop_launch(&self, id: &str, command: &str) -> Result<u32> {
-        self.desktop_handle(id).await?.launch(command).map_err(GhostError::Core)
+        self.desktop_handle(id)
+            .await?
+            .launch(command)
+            .map_err(GhostError::Core)
     }
 
     #[cfg(windows)]
     pub async fn desktop_windows(&self, id: &str) -> Result<Vec<serde_json::Value>> {
-        let windows = self.desktop_handle(id).await?.windows().map_err(GhostError::Core)?;
+        let windows = self
+            .desktop_handle(id)
+            .await?
+            .windows()
+            .map_err(GhostError::Core)?;
         Ok(windows
             .into_iter()
             .map(|w| serde_json::json!({ "hwnd": w.hwnd, "title": w.title, "pid": w.pid }))
@@ -308,22 +347,34 @@ impl GhostSession {
 
     #[cfg(windows)]
     pub async fn desktop_type(&self, id: &str, hwnd: isize, text: &str) -> Result<()> {
-        self.desktop_handle(id).await?.type_text(hwnd, text).map_err(GhostError::Core)
+        self.desktop_handle(id)
+            .await?
+            .type_text(hwnd, text)
+            .map_err(GhostError::Core)
     }
 
     #[cfg(windows)]
     pub async fn desktop_press(&self, id: &str, hwnd: isize, key: &str) -> Result<()> {
-        self.desktop_handle(id).await?.press(hwnd, key).map_err(GhostError::Core)
+        self.desktop_handle(id)
+            .await?
+            .press(hwnd, key)
+            .map_err(GhostError::Core)
     }
 
     #[cfg(windows)]
     pub async fn desktop_shortcut(&self, id: &str, hwnd: isize, name: &str) -> Result<()> {
-        self.desktop_handle(id).await?.shortcut(hwnd, name).map_err(GhostError::Core)
+        self.desktop_handle(id)
+            .await?
+            .shortcut(hwnd, name)
+            .map_err(GhostError::Core)
     }
 
     #[cfg(windows)]
     pub async fn desktop_capture(&self, id: &str, hwnd: isize) -> Result<Vec<u8>> {
-        self.desktop_handle(id).await?.capture(hwnd, false).map_err(GhostError::Core)
+        self.desktop_handle(id)
+            .await?
+            .capture(hwnd, false)
+            .map_err(GhostError::Core)
     }
 
     /// Interactive elements of a window on an isolated desktop, via UIA. UIA works

@@ -26,12 +26,13 @@ pub enum LaunchMode {
     Windowed,
 }
 
-impl LaunchMode {
-    pub fn from_str(s: &str) -> Option<Self> {
+impl std::str::FromStr for LaunchMode {
+    type Err = ();
+    fn from_str(s: &str) -> std::result::Result<Self, ()> {
         match s.trim().to_lowercase().as_str() {
-            "headless" | "hidden" => Some(LaunchMode::Headless),
-            "windowed" | "window" | "visible" => Some(LaunchMode::Windowed),
-            _ => None,
+            "headless" | "hidden" => Ok(LaunchMode::Headless),
+            "windowed" | "window" | "visible" => Ok(LaunchMode::Windowed),
+            _ => Err(()),
         }
     }
 }
@@ -83,7 +84,10 @@ const KNOWN_BROWSERS: &[(&str, &str)] = &[
     ("chrome", r"Google\Chrome\Application\chrome.exe"),
     ("comet", r"Perplexity\Comet\Application\comet.exe"),
     ("edge", r"Microsoft\Edge\Application\msedge.exe"),
-    ("brave", r"BraveSoftware\Brave-Browser\Application\brave.exe"),
+    (
+        "brave",
+        r"BraveSoftware\Brave-Browser\Application\brave.exe",
+    ),
 ];
 
 fn install_roots() -> Vec<PathBuf> {
@@ -103,7 +107,11 @@ pub fn find_named_browser(name: &str) -> Result<PathBuf> {
         .ok_or_else(|| {
             BrowserError::Launch(format!(
                 "unknown browser '{name}'; known: {}",
-                KNOWN_BROWSERS.iter().map(|(n, _)| *n).collect::<Vec<_>>().join(", ")
+                KNOWN_BROWSERS
+                    .iter()
+                    .map(|(n, _)| *n)
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ))
         })?;
     for root in install_roots() {
@@ -112,7 +120,9 @@ pub fn find_named_browser(name: &str) -> Result<PathBuf> {
             return Ok(candidate);
         }
     }
-    Err(BrowserError::Launch(format!("'{name}' is not installed on this machine")))
+    Err(BrowserError::Launch(format!(
+        "'{name}' is not installed on this machine"
+    )))
 }
 
 /// Every known browser that is actually installed, as (name, path).
@@ -327,7 +337,10 @@ mod tests {
 
     #[test]
     fn port_file_first_line_is_the_port() {
-        assert_eq!(parse_port_file("54321\n/devtools/browser/abc\n"), Some(54321));
+        assert_eq!(
+            parse_port_file("54321\n/devtools/browser/abc\n"),
+            Some(54321)
+        );
         assert_eq!(parse_port_file("  9222  \n"), Some(9222));
     }
 
@@ -340,7 +353,10 @@ mod tests {
 
     #[test]
     fn headless_mode_never_asks_for_a_window_position() {
-        let opts = LaunchOptions { mode: LaunchMode::Headless, ..Default::default() };
+        let opts = LaunchOptions {
+            mode: LaunchMode::Headless,
+            ..Default::default()
+        };
         let args = base_args(&opts);
         assert!(args.iter().any(|a| a == "--headless=new"));
         assert!(!args.iter().any(|a| a.starts_with("--window-position")));
@@ -348,7 +364,10 @@ mod tests {
 
     #[test]
     fn windowed_mode_starts_off_the_visible_desktop() {
-        let opts = LaunchOptions { mode: LaunchMode::Windowed, ..Default::default() };
+        let opts = LaunchOptions {
+            mode: LaunchMode::Windowed,
+            ..Default::default()
+        };
         let args = base_args(&opts);
         assert!(!args.iter().any(|a| a == "--headless=new"));
         assert!(args.iter().any(|a| a == "--window-position=-32000,-32000"));
@@ -377,13 +396,15 @@ mod tests {
     #[test]
     fn profile_dir_is_per_process() {
         let dir = default_profile_dir();
-        assert!(dir.to_string_lossy().contains(&format!("p{}", std::process::id())));
+        assert!(dir
+            .to_string_lossy()
+            .contains(&format!("p{}", std::process::id())));
     }
 
     #[test]
     fn launch_mode_parses_common_spellings() {
-        assert_eq!(LaunchMode::from_str("headless"), Some(LaunchMode::Headless));
-        assert_eq!(LaunchMode::from_str("Windowed"), Some(LaunchMode::Windowed));
-        assert_eq!(LaunchMode::from_str("nope"), None);
+        assert_eq!("headless".parse::<LaunchMode>(), Ok(LaunchMode::Headless));
+        assert_eq!("Windowed".parse::<LaunchMode>(), Ok(LaunchMode::Windowed));
+        assert!("nope".parse::<LaunchMode>().is_err());
     }
 }

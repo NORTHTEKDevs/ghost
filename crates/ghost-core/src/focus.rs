@@ -36,21 +36,24 @@ pub enum FocusPolicy {
     Foreground,
 }
 
+impl std::str::FromStr for FocusPolicy {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, ()> {
+        match s.trim().to_lowercase().replace('-', "_").as_str() {
+            "background" | "bg" | "strict" => Ok(FocusPolicy::Background),
+            "prefer_background" | "prefer" | "auto" => Ok(FocusPolicy::PreferBackground),
+            "foreground" | "fg" | "legacy" => Ok(FocusPolicy::Foreground),
+            _ => Err(()),
+        }
+    }
+}
+
 impl FocusPolicy {
     pub fn as_str(&self) -> &'static str {
         match self {
             FocusPolicy::Background => "background",
             FocusPolicy::PreferBackground => "prefer_background",
             FocusPolicy::Foreground => "foreground",
-        }
-    }
-
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s.trim().to_lowercase().replace('-', "_").as_str() {
-            "background" | "bg" | "strict" => Some(FocusPolicy::Background),
-            "prefer_background" | "prefer" | "auto" => Some(FocusPolicy::PreferBackground),
-            "foreground" | "fg" | "legacy" => Some(FocusPolicy::Foreground),
-            _ => None,
         }
     }
 
@@ -76,7 +79,7 @@ impl FocusPolicy {
 fn resolve_initial() -> u8 {
     let code = std::env::var("GHOST_FOCUS_POLICY")
         .ok()
-        .and_then(|v| FocusPolicy::from_str(&v))
+        .and_then(|v| v.parse::<FocusPolicy>().ok())
         .unwrap_or(FocusPolicy::Background)
         .code();
     // Only store if still unset; a concurrent set_policy must not be clobbered.
@@ -168,14 +171,20 @@ mod tests {
     // avoid cross-test interference from cargo's parallel test threads.
     #[test]
     fn policy_parsing_and_gating() {
-        assert_eq!(FocusPolicy::from_str("background"), Some(FocusPolicy::Background));
-        assert_eq!(FocusPolicy::from_str("BG"), Some(FocusPolicy::Background));
         assert_eq!(
-            FocusPolicy::from_str("prefer-background"),
-            Some(FocusPolicy::PreferBackground)
+            "background".parse::<FocusPolicy>(),
+            Ok(FocusPolicy::Background)
         );
-        assert_eq!(FocusPolicy::from_str("foreground"), Some(FocusPolicy::Foreground));
-        assert_eq!(FocusPolicy::from_str("nonsense"), None);
+        assert_eq!("BG".parse::<FocusPolicy>(), Ok(FocusPolicy::Background));
+        assert_eq!(
+            "prefer-background".parse::<FocusPolicy>(),
+            Ok(FocusPolicy::PreferBackground)
+        );
+        assert_eq!(
+            "foreground".parse::<FocusPolicy>(),
+            Ok(FocusPolicy::Foreground)
+        );
+        assert!("nonsense".parse::<FocusPolicy>().is_err());
 
         set_policy(FocusPolicy::Background);
         assert!(is_background_only());

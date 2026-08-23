@@ -113,7 +113,9 @@ impl DesktopSession {
                 // which is why this is a freshly spawned thread that has done nothing.
                 if let Err(e) = unsafe { SetThreadDesktop(hdesk) } {
                     let _ = ready_tx.send(Err(format!("SetThreadDesktop: {e}")));
-                    unsafe { let _ = CloseDesktop(hdesk); }
+                    unsafe {
+                        let _ = CloseDesktop(hdesk);
+                    }
                     return;
                 }
                 // Exempt this thread from the focus policy: its input cannot reach the
@@ -134,7 +136,9 @@ impl DesktopSession {
         match ready_rx.recv() {
             Ok(Ok(())) => Ok(Self { name, jobs: tx }),
             Ok(Err(e)) => Err(CoreError::Desktop(e)),
-            Err(_) => Err(CoreError::Desktop("worker thread died during startup".into())),
+            Err(_) => Err(CoreError::Desktop(
+                "worker thread died during startup".into(),
+            )),
         }
     }
 
@@ -277,8 +281,13 @@ impl DesktopSession {
     pub fn type_text(&self, hwnd: isize, text: &str) -> Result<(), CoreError> {
         let t = text.to_string();
         self.exec(move || {
-            let target = crate::input::BackgroundClicker::text_target(hwnd)
-                .ok_or(CoreError::NoTextControl)?;
+            let target = match crate::input::BackgroundClicker::text_target(hwnd) {
+                Some(t) => t,
+                // No message-postable control (WinUI/UWP apps like Windows 11
+                // Notepad): fall back to the UIA ValuePattern, which needs no
+                // keyboard input and so works on a non-displayed desktop.
+                None => return type_text_via_uia(hwnd, &t),
+            };
             let read = || crate::input::BackgroundClicker::read_text(target).unwrap_or_default();
             let before = read();
             for ch in t.chars() {
@@ -309,10 +318,25 @@ impl DesktopSession {
                 }
             }
             if last == before {
+                // The control accepted no posted characters at all. Some apps
+                // expose a message-postable-looking control whose thread never
+                // pumps them on a non-displayed desktop - before erroring, try
+                // the UIA ValuePattern, which bypasses the message queue.
+                if type_text_via_uia(hwnd, &t).is_ok() {
+                    return Ok(());
+                }
                 return Err(CoreError::TypeNotVerified { text: t });
             }
             if !last.contains(&t) {
-                return Err(CoreError::TypePartial { wanted: t, got: last });
+                // Partial landing: same rescue, so a target that dropped the
+                // tail gets a second chance rather than a false-negative.
+                if type_text_via_uia(hwnd, &t).is_ok() {
+                    return Ok(());
+                }
+                return Err(CoreError::TypePartial {
+                    wanted: t,
+                    got: last,
+                });
             }
             Ok::<(), CoreError>(())
         })?
@@ -325,7 +349,10 @@ impl DesktopSession {
                 let target = crate::input::BackgroundClicker::text_target(hwnd).unwrap_or(hwnd);
                 crate::input::BackgroundClicker::send_key(target, vk.0)
             }
-            None => Err(CoreError::Win32 { code: 0, context: "unknown key name" }),
+            None => Err(CoreError::Win32 {
+                code: 0,
+                context: "unknown key name",
+            }),
         })?
     }
 
@@ -344,7 +371,10 @@ impl DesktopSession {
                 "select_all" | "selectall" => crate::input::EditCommand::from_ctrl_key("a"),
                 _ => None,
             })
-            .ok_or(CoreError::Win32 { code: 0, context: "unsupported shortcut" })?;
+            .ok_or(CoreError::Win32 {
+                code: 0,
+                context: "unsupported shortcut",
+            })?;
         self.exec(move || {
             let target = crate::input::BackgroundClicker::text_target(hwnd)
                 .ok_or(CoreError::NoTextControl)?;
@@ -396,6 +426,35 @@ impl DesktopSession {
             Ok::<(), CoreError>(())
         })?
     }
+}
+
+/// Type into a window that has no message-postable text control, via UIA.
+///
+/// Modern app frameworks (WinUI 3, UWP) expose their text fields only through
+/// UI Automation - there is no classic EDIT control to post WM_CHAR to. The
+/// ValuePattern sets the value directly, no keyboard involved, so it works on
+/// a non-displayed desktop where SendInput is refused. The read-back is the
+/// proof: SetValue reported success means nothing if the value did not change.
+fn type_text_via_uia(hwnd: isize, text: &str) -> Result<(), CoreError> {
+    crate::uia::init_com()?;
+    let tree = crate::uia::tree::UiaTree::new()?;
+    for role in ["edit", "document", "combobox"] {
+        let candidates = tree.find_all_in_hwnd(hwnd, None, Some(role), 10)?;
+        for el in candidates {
+            if !el.is_enabled() || el.is_offscreen() {
+                continue;
+            }
+            // Providers may normalise newlines on SetValue (WinUI stores \r\n);
+            // compare folded so a successful set is never misread as a failure.
+            let fold = |s: &str| s.replace("\r\n", "\n");
+            if crate::uia::patterns::set_value_ex(&el, text, false).is_ok()
+                && fold(&el.get_text()).contains(&fold(text))
+            {
+                return Ok(());
+            }
+        }
+    }
+    Err(CoreError::NoTextControl)
 }
 
 impl Drop for DesktopSession {
@@ -486,9 +545,7 @@ pub fn visible_windows() -> Result<Vec<DesktopWindow>, CoreError> {
     use windows::Win32::UI::WindowsAndMessaging::IsWindowVisible;
     Ok(enum_desktop_windows()?
         .into_iter()
-        .filter(|w| unsafe {
-            IsWindowVisible(HWND(w.hwnd as *mut core::ffi::c_void)).as_bool()
-        })
+        .filter(|w| unsafe { IsWindowVisible(HWND(w.hwnd as *mut core::ffi::c_void)).as_bool() })
         .collect())
 }
 
@@ -526,7 +583,11 @@ fn scroll_window(hwnd: isize, notches: i32, horizontal: bool) -> Result<(), Core
         }
         let delta = WHEEL_DELTA * notches;
         let wparam = WPARAM(((delta as u32 as usize) << 16) & 0xFFFF_0000);
-        let msg = if horizontal { WM_MOUSEHWHEEL } else { WM_MOUSEWHEEL };
+        let msg = if horizontal {
+            WM_MOUSEHWHEEL
+        } else {
+            WM_MOUSEWHEEL
+        };
         PostMessageW(h, msg, wparam, LPARAM(0)).map_err(|e| CoreError::Win32 {
             code: e.code().0 as u32,
             context: "PostMessage wheel",

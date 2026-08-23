@@ -624,11 +624,29 @@ async fn handle_tool(
     match method {
         "ghost_find" => {
             let (mode_label, mode) = parse_locate_mode(p);
-            // Optional window anchor: focus + confirm the target window first so
-            // every downstream foreground-based path (UIA fast walk, OCR crop,
-            // cache hwnd key) resolves against the INTENDED window, not whatever
-            // happens to be foreground.
+            // Optional window anchor. Under the default `background` policy the
+            // anchor scopes resolution to the target window's UIA subtree - it
+            // must NOT demand foreground, because raising the window is exactly
+            // what the policy refuses (and what the README promises never
+            // happens). Foreground policies keep the focus+confirm behaviour so
+            // OCR/crop paths resolve against the intended window.
             if let Some(window) = p["window"].as_str() {
+                if session.is_background_only() {
+                    let by = if let Some(n) = p["name"].as_str() {
+                        ghost_session::By::name(n)
+                    } else if let Some(r) = p["role"].as_str() {
+                        ghost_session::By::role(r)
+                    } else {
+                        return Err("ghost_find with 'window' requires 'name' or 'role' to locate the element".into());
+                    };
+                    let idx = p["index"].as_u64().map(|i| i as usize);
+                    let mut out = session.find_background(window, by, idx).await
+                        .map_err(|e| format!("ghost_find: {e}"))?;
+                    if let Some(obj) = out.as_object_mut() {
+                        obj.insert("ok".into(), json!(true));
+                    }
+                    return Ok(out);
+                }
                 session.ensure_window_foreground(window).await
                     .map_err(|e| format!("ghost_find: could not focus window '{window}': {e}"))?;
             }
@@ -674,6 +692,15 @@ async fn handle_tool(
         "ghost_click_at" => {
             let x = p["x"].as_i64().ok_or("missing param: x")? as i32;
             let y = p["y"].as_i64().ok_or("missing param: y")? as i32;
+            // Background policy: post the click to the window that owns the
+            // point instead of moving the real cursor (README: posted mouse
+            // messages, never a cursor jump). An explicit hwnd pins the target
+            // window - UIA rects stay valid under occlusion, WindowFromPoint
+            // does not, so chained find -> click_at flows pass hwnd through.
+            if session.is_background_only() {
+                let hwnd = p["hwnd"].as_i64().map(|h| h as isize);
+                return session.click_at_background(x, y, hwnd).await.map_err(|e| e.to_string());
+            }
             session.click_at(x, y).await.map_err(|e| e.to_string())?;
             Ok(json!({ "ok": true }))
         }
@@ -1169,8 +1196,21 @@ async fn handle_tool(
             }
 
             let (mode_label, mode) = parse_locate_mode(p);
-            // Optional window anchor - see ghost_find.
+            // Optional window anchor - see ghost_find. Under the `background`
+            // policy an anchored act routes to the background machinery (posted
+            // messages / UIA patterns + read-back verification) instead of
+            // demanding foreground; explicit background=true lands above.
             if let Some(window) = p["window"].as_str() {
+                if session.is_background_only() {
+                    let by = if let Some(n) = p["name"].as_str() {
+                        ghost_session::By::name(n)
+                    } else if let Some(r) = p["role"].as_str() {
+                        ghost_session::By::role(r)
+                    } else {
+                        return Err("ghost_act with 'window' requires 'name' or 'role' to locate the element".into());
+                    };
+                    return session.act_background(window, by, action, text).await.map_err(|e| e.to_string());
+                }
                 session.ensure_window_foreground(window).await
                     .map_err(|e| format!("ghost_act: could not focus window '{window}': {e}"))?;
             }
@@ -1518,6 +1558,14 @@ async fn handle_ghost_key(
     // + confirm the target first and FAIL LOUDLY if it can't be confirmed, instead
     // of silently typing into the wrong app.
     if let Some(window) = p.get("window").and_then(|v| v.as_str()) {
+        if session.is_background_only() {
+            // Background policy: a SINGLE key posts to the window without focus
+            // (README: ghost_key background=true). Modifier combos have no honest
+            // background path - refuse naming the action and the unblocking
+            // policy, exactly like every other foreground-only primitive.
+            let (_, key_only) = parse_key_combo(keys)?;
+            return session.key_background(window, &key_only).await.map_err(|e| e.to_string());
+        }
         session.ensure_window_foreground(window).await.map_err(|e| {
             format!("ghost_key: could not confirm '{window}' as foreground before sending keys: {e}")
         })?;
@@ -2228,9 +2276,10 @@ fn legacy_tools_schema_full() -> Value {
               "text": { "type": "string", "description": "Text to type" }
           }}},
         { "name": "ghost_click_at",
-          "description": "Left-click at absolute screen pixel coordinates.",
+          "description": "Left-click at absolute screen pixel coordinates. Under the background policy the click is POSTED to the window owning the point (no cursor move). Pass hwnd (from ghost_find) when the target may be occluded - UIA rects stay valid under occlusion, WindowFromPoint does not.",
           "inputSchema": { "type": "object", "required": ["x","y"], "properties": {
-              "x": { "type": "integer" }, "y": { "type": "integer" }
+              "x": { "type": "integer" }, "y": { "type": "integer" },
+              "hwnd": { "type": "integer", "description": "Target window handle (from ghost_find) - pins the click to that window even when occluded" }
           }}},
         { "name": "ghost_screenshot",
           "description": "Capture a screenshot. Default: foreground window, max 768px longest edge, JPEG quality 75 - typically 20-100KB. Pass \"full\": true for a full-screen lossless PNG (1-5MB). Always includes size_bytes.",

@@ -1,5 +1,37 @@
 # Changelog
 
+## [Unreleased] - background-routing completion + bench restored to 14/14
+
+- **Background-policy routing for anchored verbs**: `ghost_find`, `ghost_act`,
+  `ghost_key` (single keys) and `ghost_click_at` with a `window` anchor now
+  route to the background machinery under the default policy instead of
+  demanding foreground - previously they errored with a focus-policy refusal,
+  contradicting the README's anchoring promise. `find_background` scopes UIA
+  resolution to the target window's subtree (with launch-race retries and
+  index disambiguation); `act_background` and `key_background` dispatch as
+  documented.
+- **Occlusion-safe coordinate clicks**: `ghost_click_at` accepts `hwnd` (from
+  `ghost_find`) so chained find -> click flows post to the intended window even
+  when it is covered - `WindowFromPoint` only sees the topmost window. The
+  background click verifies via PrintWindow delta and falls back to UIA
+  Invoke (flagged in the response) when posted messages have no pixel effect.
+- **Isolated-desktop typing rescue**: typing falls back to the UIA
+  ValuePattern both when a window has no message-postable control (WinUI/UWP)
+  and when posted characters partially or wholly fail to land - verified by
+  read-back either way. Both Windows 11 Notepad variants now type correctly on
+  a non-displayed desktop.
+- **CI lint fix**: inherent `from_str` methods replaced with real
+  `std::str::FromStr` implementations (`FocusPolicy`, `LaunchMode`);
+  `cargo clippy --workspace -- -D warnings` is green again.
+- **Bench**: 14/14 restored (was 4/14 against 0.19 enforcement). Tasks that
+  asserted pre-0.19 semantics updated to the documented contracts: background
+  response fields (`focus_preserved`/`cursor_preserved`), the raise-policy
+  pattern for foreground-only steps, and state-transition asserts instead of
+  exact window counts (Win11 Calculator exposes multiple same-titled windows).
+- **Loop harness**: `scripts/bshr-loop.ps1` runs the full mechanical gate
+  (clippy -D warnings, tests, release build, doctor, verify, live desktop-input
+  contract); `LOOP-STATE.md` records the completion graph and claim table.
+
 ## [0.19.0] - Background automation, browsers, isolated desktops, concurrency
 
 Merges the `feat/background-automation` line into the cross-platform 0.18 base.

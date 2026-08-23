@@ -38,3 +38,8 @@
 
 ## Gotchas:
 - diagnose.rs was task-specific (Gmail + VS Code hardcoded), replaced with tool-category verifier against Notepad.
+- Window-anchored find/act/key/click_at MUST route to background machinery under the default policy - demanding foreground contradicts the README and breaks the bench (fixed 2026-08-23; see session.rs find_background/click_at_background).
+- Occluded-window coordinate clicks: WindowFromPoint returns the COVERING window. Chain hwnd from ghost_find into ghost_click_at (schema supports it).
+- Isolated-desktop typing: message-post path can silently drop chars on some targets; UIA ValuePattern fallback + partial-failure rescue covers both Notepad variants.
+- Win11 Calculator exposes multiple same-titled top-level windows (XAML islands) - never assert exact window counts; assert state transitions.
+- This repo does NOT enforce rustfmt: a repo-wide `cargo fmt --all` is a 6.5k-line diff. scripts/bshr-loop.ps1 deliberately omits the fmt gate.
