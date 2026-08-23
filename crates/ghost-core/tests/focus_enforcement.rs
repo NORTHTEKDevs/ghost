@@ -8,6 +8,8 @@
 //! All assertions live in one test function on purpose: the focus policy is
 //! process-global state, and cargo runs test functions on parallel threads.
 
+#![cfg(windows)]
+
 use ghost_core::error::CoreError;
 use ghost_core::focus::{self, FocusPolicy};
 use ghost_core::input::{keyboard, mouse};
@@ -53,7 +55,9 @@ fn background_policy_blocks_every_screen_stealing_primitive() {
 fn error_message_tells_the_caller_how_to_opt_in() {
     // An agent hitting this wall needs to learn the escape hatch from the message
     // alone, without reading the source.
-    let err = focus::require_foreground_allowed("click").unwrap_err().to_string();
+    let err = focus::require_foreground_allowed("click")
+        .unwrap_err()
+        .to_string();
     assert!(err.contains("click"), "{err}");
     assert!(err.contains("background"), "{err}");
     assert!(
