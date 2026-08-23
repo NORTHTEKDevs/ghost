@@ -529,8 +529,20 @@ impl GhostSession {
         let marks: Vec<crate::engine::capture::Mark> = candidates.iter().enumerate().map(|(i, c)| {
             crate::engine::capture::Mark { label: (i + 1) as u32, x: c.0 - rect.0, y: c.1 - rect.1 }
         }).collect();
+        // Windows renders the target's own surface via PrintWindow, so the
+        // marks are correct even when the window is fully covered. Linux has
+        // no occlusion-proof window capture: it grabs the screen region, which
+        // is honest about needing the window visible (capability matrix).
+        #[cfg(windows)]
         let jpeg = tokio::task::spawn_blocking(move || {
             crate::engine::capture::capture_window_marked_jpeg(hwnd, &marks, 1400, 82)
+        })
+        .await
+        .map_err(|e| GhostError::Core(crate::engine::error::CoreError::WorkerPanic(e.to_string())))?
+        .map_err(GhostError::Core)?;
+        #[cfg(not(windows))]
+        let jpeg = tokio::task::spawn_blocking(move || {
+            crate::engine::capture::capture_region_marked_jpeg(Some(rect), &marks, 1400, 82)
         })
         .await
         .map_err(|e| GhostError::Core(crate::engine::error::CoreError::WorkerPanic(e.to_string())))?

@@ -120,6 +120,12 @@ impl A11yTree {
         self.find(Some(window), None, Some(role))
     }
 
+    /// Collect up to `cap` elements from the window's subtree regardless of
+    /// name/role - the inventory for window-scoped Set-of-Marks.
+    pub fn collect_in_hwnd(&self, window: isize, cap: usize) -> Result<Vec<UiaElement>> {
+        self.find_all_in_hwnd(window, None, None, cap)
+    }
+
     pub fn find_all_in_hwnd(
         &self,
         window: isize,
