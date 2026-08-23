@@ -190,7 +190,7 @@ fn composite_capture(hwnd_raw: isize) -> Option<(Vec<u8>, usize, usize)> {
     let reply = reply.ok()?;
 
     let mut rgba = Vec::with_capacity(w as usize * h as usize * 4);
-    for px in reply.data.chunks_exact(4) {
+    for px in reply.data.as_chunks::<4>().0 {
         rgba.extend_from_slice(&[px[2], px[1], px[0], 255]);
     }
     if rgba.len() < w as usize * h as usize * 4 {
@@ -298,7 +298,7 @@ fn x11_capture(region: Option<(i32, i32, u32, u32)>) -> Result<(Vec<u8>, usize, 
 
     // Z_PIXMAP at depth 24/32 is BGRX/BGRA on little-endian servers.
     let mut rgba = Vec::with_capacity((w * h * 4) as usize);
-    for px in reply.data.chunks_exact(4) {
+    for px in reply.data.as_chunks::<4>().0 {
         rgba.extend_from_slice(&[px[2], px[1], px[0], 255]);
     }
     if rgba.len() < (w as usize) * (h as usize) * 4 {
@@ -483,3 +483,4 @@ mod tests {
         assert!(encode_rgba(&[0u8; 10], 100, 100, CaptureFormat::Png).is_err());
     }
 }
+
