@@ -284,6 +284,9 @@ pub async fn dispatch(
 
 /// Schemas for the extended surface, appended to the lean tools/list.
 pub fn schemas() -> Vec<Value> {
+    // The Windows-only desktop/focus tools extend this vec below; on other
+    // platforms the extension is compiled out and the mut would be unused.
+    #[cfg_attr(not(windows), allow(unused_mut))]
     let mut tools = vec![
         json!({ "name": "ghost_browser_launch",
           "description": "Launch an isolated browser for background automation. Each id gets its own process, profile, and DevTools port, so concurrent ghost processes never collide. browser= chrome | comet | edge | brave (default: first installed). mode=headless (invisible) | windowed (kept off the visible desktop). Tabs are driven individually via ghost_tab_* without focusing the window or moving the cursor.",
