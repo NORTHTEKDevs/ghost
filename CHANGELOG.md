@@ -48,6 +48,15 @@
   whole screen. Measured: an anchored hidden window in 17 ms, a covered
   Calculator on the user desktop in 33 ms, foreground unchanged, audit 0.
 
+- **Proven, not assumed.** `crates/ghost-core/tests/chromium_inactive_typing.rs`
+  deactivates a Chromium page on a hidden desktop the way the system does
+  (WM_NCACTIVATE, WM_ACTIVATE, WM_KILLFOCUS - the page reports `onblur`
+  through its title) and then types through the posted-message rung: the text
+  lands. The real Comet, started with `--remote-debugging-port=0` on a hidden
+  desktop, was routed through CDP: DOM describe in 12 ms, navigate, type,
+  assert, key combo, foreground unchanged, audit 0 (Comet's native title stays
+  "Comet" there; the window-to-tab binding carries the route).
+
 **Defects those tests found, all real and all fixed:** `read_text` returned only
 the FIRST CHARACTER of a control (the message result was discarded, so the
 length was the send's success flag) - every isolated-desktop typing check was
