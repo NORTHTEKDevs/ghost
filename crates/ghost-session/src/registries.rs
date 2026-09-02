@@ -94,22 +94,44 @@ impl GhostSession {
         let mut dir = std::env::temp_dir();
         dir.push("ghost-browser-profiles");
         dir.push(format!("p{}-{}", std::process::id(), sanitize_id(id)));
-        let opts = ghost_browser::LaunchOptions {
+        #[allow(unused_mut)]
+        let mut opts = ghost_browser::LaunchOptions {
             mode,
             user_data_dir: dir,
             executable,
             ..Default::default()
         };
+        // A windowed browser is never born on the user's desktop. Chromium
+        // activates its first window on launch in every launch style (measured
+        // for Edge and Chrome: normal, hidden, minimized, from a background
+        // parent), which hands the human's keyboard to an invisible window.
+        // The hidden desktop has its own input queue, so that cannot happen
+        // there, and CDP is a local TCP port that does not care where the
+        // window lives.
+        #[cfg(windows)]
+        if mode == ghost_browser::LaunchMode::Windowed {
+            let d = self.auto_desktop().await?;
+            opts.desktop = Some(d.name().to_string());
+        }
         let browser = ghost_browser::Browser::launch(&opts)
             .await
             .map_err(|e| GhostError::Intent(e.to_string()))?;
-        let info = serde_json::json!({
+        let mut info = serde_json::json!({
             "id": id,
             "port": browser.port(),
             "pid": browser.pid(),
             "browser": which.unwrap_or("default"),
             "mode": format!("{mode:?}").to_lowercase(),
         });
+        if opts.desktop.is_some() {
+            info["desktop"] = serde_json::Value::String(crate::hidden::AUTO_DESKTOP.into());
+            info["note"] = serde_json::Value::String(
+                "windowed browser started on the hidden desktop 'auto': never on your screen, \
+                 never takes focus. Drive tabs with ghost_tab_*; the window itself is also \
+                 reachable by title through ghost_see/ghost_act (surface=hidden)."
+                    .into(),
+            );
+        }
         self.browsers
             .lock()
             .await

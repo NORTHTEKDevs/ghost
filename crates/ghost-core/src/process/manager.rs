@@ -249,3 +249,19 @@ mod tests {
         }
     }
 }
+
+/// Turn what an agent typed (`msedge.exe`, `notepad`, a full path with
+/// arguments) into a command line `CreateProcessW` can start. A bare program
+/// name that is not on PATH is resolved through the App Paths registry, which
+/// is where every major browser registers itself. Anything with whitespace is
+/// treated as an already-formed command line and passed through untouched.
+pub fn resolve_command_line(command: &str) -> String {
+    let c = command.trim();
+    if c.is_empty() || c.chars().any(char::is_whitespace) || std::path::Path::new(c).is_absolute() {
+        return c.to_string();
+    }
+    match resolve_via_app_paths(c) {
+        Some(resolved) => quote_if_needed(&resolved),
+        None => c.to_string(),
+    }
+}

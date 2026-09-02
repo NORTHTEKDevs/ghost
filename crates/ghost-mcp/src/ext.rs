@@ -289,7 +289,7 @@ pub fn schemas() -> Vec<Value> {
     #[cfg_attr(not(windows), allow(unused_mut))]
     let mut tools = vec![
         json!({ "name": "ghost_browser_launch",
-          "description": "Launch an isolated browser for background automation. Each id gets its own process, profile, and DevTools port, so concurrent ghost processes never collide. browser= chrome | comet | edge | brave (default: first installed). mode=headless (invisible) | windowed (kept off the visible desktop). Tabs are driven individually via ghost_tab_* without focusing the window or moving the cursor.",
+          "description": "Launch an isolated browser for background automation. Each id gets its own process, profile, and DevTools port, so concurrent ghost processes never collide. browser= chrome | comet | edge | brave (default: first installed). mode=headless (invisible, default) | windowed (a real browser window, started on a hidden desktop - never on your screen, never takes focus; use it only for sites that behave differently headless). Never launched on your own desktop: a new Chromium window takes the foreground on creation. Tabs are driven individually via ghost_tab_* without focusing the window or moving the cursor.",
           "inputSchema": { "type": "object", "properties": {
               "id": { "type": "string", "description": "Handle for later calls (default: 'default')" },
               "mode": { "type": "string", "enum": ["headless", "windowed"] },
@@ -405,13 +405,13 @@ pub fn schemas() -> Vec<Value> {
               "description": "The window the user is working in (handle + title) and the real cursor position. Call before/after a batch of actions to verify nothing was disturbed; compare foreground_hwnd, since titles change on their own.",
               "inputSchema": { "type": "object", "properties": {}}}),
             json!({ "name": "ghost_desktop_create",
-              "description": "Create an isolated Windows desktop - apps launched onto it NEVER appear on the user's screen (the desktop-app equivalent of headless). UIA, window messages, and capture all work there; real SendInput does not (OS boundary).",
+              "description": "Create an isolated Windows desktop - apps launched onto it NEVER appear on the user's screen (the desktop-app equivalent of headless). Usually unnecessary: under the default background policy ghost_window op=launch already starts apps on the hidden desktop 'auto' and the ordinary verbs (ghost_see/find/act/key/scroll with window=<title>) drive them there. UIA, window messages, and capture all work; real SendInput does not (OS boundary).",
               "inputSchema": { "type": "object", "properties": { "id": { "type": "string" }}}}),
             json!({ "name": "ghost_desktop_close",
               "description": "Destroy an isolated desktop, terminating any processes still on it (they have no visible window to close).",
               "inputSchema": { "type": "object", "properties": { "id": { "type": "string" }}}}),
             json!({ "name": "ghost_desktop_launch",
-              "description": "Launch a program onto an isolated desktop. Windows cannot move an existing window there - launch is the only entry.",
+              "description": "Launch a program onto a specific isolated desktop (ghost_window op=launch does this automatically onto 'auto' under the background policy and anchors the window). Windows cannot move an existing window there - launch is the only entry.",
               "inputSchema": { "type": "object", "required": ["command"], "properties": {
                   "desktop": { "type": "string" }, "command": { "type": "string" }
               }}}),

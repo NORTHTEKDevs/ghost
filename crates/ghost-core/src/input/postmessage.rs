@@ -499,3 +499,11 @@ mod tests {
         assert_eq!(EditCommand::from_ctrl_key("s"), None);
     }
 }
+
+/// The window class of a top-level or child window, lowercased ("" if unreadable).
+/// Lets callers recognise GPU-composited families (Chromium/Electron report
+/// `chrome_widgetwin_*`) whose `PrintWindow` on a non-displayed desktop falls
+/// back to a slow software `WM_PRINT` render.
+pub fn window_class(hwnd_raw: isize) -> String {
+    BackgroundClicker::class_name(hwnd_of(hwnd_raw))
+}

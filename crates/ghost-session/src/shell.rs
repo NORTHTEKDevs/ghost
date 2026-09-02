@@ -1,8 +1,8 @@
 //! Shell control: one-shot commands and persistent PowerShell sessions.
 //!
 //! Two modes exist behind the single `ghost_shell` MCP verb:
-//!   * one-shot `run` — spawn a shell, run one command, capture merged output.
-//!   * persistent sessions (`open`/`send`/`read`/`kill`) — a long-lived PowerShell
+//!   * one-shot `run` - spawn a shell, run one command, capture merged output.
+//!   * persistent sessions (`open`/`send`/`read`/`kill`) - a long-lived PowerShell
 //!     process whose variables, cwd and env persist across commands.
 //!
 //! Persistent framing: the driver reads `<nonce> <base64(utf8 cmd)>` lines from
@@ -58,12 +58,18 @@ struct ShellSession {
     pid: Option<u32>,
 }
 
-/// Registry of persistent sessions, held in a RefCell on GhostSession (all calls
-/// run on the single STA block_on thread, so no locking is required).
+/// Registry of persistent sessions, held in a Mutex on GhostSession.
 #[derive(Default)]
 pub struct ShellRegistry {
     sessions: HashMap<String, ShellSession>,
     auto_id: u64,
+    /// A pre-spawned PowerShell running the persistent driver, waiting for
+    /// exactly one `op=run` command. Measured: a fresh `powershell -Command`
+    /// costs 232-447 ms of process start and module prep on this machine, and
+    /// `op=run` is 60% of all Ghost calls. Handing the command to a process
+    /// that already finished starting brings that to single-digit ms. The spare
+    /// is replaced right after it is taken, so the next call is warm too.
+    warm: Option<ShellSession>,
 }
 
 impl ShellRegistry {
@@ -74,6 +80,61 @@ impl ShellRegistry {
 
 fn shell_disabled() -> bool {
     matches!(std::env::var("GHOST_SHELL"), Ok(v) if v.trim().eq_ignore_ascii_case("off"))
+}
+
+/// `GHOST_SHELL_WARM=off` disables the pre-spawned spare (one idle PowerShell
+/// per ghost process, roughly 40 MB).
+fn warm_disabled() -> bool {
+    matches!(std::env::var("GHOST_SHELL_WARM"), Ok(v) if v.trim().eq_ignore_ascii_case("off"))
+}
+
+/// Prefix that moves a driver-run command into `cwd`. Single quotes are the
+/// PowerShell literal string delimiter and are escaped by doubling.
+fn cwd_prefix(cwd: &str) -> String {
+    format!("Set-Location -LiteralPath '{}'; ", cwd.replace('\'', "''"))
+}
+
+/// Start one persistent driver process (PowerShell here, bash on Linux).
+/// Shared by `op=open` sessions and the warm spare.
+fn spawn_driver(cwd: Option<&str>) -> Result<ShellSession> {
+    #[cfg(target_os = "linux")]
+    let mut command = {
+        let mut c = Command::new("bash");
+        c.args(["--noprofile", "--norc", "-c", BASH_DRIVER_SCRIPT]);
+        c
+    };
+    #[cfg(not(target_os = "linux"))]
+    let mut command = {
+        let mut c = Command::new("powershell");
+        c.args(["-NoProfile", "-NoLogo", "-NonInteractive", "-EncodedCommand"])
+            .arg(ps_encoded_command(DRIVER_SCRIPT));
+        c
+    };
+    if let Some(dir) = cwd {
+        command.current_dir(dir);
+    }
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+
+    let mut child = command
+        .spawn()
+        .map_err(|e| GhostError::Config(format!("failed to start persistent shell: {e}")))?;
+    let stdin = child.stdin.take().unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let pid = child.id();
+    Ok(ShellSession {
+        child,
+        stdin,
+        reader: BufReader::new(stdout),
+        nonce: 0,
+        secret: session_secret(),
+        pending: None,
+        created: Instant::now(),
+        pid,
+    })
 }
 
 /// Standard-alphabet base64 (encode only). Avoids pulling a dependency for a
@@ -109,6 +170,7 @@ fn ps_encoded_command(script: &str) -> String {
 #[cfg(not(target_os = "linux"))]
 const DRIVER_SCRIPT: &str = r#"
 $ErrorActionPreference='Continue'
+$ProgressPreference='SilentlyContinue'
 [Console]::OutputEncoding=[System.Text.Encoding]::UTF8
 while($true){
   $line=[Console]::In.ReadLine()
@@ -204,6 +266,21 @@ impl GhostSession {
         let cwd = args.get("cwd").and_then(|v| v.as_str());
         let dur = clamp_timeout(args.get("timeout_ms").and_then(|v| v.as_u64()));
 
+        // Warm path: hand the command to the pre-spawned PowerShell. Only the
+        // default shell qualifies (cmd starts in ~15 ms anyway; pwsh is rarely
+        // installed). A spare that died is discarded; either way the next
+        // spare is started before this command runs, so its warm-up overlaps
+        // the agent's thinking instead of the agent's waiting.
+        if cfg!(not(target_os = "linux")) && shell == "powershell" && !warm_disabled() {
+            let spare = self.shells.lock().unwrap().warm.take();
+            self.replenish_warm();
+            if let Some(mut sess) = spare {
+                if matches!(sess.child.try_wait(), Ok(None)) {
+                    return self.run_on_spare(sess, cmd, cwd, dur, shell).await;
+                }
+            }
+        }
+
         let mut command = build_oneshot(shell, cmd)?;
         if let Some(dir) = cwd {
             command.current_dir(dir);
@@ -264,6 +341,81 @@ impl GhostSession {
         }))
     }
 
+    /// Start the next spare. Process creation is a few milliseconds; the
+    /// PowerShell warm-up itself happens in the child, off the request path.
+    fn replenish_warm(&self) {
+        match spawn_driver(None) {
+            Ok(s) => self.shells.lock().unwrap().warm = Some(s),
+            Err(e) => tracing::warn!("ghost_shell: could not start a warm spare: {e}"),
+        }
+    }
+
+    /// Run one `op=run` command on a warm spare. Same response shape as the
+    /// one-shot path plus `warm: true`. The spare is single-use: it is killed
+    /// once the command has answered (or timed out), never reused, so state
+    /// cannot leak between commands.
+    async fn run_on_spare(
+        &self,
+        mut sess: ShellSession,
+        cmd: &str,
+        cwd: Option<&str>,
+        dur: Duration,
+        shell: &str,
+    ) -> Result<Value> {
+        let started = Instant::now();
+        let script = match cwd {
+            Some(dir) => format!("{}{cmd}", cwd_prefix(dir)),
+            None => cmd.to_string(),
+        };
+        sess.nonce += 1;
+        let token = sentinel_token(&sess.secret, sess.nonce);
+        let frame = format!("{} {}\n", token, b64_encode(script.as_bytes()));
+        if let Err(e) = sess.stdin.write_all(frame.as_bytes()).await {
+            let _ = sess.child.start_kill();
+            return Err(GhostError::Config(format!("ghost_shell: warm shell write failed: {e}")));
+        }
+        let _ = sess.stdin.flush().await;
+
+        let outcome = read_until_sentinel(&mut sess, &token, dur).await;
+        let duration_ms = started.elapsed().as_millis() as u64;
+        match outcome {
+            ReadOutcome::Done { output, exit_code } => {
+                let _ = sess.child.start_kill();
+                let (output, truncated) = cap_output(output);
+                Ok(json!({
+                    "ok": true, "output": output, "exit_code": exit_code,
+                    "duration_ms": duration_ms, "truncated": truncated,
+                    "timed_out": false, "shell": shell, "warm": true,
+                }))
+            }
+            ReadOutcome::TimedOut { output } => {
+                let _ = sess.child.start_kill();
+                let (output, truncated) = cap_output(output);
+                Ok(json!({
+                    "ok": false, "output": output, "exit_code": Value::Null,
+                    "duration_ms": duration_ms, "truncated": truncated,
+                    "timed_out": true, "shell": shell, "warm": true,
+                }))
+            }
+            ReadOutcome::Stopped => {
+                let _ = sess.child.start_kill();
+                Err(GhostError::Stopped)
+            }
+            ReadOutcome::Eof { output } => {
+                // The command ended the shell itself (`exit N`): the process exit
+                // status is the command's exit code, exactly as in the one-shot path.
+                let status = sess.child.wait().await.ok();
+                let (output, truncated) = cap_output(output);
+                Ok(json!({
+                    "ok": true, "output": output,
+                    "exit_code": status.and_then(|s| s.code()),
+                    "duration_ms": duration_ms, "truncated": truncated,
+                    "timed_out": false, "shell": shell, "warm": true,
+                }))
+            }
+        }
+    }
+
     async fn shell_open(&self, args: &Value) -> Result<Value> {
         let cwd = args.get("cwd").and_then(|v| v.as_str());
         let id = match args.get("id").and_then(|v| v.as_str()) {
@@ -280,44 +432,8 @@ impl GhostSession {
             )));
         }
 
-        #[cfg(target_os = "linux")]
-        let mut command = {
-            let mut c = Command::new("bash");
-            c.args(["--noprofile", "--norc", "-c", BASH_DRIVER_SCRIPT]);
-            c
-        };
-        #[cfg(not(target_os = "linux"))]
-        let mut command = {
-            let mut c = Command::new("powershell");
-            c.args(["-NoProfile", "-NoLogo", "-NonInteractive", "-EncodedCommand"])
-                .arg(ps_encoded_command(DRIVER_SCRIPT));
-            c
-        };
-        if let Some(dir) = cwd {
-            command.current_dir(dir);
-        }
-        command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .kill_on_drop(true);
-
-        let mut child = command
-            .spawn()
-            .map_err(|e| GhostError::Config(format!("failed to start persistent shell: {e}")))?;
-        let stdin = child.stdin.take().unwrap();
-        let stdout = child.stdout.take().unwrap();
-        let pid = child.id();
-        let session = ShellSession {
-            child,
-            stdin,
-            reader: BufReader::new(stdout),
-            nonce: 0,
-            secret: session_secret(),
-            pending: None,
-            created: Instant::now(),
-            pid,
-        };
+        let session = spawn_driver(cwd)?;
+        let pid = session.pid;
         self.shells.lock().unwrap().sessions.insert(id.clone(), session);
         Ok(json!({ "ok": true, "id": id, "pid": pid }))
     }
@@ -701,5 +817,65 @@ mod tests {
         assert!(shell_disabled());
         std::env::remove_var("GHOST_SHELL");
         assert!(!shell_disabled());
+    }
+}
+
+#[cfg(test)]
+mod warm_tests {
+    use super::*;
+
+    #[test]
+    fn cwd_prefix_escapes_single_quotes_for_a_literal_path() {
+        assert_eq!(
+            cwd_prefix(r"C:\Users\Krist\o'neil"),
+            r"Set-Location -LiteralPath 'C:\Users\Krist\o''neil'; "
+        );
+    }
+
+    #[test]
+    fn warm_flag_reads_env() {
+        std::env::set_var("GHOST_SHELL_WARM", "off");
+        assert!(warm_disabled());
+        std::env::remove_var("GHOST_SHELL_WARM");
+        assert!(!warm_disabled());
+    }
+
+    /// The mechanism the warm path relies on: a driver process accepts one
+    /// framed command, answers with the sentinel and the native exit code, and
+    /// the whole exchange is fast once the process is up. Windows only (real
+    /// PowerShell); the exit code comes from `cmd /c exit 3`, a native command.
+    #[cfg(windows)]
+    #[test]
+    fn a_spare_driver_serves_one_framed_command_with_its_exit_code() {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let mut sess = spawn_driver(None).expect("spawn driver");
+            // Let the child finish starting so the measurement below is the
+            // warm cost, not PowerShell's own start-up.
+            tokio::time::sleep(Duration::from_millis(1500)).await;
+            let started = Instant::now();
+            sess.nonce += 1;
+            let token = sentinel_token(&sess.secret, sess.nonce);
+            let frame = format!("{} {}\n", token, b64_encode(b"Write-Output warm-ok; cmd /c exit 3"));
+            sess.stdin.write_all(frame.as_bytes()).await.unwrap();
+            sess.stdin.flush().await.unwrap();
+            let outcome = read_until_sentinel(&mut sess, &token, Duration::from_secs(20)).await;
+            let elapsed = started.elapsed();
+            let _ = sess.child.start_kill();
+            match outcome {
+                ReadOutcome::Done { output, exit_code } => {
+                    assert!(output.contains("warm-ok"), "output was {output:?}");
+                    assert_eq!(exit_code, Some(3));
+                }
+                other => panic!("expected Done, got {:?}", matches!(other, ReadOutcome::Done { .. })),
+            }
+            assert!(
+                elapsed < Duration::from_millis(1500),
+                "a warm command should not cost a process start: {elapsed:?}"
+            );
+        });
     }
 }

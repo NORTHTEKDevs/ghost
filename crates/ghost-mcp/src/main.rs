@@ -681,6 +681,14 @@ fn dispatch_tool_inner<'a>(
         // foreground; every such response reports what it targeted.
         let prepared = prepare_window_target(session, name, args).await?;
         let args: &Value = prepared.args.as_ref().unwrap_or(args);
+        // A window on one of Ghost's hidden desktops is driven through that
+        // desktop's own worker (ghost_session::hidden); the user-desktop verbs
+        // below cannot see it at all.
+        #[cfg(windows)]
+        if let Some(t) = prepared.target.as_ref().filter(|t| t.is_hidden()) {
+            let result = dispatch_hidden(session, name, args, t).await;
+            return attach_target(session, result, prepared.target);
+        }
         // Route lean verbs first, fall through to legacy handle_tool for all others.
         let result = match name {
             "ghost_see" => handle_ghost_see(session, args).await,
@@ -700,6 +708,163 @@ fn dispatch_tool_inner<'a>(
     })
 }
 
+/// The window-scoped verbs against a window on a hidden desktop. Same argument
+/// names and result shapes as the user-desktop paths, so the agent sees one
+/// vocabulary; `target.surface` in the envelope is the only tell.
+#[cfg(windows)]
+async fn dispatch_hidden(
+    session: &GhostSession,
+    name: &str,
+    p: &Value,
+    t: &WindowTarget,
+) -> std::result::Result<Value, String> {
+    let err = |e: ghost_session::GhostError| e.to_string();
+    match name {
+        "ghost_see" => match p["mode"].as_str().unwrap_or("full") {
+            "text" => {
+                let max_chars = p
+                    .get("limit")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as usize)
+                    .filter(|v| *v > 0)
+                    .unwrap_or(20_000);
+                let (text, truncated) = session.hidden_read_text(t, max_chars).await.map_err(err)?;
+                Ok(json!({ "text": text, "chars": text.len(), "truncated": truncated }))
+            }
+            _ => {
+                let els = session.hidden_describe(t).await.map_err(err)?;
+                Ok(elements_response(&els, p))
+            }
+        },
+        "ghost_snapshot" => {
+            let els = session.hidden_describe(t).await.map_err(err)?;
+            Ok(snapshot_response(&els, p))
+        }
+        "ghost_find" => {
+            let by = parse_by(p)?;
+            let idx = p["index"].as_u64().map(|i| i as usize);
+            session.hidden_find(t, by, idx).await.map_err(|e| format!("ghost_find: {e}"))
+        }
+        "ghost_act" => {
+            let action = p["action"]
+                .as_str()
+                .ok_or("missing param: action (click|type|double_click|right_click|hover)")?;
+            let text = p["text_input"].as_str().or_else(|| p["text"].as_str());
+            let by = parse_by(p)?;
+            session.hidden_act(t, by, action, text).await.map_err(err)
+        }
+        "ghost_key" => {
+            let keys = p["keys"].as_str().ok_or("ghost_key: missing 'keys' param")?;
+            session.hidden_key(t, keys).await.map_err(err)
+        }
+        "ghost_click_at" => {
+            let x = p["x"].as_i64().ok_or("missing param: x")? as i32;
+            let y = p["y"].as_i64().ok_or("missing param: y")? as i32;
+            session.hidden_click_at(t, x, y).await.map_err(err)
+        }
+        "ghost_scroll" => {
+            let direction = p["direction"].as_str().ok_or("missing param: direction")?;
+            let amount = p["amount"].as_i64().unwrap_or(3) as i32;
+            if p.get("until_name").is_some() || p.get("until_role").is_some() {
+                let by = if let Some(n) = p["until_name"].as_str() {
+                    ghost_session::By::name(n)
+                } else {
+                    ghost_session::By::role(p["until_role"].as_str().unwrap_or(""))
+                };
+                let max_scrolls = p["max_scrolls"].as_u64().unwrap_or(20).min(100);
+                for _ in 0..max_scrolls {
+                    if session.hidden_find(t, by.clone(), None).await.is_ok() {
+                        return Ok(json!({ "ok": true, "found": true, "mode": "hidden" }));
+                    }
+                    session.hidden_scroll(t, direction, amount).await.map_err(err)?;
+                    tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+                }
+                let found = session.hidden_find(t, by, None).await.is_ok();
+                return Ok(json!({ "ok": found, "found": found, "mode": "hidden" }));
+            }
+            session.hidden_scroll(t, direction, amount).await.map_err(err)
+        }
+        "ghost_assert" => {
+            let predicate = p["predicate"].as_str().ok_or("ghost_assert: missing 'predicate' param")?;
+            match predicate {
+                "element-exists" => {
+                    let by = parse_by(p)?;
+                    session
+                        .hidden_find(t, by, None)
+                        .await
+                        .map_err(|e| format!("assert failed: element not found - {e}"))?;
+                    Ok(json!({ "ok": true, "predicate": predicate, "passed": true }))
+                }
+                "value-equals" | "value-contains" => {
+                    let expected = p["text"]
+                        .as_str()
+                        .ok_or("ghost_assert: value-equals/value-contains requires 'text'")?;
+                    let by = parse_by(p)?;
+                    let actual = session
+                        .hidden_value(t, by)
+                        .await
+                        .map_err(|e| format!("assert failed: element not found - {e}"))?;
+                    let passed = if predicate == "value-equals" {
+                        actual == expected
+                    } else {
+                        actual.contains(expected)
+                    };
+                    if passed {
+                        Ok(json!({ "ok": true, "predicate": predicate, "passed": true, "value": actual }))
+                    } else {
+                        Err(format!("assert failed: predicate={predicate}, expected={expected:?}, actual={actual:?}"))
+                    }
+                }
+                other => Err(format!(
+                    "ghost_assert: predicate '{other}' is screen-based (OCR) and has no hidden-desktop path; \
+                     use element-exists or value-equals/value-contains, or ghost_see mode=text"
+                )),
+            }
+        }
+        "ghost_wait" => match p["for"].as_str().unwrap_or("ms") {
+            "element" => {
+                let appears = p["appears"].as_bool().unwrap_or(true);
+                let timeout_ms = p["timeout_ms"].as_u64().unwrap_or(5000);
+                let by = parse_by(p)?;
+                session
+                    .hidden_wait_for_element(t, by, appears, timeout_ms)
+                    .await
+                    .map_err(err)?;
+                Ok(json!({ "ok": true, "appeared": appears }))
+            }
+            "value" => {
+                let pred = p["predicate"].as_str().unwrap_or("equals");
+                let expected = p["text"].as_str().unwrap_or("");
+                let timeout_ms = p["timeout_ms"].as_u64().unwrap_or(5000);
+                let by = parse_by(p)?;
+                let start = std::time::Instant::now();
+                let initial = session.hidden_value(t, by.clone()).await.ok();
+                loop {
+                    let value = session.hidden_value(t, by.clone()).await.unwrap_or_default();
+                    let done = match pred {
+                        "contains" => value.contains(expected),
+                        "changes" => initial.as_deref() != Some(value.as_str()),
+                        _ => value == expected,
+                    };
+                    if done {
+                        return Ok(json!({ "ok": true, "value": value }));
+                    }
+                    if start.elapsed() >= std::time::Duration::from_millis(timeout_ms) {
+                        return Err(format!(
+                            "Timeout after {timeout_ms}ms waiting for: value {pred} {expected:?} (last {value:?})"
+                        ));
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+            }
+            other => Err(format!(
+                "ghost_wait for={other} is screen-based and has no hidden-desktop path; use for=element or for=value"
+            )),
+        },
+        other => Err(format!("{other} has no hidden-desktop path")),
+    }
+}
+
 /// The outcome of window resolution for one call: possibly rewritten arguments
 /// (the implicit window filled in, or `window="foreground"` stripped) and the
 /// target that was chosen.
@@ -717,7 +882,7 @@ fn is_window_scoped(name: &str, args: &Value) -> bool {
             "fast" | "full" | "text"
         ),
         "ghost_find" | "ghost_act" | "ghost_key" | "ghost_click_at" | "ghost_snapshot"
-        | "ghost_assert" => true,
+        | "ghost_assert" | "ghost_scroll" => true,
         "ghost_wait" => matches!(
             args["for"].as_str().unwrap_or("ms"),
             "element" | "value" | "idle" | "text"
@@ -1040,8 +1205,17 @@ async fn handle_tool(
             let exe = p["exe"].as_str()
                 .or_else(|| p["name"].as_str())
                 .ok_or("missing param: exe (or name)")?;
+            // Under the background policy a launch goes to a hidden desktop: a
+            // new window on the user's desktop takes the foreground on creation
+            // (measured for Edge and Chrome in every launch style), which is the
+            // one thing the policy forbids. The app is anchored so the ordinary
+            // verbs drive it by title from here on.
+            #[cfg(windows)]
+            if session.is_background_only() {
+                return session.launch_hidden(exe).await.map_err(|e| e.to_string());
+            }
             let pid = session.launch(exe).await.map_err(|e| e.to_string())?;
-            Ok(json!({ "pid": pid }))
+            Ok(json!({ "pid": pid, "surface": "user" }))
         }
         "ghost_stop" => {
             session.stop();
@@ -1120,6 +1294,32 @@ async fn handle_tool(
         "ghost_scroll" => {
             let direction = p["direction"].as_str().ok_or("missing param: direction")?;
             let amount = p["amount"].as_i64().unwrap_or(3) as i32;
+            // Background policy with a target window (explicit or anchored): post
+            // the wheel to that window - the pointer never moves and the window
+            // is never raised. Scrolling used to have no background path at all.
+            if session.is_background_only() {
+                if let Some(window) = p["window"].as_str() {
+                    let t = session.resolve_target(Some(window)).await.map_err(|e| e.to_string())?;
+                    if p.get("until_name").is_some() || p.get("until_role").is_some() {
+                        let by = if let Some(n) = p["until_name"].as_str() {
+                            ghost_session::By::name(n)
+                        } else {
+                            ghost_session::By::role(p["until_role"].as_str().unwrap_or(""))
+                        };
+                        let max_scrolls = p["max_scrolls"].as_u64().unwrap_or(20).min(100);
+                        for _ in 0..max_scrolls {
+                            if session.find_background(&t.title, by.clone(), None).await.is_ok() {
+                                return Ok(json!({ "ok": true, "found": true, "mode": "background" }));
+                            }
+                            session.scroll_background(&t, direction, amount).await.map_err(|e| e.to_string())?;
+                            tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+                        }
+                        let found = session.find_background(&t.title, by, None).await.is_ok();
+                        return Ok(json!({ "ok": found, "found": found, "mode": "background" }));
+                    }
+                    return session.scroll_background(&t, direction, amount).await.map_err(|e| e.to_string());
+                }
+            }
             // "until" mode: scroll until the named/roled element becomes visible.
             if p.get("until_name").is_some() || p.get("until_role").is_some() {
                 let by = if let Some(n) = p["until_name"].as_str() { ghost_session::By::name(n) }
@@ -2450,8 +2650,9 @@ fn lean_tools_schema() -> Value {
               "limit": { "type": "integer", "description": "Max elements (default 150; 0 = unlimited)" }
           }}},
         { "name": "ghost_scroll",
-          "description": "Scroll. direction: up/down/left/right, amount = notches (default 3). Coord mode: pass x/y. 'Until' mode: pass until_name/until_role to scroll the foreground window repeatedly until that element becomes visible (long/virtualized lists), up to max_scrolls; returns found=true/false.",
+          "description": "Scroll. direction: up/down/left/right, amount = notches (default 3). Target = window= (anchored) or the session anchor: under the default background policy the wheel is POSTED to that window (pointer never moves, window never raised; works on covered and hidden-desktop windows). 'Until' mode: until_name/until_role scrolls repeatedly until that element is present, up to max_scrolls; returns found. Coord mode (x/y at the real pointer) needs a foreground policy.",
           "inputSchema": { "type": "object", "required": ["direction"], "properties": {
+              "window": { "type": "string", "description": "Title substring of the window to scroll (anchors it). Omit to use the anchor." },
               "x": { "type": "integer" }, "y": { "type": "integer" },
               "direction": { "type": "string", "enum": ["up","down","left","right"] },
               "amount": { "type": "integer", "default": 3 },

@@ -5,6 +5,8 @@ pub mod element;
 pub mod reflection;
 pub mod session;
 pub mod target;
+#[cfg(windows)]
+pub mod hidden;
 pub mod registries;
 pub mod shell;
 pub mod tiers;

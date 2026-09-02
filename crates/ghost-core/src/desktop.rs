@@ -570,7 +570,9 @@ fn as_hwnd(h: isize) -> HWND {
 }
 
 /// Background wheel scroll via a posted WM_MOUSEWHEEL to the window.
-fn scroll_window(hwnd: isize, notches: i32, horizontal: bool) -> Result<(), CoreError> {
+/// Post a mouse-wheel message to `hwnd` without moving the real pointer. Shared
+/// by the hidden-desktop scroll and the user-desktop background scroll.
+pub fn scroll_window(hwnd: isize, notches: i32, horizontal: bool) -> Result<(), CoreError> {
     use windows::Win32::Foundation::{LPARAM, WPARAM};
     use windows::Win32::UI::WindowsAndMessaging::{IsWindow, PostMessageW};
     const WM_MOUSEWHEEL: u32 = 0x020A;
