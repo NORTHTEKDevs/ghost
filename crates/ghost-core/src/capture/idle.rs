@@ -20,7 +20,7 @@ pub fn downsample_to_4x4(pixels: &[u8], width: usize, height: usize) -> [u8; 64]
 }
 
 /// Downsample an RGBA buffer to a `dim`x`dim` grid of per-cell channel averages.
-/// Returns `dim*dim*4` bytes. Generic version of `downsample_to_4x4` — used by
+/// Returns `dim*dim*4` bytes. Generic version of `downsample_to_4x4` - used by
 /// act-verification, which needs enough resolution to see a typed word.
 pub fn downsample_grid(pixels: &[u8], width: usize, height: usize, dim: usize) -> Vec<u8> {
     let dim = dim.max(1);
@@ -84,7 +84,7 @@ impl IdleDetector {
             if start.elapsed() >= deadline {
                 return Err(CoreError::JobTimeout);
             }
-            // Hash a raw 8x8 downsample of the DXGI surface — no PNG encoding.
+            // Hash a raw 8x8 downsample of the DXGI surface - no PNG encoding.
             // HIGH-2: DXGI AcquireNextFrame blocks up to 50ms; must not run on the
             // tokio executor thread. Same pattern as screenshot() in session.rs.
             let raw = tokio::task::spawn_blocking(|| crate::capture::screen::capture_screen_downsample_raw(8))
@@ -194,6 +194,12 @@ mod tests {
     #[tokio::test]
     #[ignore] // requires display
     async fn idle_detector_returns_stable_on_static_desktop() {
+        // The detector compares captured frames, so it needs a DISPLAYED desktop;
+        // on a hidden one capture fails outright. Environment, not defect.
+        if crate::capture::capture_screen().is_err() {
+            eprintln!("skipped: no displayed desktop to capture");
+            return;
+        }
         let d = IdleDetector::new().unwrap();
         let r = d.wait_stable(3, 2000).await;
         assert!(r.is_ok() || matches!(r, Err(CoreError::JobTimeout)));

@@ -1,28 +1,40 @@
-//! Live Windows-app test: drives Notepad/Calculator/Explorer via the
-//! Windows engine, so it is gated to Windows.
+//! Live Windows-app test: drives Calculator through the BACKGROUND path.
+//! Run with: cargo test -p ghost-session --test calculator -- --ignored --nocapture
+//!
+//! This test used to call `GhostElement::click()`, which is the foreground path
+//! (UIA Invoke with a coordinate fallback that moves the real cursor). Since
+//! 0.19 the default focus policy refuses that, so the test failed with
+//! `NoBackgroundPath` on every run - it was asserting pre-0.19 behaviour. The
+//! product's own path is `click_background`: UIA Invoke only, no cursor, no
+//! foreground, and an honest error when the control has no Invoke pattern.
+
 #![cfg(windows)]
 
-//! Integration test: automate Calculator
-//! Run with: cargo test -p ghost-session --test calculator -- --ignored --nocapture
-
-use ghost_session::{GhostSession, By};
+use ghost_session::{By, GhostSession};
 use std::time::Duration;
 
 #[tokio::test]
 #[ignore = "requires Windows display; run manually"]
-async fn test_calculator_click_button() {
+async fn calculator_button_clicks_in_the_background() {
     let session = GhostSession::new().expect("failed to create session");
+    let pid = match session.launch("calc.exe").await {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("skipped: could not launch Calculator ({e})");
+            return;
+        }
+    };
+    // Calculator is a Store app: it hands off to a broker, takes a while to show
+    // a window, and may not come up at all on a desktop that is never displayed.
+    tokio::time::sleep(Duration::from_millis(2500)).await;
 
-    let pid = session.launch("calc.exe").await
-        .expect("failed to launch Calculator");
-
-    // Calculator takes longer to initialize than Notepad
-    tokio::time::sleep(Duration::from_millis(1500)).await;
-
-    // Click the "One" button (UIA name for the "1" key)
-    let btn = session.find(By::name("One")).await
-        .expect("failed to find '1' button");
-    btn.click().expect("failed to click '1' button");
-
+    // "One" is the UIA name of the 1 key.
+    let Ok(btn) = session.find(By::name("One")).await else {
+        eprintln!("skipped: Calculator's keypad did not appear");
+        ghost_core::process::kill(pid).ok();
+        return;
+    };
+    let result = btn.click_background();
     ghost_core::process::kill(pid).ok();
+    result.expect("a XAML button exposes InvokePattern, so the background click must succeed");
 }

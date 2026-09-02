@@ -256,7 +256,7 @@ impl BackgroundClicker {
     }
 
     /// True when `hwnd` is a control that accepts the standard edit messages.
-    fn is_text_control(hwnd: HWND) -> bool {
+    pub(crate) fn is_text_control(hwnd: HWND) -> bool {
         let class = Self::class_name(hwnd);
         TEXT_CLASS_PREFIXES.iter().any(|p| class.starts_with(p))
     }
@@ -452,6 +452,16 @@ impl BackgroundClicker {
         }
         Ok(())
     }
+}
+
+/// True when `hwnd` is a control that accepts the standard edit messages.
+///
+/// Load-bearing for `WM_SETTEXT`: almost every window accepts that message, but
+/// on a non-edit window it sets the window's CAPTION. Reading the caption back
+/// then looks exactly like a successful type, which is the blind success this
+/// codebase exists to prevent - so the callers gate on this first.
+pub fn is_text_control(hwnd_raw: isize) -> bool {
+    BackgroundClicker::is_text_control(hwnd_of(hwnd_raw))
 }
 
 /// The window class of a top-level or child window, lowercased ("" if unreadable).

@@ -293,12 +293,15 @@ impl DesktopSession {
             if t.is_empty() {
                 return Ok(());
             }
-            // WM_SETTEXT first: it is atomic and cannot land half the string.
-            // Posted characters are the fallback for controls that ignore it
-            // (measured: a classic EDIT on a non-displayed desktop accepted the
-            // first WM_CHAR and dropped the rest, so the posted path alone
-            // reported TypePartial).
-            if crate::input::BackgroundClicker::set_text(target, &t).is_ok() {
+            // WM_SETTEXT first, but ONLY on a real edit control: it is atomic and
+            // cannot land half the string (measured: a classic EDIT on a
+            // non-displayed desktop accepted the first WM_CHAR and dropped the
+            // rest). On any other window WM_SETTEXT sets the window's CAPTION,
+            // and reading that back looks exactly like a successful type - the
+            // blind success this crate exists to prevent.
+            if crate::input::is_text_control(target)
+                && crate::input::BackgroundClicker::set_text(target, &t).is_ok()
+            {
                 let deadline = std::time::Instant::now() + std::time::Duration::from_millis(400);
                 while std::time::Instant::now() < deadline {
                     if read().contains(&t) {

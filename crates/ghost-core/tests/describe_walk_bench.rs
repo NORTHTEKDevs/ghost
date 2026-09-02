@@ -14,11 +14,17 @@ use std::time::Instant;
 fn walker_vs_cached_describe_on_a_live_window() {
     let _com = init_com().expect("com");
     let needle = std::env::var("GHOST_BENCH_WINDOW").unwrap_or_else(|_| "Comet".into());
-    let win = list_windows()
+    let Some(win) = list_windows()
         .expect("windows")
         .into_iter()
         .find(|w| w.name.to_lowercase().contains(&needle.to_lowercase()) && w.state != "minimized")
-        .unwrap_or_else(|| panic!("no window matching {needle}"));
+    else {
+        // A measurement, not a contract: on a hidden desktop or a machine
+        // without that window there is nothing to measure, and failing would
+        // turn a benchmark into a false alarm.
+        eprintln!("skipped: no window matching {needle:?} (set GHOST_BENCH_WINDOW)");
+        return;
+    };
     let tree = UiaTree::new().expect("tree");
     for round in 0..3 {
         let t = Instant::now();
