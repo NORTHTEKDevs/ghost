@@ -79,9 +79,33 @@ impl Located {
     }
 }
 
+/// Chromium and Electron windows report the `chrome_widgetwin_*` class.
+pub(crate) fn is_chromium_window(hwnd: isize) -> bool {
+    ghost_core::input::window_class(hwnd).starts_with("chrome_")
+}
+
 /// Locate the `index`-th element matching `by` inside `hwnd`'s subtree. Returns
 /// the element and how many matched (bounded by the search cap).
+///
+/// Chromium builds its accessibility tree lazily - the first UIA query on a
+/// fresh window is what switches it on, and that query sees almost nothing. A
+/// miss on a Chromium window is therefore retried once after a short pause.
 fn find_in(
+    tree: &UiaTree,
+    hwnd: isize,
+    by: &By,
+    index: Option<usize>,
+) -> Result<(UiaElement, usize)> {
+    match find_in_once(tree, hwnd, by, index) {
+        Err(GhostError::ElementNotFound { .. }) if is_chromium_window(hwnd) => {
+            std::thread::sleep(Duration::from_millis(450));
+            find_in_once(tree, hwnd, by, index)
+        }
+        other => other,
+    }
+}
+
+fn find_in_once(
     tree: &UiaTree,
     hwnd: isize,
     by: &By,
@@ -290,15 +314,17 @@ impl GhostSession {
     /// `ghost_see` (elements) on a hidden-desktop window.
     pub async fn hidden_describe(&self, t: &WindowTarget) -> Result<Vec<ElementDescriptor>> {
         let d = self.desktop_for(t).await?;
-        let title = t.title.clone();
-        core(core(d.with_uia(move |tree| tree.describe_screen(Some(&title))))?)
+        let hwnd = t.hwnd;
+        // Rooted by handle: a title lookup among the desktop's children returned
+        // an empty walk for a Chromium window that owns same-titled helpers.
+        core(core(d.with_uia(move |tree| tree.describe_hwnd(hwnd)))?)
     }
 
     /// `ghost_see mode=text` on a hidden-desktop window.
     pub async fn hidden_read_text(&self, t: &WindowTarget, max_chars: usize) -> Result<(String, bool)> {
         let d = self.desktop_for(t).await?;
-        let title = t.title.clone();
-        core(core(d.with_uia(move |tree| tree.collect_text(Some(&title), max_chars)))?)
+        let hwnd = t.hwnd;
+        core(core(d.with_uia(move |tree| tree.collect_text_in_hwnd(hwnd, max_chars)))?)
     }
 
     /// `ghost_find` on a hidden-desktop window: same shape as the user-desktop

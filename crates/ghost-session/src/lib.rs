@@ -5,6 +5,8 @@ pub mod element;
 pub mod reflection;
 pub mod session;
 pub mod target;
+pub mod cdp_route;
+pub mod suggest;
 #[cfg(windows)]
 pub mod hidden;
 pub mod registries;

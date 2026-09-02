@@ -275,21 +275,180 @@ impl Tab {
 
     /// Click at viewport coordinates.
     pub async fn click_at(&self, x: f64, y: f64) -> Result<()> {
+        self.click_at_ex(x, y, "left", 1).await
+    }
+
+    /// Click at viewport coordinates with a button (`left`|`right`|`middle`) and a
+    /// click count (2 = double-click).
+    pub async fn click_at_ex(&self, x: f64, y: f64, button: &str, count: u32) -> Result<()> {
         // The move arms hover state for menus and hover-reveal controls; the press
         // and release are awaited so the caller knows the click was really handled.
         self.dispatch_move(x, y)?;
+        let buttons_mask = match button {
+            "right" => 2,
+            "middle" => 4,
+            _ => 1,
+        };
+        for n in 1..=count.max(1) {
+            let base = json!({ "x": x, "y": y, "button": button, "clickCount": n });
+            let mut down = base.clone();
+            down["type"] = json!("mousePressed");
+            down["buttons"] = json!(buttons_mask);
+            self.call("Input.dispatchMouseEvent", down).await?;
 
-        let base = json!({ "x": x, "y": y, "button": "left", "clickCount": 1 });
-        let mut down = base.clone();
-        down["type"] = json!("mousePressed");
-        down["buttons"] = json!(1);
-        self.call("Input.dispatchMouseEvent", down).await?;
-
-        let mut up = base;
-        up["type"] = json!("mouseReleased");
-        up["buttons"] = json!(0);
-        self.call("Input.dispatchMouseEvent", up).await?;
+            let mut up = base;
+            up["type"] = json!("mouseReleased");
+            up["buttons"] = json!(0);
+            self.call("Input.dispatchMouseEvent", up).await?;
+        }
         Ok(())
+    }
+
+    /// Make the page believe it has focus even though its window is not the
+    /// active one on any desktop. Without this, sites that check
+    /// `document.hasFocus()` (editors, some login forms) ignore typed input.
+    pub async fn set_focus_emulation(&self, enabled: bool) -> Result<()> {
+        self.call(
+            "Emulation.setFocusEmulationEnabled",
+            json!({ "enabled": enabled }),
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Where the viewport sits on the screen: `(origin_x, origin_y, dpr)` in
+    /// physical screen pixels, derived from `window.screenX/Y` plus the frame
+    /// chrome height. Best-effort - Chromium reports these in CSS pixels of the
+    /// primary display's scale, so multi-monitor mixed-DPI layouts can be off.
+    pub async fn viewport_origin(&self) -> Result<(f64, f64, f64)> {
+        let v = self
+            .eval(
+                "(() => { const dpr = window.devicePixelRatio || 1; \
+                 const ox = window.screenX + (window.outerWidth - window.innerWidth) / 2; \
+                 const oy = window.screenY + (window.outerHeight - window.innerHeight); \
+                 return { x: ox * dpr, y: oy * dpr, dpr }; })()",
+            )
+            .await?;
+        let f = |k: &str| v.get(k).and_then(|n| n.as_f64());
+        match (f("x"), f("y"), f("dpr")) {
+            (Some(x), Some(y), Some(d)) => Ok((x, y, d)),
+            _ => Err(BrowserError::Protocol {
+                method: "viewport_origin".into(),
+                detail: format!("unexpected payload: {v}"),
+            }),
+        }
+    }
+
+    /// The accessible view of the page - the CDP counterpart of a UIA walk.
+    ///
+    /// Every visible interactive element (plus headings and labelled text) with
+    /// an accessible NAME (aria-label, text, value, placeholder, alt, title), a
+    /// ROLE (explicit or derived from the tag), its viewport rect, and a selector
+    /// that survives re-renders: `#id` when the element has one, otherwise a
+    /// `data-ghost-id` attribute stamped on the element. Optional filters narrow
+    /// the walk by name substring (case-insensitive) and role.
+    pub async fn describe_accessible(
+        &self,
+        limit: usize,
+        name: Option<&str>,
+        role: Option<&str>,
+    ) -> Result<Value> {
+        let expr = format!(
+            r#"(() => {{
+                const wantName = {name};
+                const wantRole = {role};
+                const limit = {limit};
+                const roleOf = (el) => {{
+                    const r = el.getAttribute('role');
+                    if (r) return r.toLowerCase();
+                    const t = el.tagName.toLowerCase();
+                    const ty = (el.getAttribute('type') || '').toLowerCase();
+                    if (t === 'a') return 'hyperlink';
+                    if (t === 'button') return 'button';
+                    if (t === 'select') return 'combobox';
+                    if (t === 'textarea') return 'edit';
+                    if (t === 'input') {{
+                        if (ty === 'checkbox') return 'checkbox';
+                        if (ty === 'radio') return 'radiobutton';
+                        if (ty === 'submit' || ty === 'button' || ty === 'reset' || ty === 'image') return 'button';
+                        return 'edit';
+                    }}
+                    if (/^h[1-6]$/.test(t)) return 'heading';
+                    if (t === 'img') return 'image';
+                    if (t === 'li') return 'listitem';
+                    if (t === 'option') return 'listitem';
+                    if (el.isContentEditable) return 'edit';
+                    return 'text';
+                }};
+                const nameOf = (el) => {{
+                    const lab = el.getAttribute('aria-label');
+                    if (lab) return lab;
+                    const by = el.getAttribute('aria-labelledby');
+                    if (by) {{ const s = by.split(/\s+/).map(id => (document.getElementById(id) || {{}}).innerText || '').join(' ').trim(); if (s) return s; }}
+                    if (el.id) {{ const l = document.querySelector('label[for="' + CSS.escape(el.id) + '"]'); if (l && l.innerText.trim()) return l.innerText.trim(); }}
+                    const t = el.tagName.toLowerCase();
+                    if (t === 'input' || t === 'textarea' || t === 'select') {{
+                        return (el.placeholder || el.value || el.getAttribute('name') || el.title || '').toString();
+                    }}
+                    if (t === 'img') return el.alt || el.title || '';
+                    const txt = (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ');
+                    return txt || el.title || el.value || '';
+                }};
+                const sel = 'a,button,input,select,textarea,[role],[onclick],[contenteditable=""],[contenteditable="true"],h1,h2,h3,h4,h5,h6,label,summary';
+                const out = [];
+                let stamp = 0;
+                const vw = window.innerWidth, vh = window.innerHeight;
+                for (const el of document.querySelectorAll(sel)) {{
+                    if (out.length >= limit) break;
+                    const r = el.getBoundingClientRect();
+                    if (r.width === 0 || r.height === 0) continue;
+                    if (r.right < 0 || r.bottom < 0 || r.left > vw || r.top > vh) continue;
+                    const style = window.getComputedStyle(el);
+                    if (style.visibility === 'hidden' || style.display === 'none') continue;
+                    const role = roleOf(el);
+                    const name = nameOf(el).slice(0, 160);
+                    if (wantRole && role !== wantRole) continue;
+                    if (wantName && !name.toLowerCase().includes(wantName)) continue;
+                    let selector;
+                    if (el.id) {{ selector = '#' + CSS.escape(el.id); }}
+                    else {{
+                        if (!el.dataset.ghostId) {{ el.dataset.ghostId = String(Date.now() % 100000) + '-' + (stamp++); }}
+                        selector = '[data-ghost-id="' + el.dataset.ghostId + '"]';
+                    }}
+                    out.push({{
+                        name, role, selector,
+                        left: Math.round(r.left), top: Math.round(r.top),
+                        right: Math.round(r.right), bottom: Math.round(r.bottom),
+                        enabled: !(el.disabled || el.getAttribute('aria-disabled') === 'true'),
+                        value: ('value' in el && typeof el.value === 'string') ? el.value.slice(0, 200) : (el.isContentEditable ? (el.innerText || '').slice(0, 200) : null)
+                    }});
+                }}
+                return out;
+            }})()"#,
+            name = name
+                .map(|n| js_string(&n.to_lowercase()))
+                .unwrap_or_else(|| "null".into()),
+            role = role
+                .map(|r| js_string(&r.to_lowercase()))
+                .unwrap_or_else(|| "null".into()),
+            limit = limit,
+        );
+        self.eval(&expr).await
+    }
+
+    /// Current value / text of the element behind `selector` (the read-back that
+    /// verifies a type).
+    pub async fn value_of(&self, selector: &str) -> Result<String> {
+        let expr = format!(
+            "(() => {{ const e = document.querySelector({}); if (!e) return null; \
+             return ('value' in e && typeof e.value === 'string') ? e.value : (e.innerText || e.textContent || ''); }})()",
+            js_string(selector)
+        );
+        let v = self.eval(&expr).await?;
+        if v.is_null() {
+            return Err(BrowserError::SelectorNotFound { selector: selector.to_string(), ms: 0 });
+        }
+        Ok(v.as_str().unwrap_or_default().to_string())
     }
 
     /// Move the pointer over an element to trigger hover states.

@@ -189,6 +189,45 @@ impl UiaTree {
         }
     }
 
+    /// `describe_screen` scoped to the window behind `hwnd`, rooted by handle
+    /// rather than by title. A title lookup among the desktop's children can
+    /// land on the wrong top-level element for apps that own several windows
+    /// with the same title (Chromium has helper windows), and returns an empty
+    /// walk; a handle is unambiguous.
+    pub fn describe_hwnd(&self, hwnd: isize) -> Result<Vec<ElementDescriptor>, CoreError> {
+        unsafe {
+            let root = self
+                .automation
+                .ElementFromHandle(HWND(hwnd as *mut _))
+                .map_err(|e| CoreError::ComInit(e.to_string()))?;
+            let walker = self.get_walker()?;
+            let mut results = Vec::new();
+            let mut budget = DESCRIBE_NODE_BUDGET;
+            self.collect_interactive(&root, &mut results, 0, &walker, &mut budget)?;
+            Ok(results)
+        }
+    }
+
+    /// `collect_text` scoped to the window behind `hwnd` (see `describe_hwnd`).
+    pub fn collect_text_in_hwnd(
+        &self,
+        hwnd: isize,
+        max_chars: usize,
+    ) -> Result<(String, bool), CoreError> {
+        unsafe {
+            let root = self
+                .automation
+                .ElementFromHandle(HWND(hwnd as *mut _))
+                .map_err(|e| CoreError::ComInit(e.to_string()))?;
+            let walker = self.get_walker()?;
+            let mut out = String::new();
+            let mut budget = TEXT_NODE_BUDGET;
+            let truncated =
+                self.collect_text_rec(&root, &walker, 0, &mut budget, max_chars, &mut out)?;
+            Ok((out, truncated))
+        }
+    }
+
     /// Scoped role search: walks only the subtree rooted at `hwnd`.
     pub fn find_by_role_in_hwnd(
         &self,

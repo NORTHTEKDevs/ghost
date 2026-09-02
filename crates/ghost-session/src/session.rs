@@ -100,6 +100,8 @@ pub struct GhostSession {
     /// The window unanchored verbs act on (see `target.rs`): the last window the
     /// agent named or launched. Never the human's foreground by accident.
     pub(crate) anchor: Mutex<Option<crate::target::WindowTarget>>,
+    /// pid -> DevTools port memo for CDP routing (see `cdp_route.rs`).
+    pub(crate) cdp_ports: Mutex<crate::cdp_route::CdpPortCache>,
 }
 
 impl GhostSession {
@@ -140,6 +142,7 @@ impl GhostSession {
             #[cfg(windows)]
             desktops: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             anchor: Mutex::new(None),
+            cdp_ports: Mutex::new(crate::cdp_route::CdpPortCache::default()),
         })
     }
 
@@ -1860,13 +1863,21 @@ impl GhostSession {
         let cur_before = crate::engine::system::cursor_pos();
 
         // Find the element WITHIN that window's subtree - no foreground, no set_focus.
-        let el = match &by {
-            By::Name(n) => self.tree.find_by_name_in_hwnd(hwnd, n).map_err(GhostError::Core)?,
-            By::Role(r) => self.tree.find_by_role_in_hwnd(hwnd, r).map_err(GhostError::Core)?,
-            By::Description(d) => return Err(GhostError::Vision(format!(
+        // Chromium builds its accessibility tree lazily: the first UIA query on a
+        // fresh window switches it on and sees almost nothing, so a miss on a
+        // Chromium window is retried once after a short pause.
+        let lookup = || match &by {
+            By::Name(n) => self.tree.find_by_name_in_hwnd(hwnd, n).map_err(GhostError::Core),
+            By::Role(r) => self.tree.find_by_role_in_hwnd(hwnd, r).map_err(GhostError::Core),
+            By::Description(d) => Err(GhostError::Vision(format!(
                 "ghost_act background: description targets need vision grounding (foreground); desc={d}"
             ))),
         };
+        let mut el = lookup()?;
+        if el.is_none() && crate::hidden::is_chromium_window(hwnd) {
+            tokio::time::sleep(Duration::from_millis(450)).await;
+            el = lookup()?;
+        }
         let el = el.map(crate::GhostElement::new).ok_or_else(|| GhostError::ElementNotFound {
             query: format!("{by:?} in window '{window}'"),
             screenshot: None,

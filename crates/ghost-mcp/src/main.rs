@@ -681,12 +681,30 @@ fn dispatch_tool_inner<'a>(
         // foreground; every such response reports what it targeted.
         let prepared = prepare_window_target(session, name, args).await?;
         let args: &Value = prepared.args.as_ref().unwrap_or(args);
+        // A Chromium window whose process exposes a DevTools port is driven
+        // through CDP (ghost_session::cdp_route): DOM names, trusted input into
+        // the right renderer, full key combos, and no way to touch the
+        // foreground. Any surface - the user's desktop or a hidden one.
+        if let Some(t) = prepared.target.as_ref() {
+            if let Some(route) = session.cdp_route_for(t).await {
+                let result = dispatch_cdp(session, name, args, t, &route).await;
+                let result = result.map(|mut v| {
+                    if let Some(m) = v.as_object_mut() {
+                        m.insert("route".into(), route.to_json());
+                    }
+                    v
+                });
+                let result = enrich_not_found(session, result, args, t, Some(&route)).await;
+                return attach_target(session, result, prepared.target);
+            }
+        }
         // A window on one of Ghost's hidden desktops is driven through that
         // desktop's own worker (ghost_session::hidden); the user-desktop verbs
         // below cannot see it at all.
         #[cfg(windows)]
         if let Some(t) = prepared.target.as_ref().filter(|t| t.is_hidden()) {
             let result = dispatch_hidden(session, name, args, t).await;
+            let result = enrich_not_found(session, result, args, t, None).await;
             return attach_target(session, result, prepared.target);
         }
         // Route lean verbs first, fall through to legacy handle_tool for all others.
@@ -704,8 +722,319 @@ fn dispatch_tool_inner<'a>(
             // All other names (lean verbs with existing impls + all 48 legacy aliases).
             _ => handle_tool(session, name, args).await,
         };
+        let result = match prepared.target.as_ref() {
+            Some(t) => enrich_not_found(session, result, args, t, None).await,
+            None => result,
+        };
         attach_target(session, result, prepared.target)
     })
+}
+
+/// Append "did you mean" names to an element-not-found error.
+///
+/// A miss used to cost the agent a `ghost_see` round trip just to learn what the
+/// window calls the thing. One extra walk of the target window here (a few tens
+/// of milliseconds through CDP, ~100 ms through UIA) puts the closest names in
+/// the error instead. Only for lookups by name; a role miss has no spelling.
+async fn enrich_not_found(
+    session: &GhostSession,
+    result: std::result::Result<Value, String>,
+    args: &Value,
+    t: &WindowTarget,
+    route: Option<&ghost_session::cdp_route::CdpRoute>,
+) -> std::result::Result<Value, String> {
+    let Err(msg) = result else { return result };
+    let lower = msg.to_lowercase();
+    let is_miss = lower.contains("not found") || lower.contains("out of range");
+    let query = args["name"].as_str().or_else(|| args["until_name"].as_str());
+    let (Some(query), true) = (query, is_miss) else { return Err(msg) };
+    let names: Vec<String> = if let Some(r) = route {
+        session
+            .cdp_describe(r, 400, None, None)
+            .await
+            .map(|els| els.into_iter().map(|e| e.name).collect())
+            .unwrap_or_default()
+    } else {
+        #[cfg(windows)]
+        let els = if t.is_hidden() {
+            session.hidden_describe(t).await.ok()
+        } else {
+            session.describe_screen(Some(&t.title)).await.ok()
+        };
+        #[cfg(not(windows))]
+        let els = session.describe_screen(Some(&t.title)).await.ok();
+        els.map(|v| v.into_iter().map(|e| e.name).collect()).unwrap_or_default()
+    };
+    match ghost_session::suggest::did_you_mean(query, names, 8) {
+        Some(hint) => Err(format!("{msg}. {hint}")),
+        None => Err(msg),
+    }
+}
+
+/// The window-scoped verbs through CDP for a window whose browser exposes a
+/// DevTools port. Coordinates in results are page-viewport pixels (the page's
+/// own frame of reference; `coords: "viewport"` says so), and `ghost_click_at`
+/// converts the screen coordinates it is given.
+async fn dispatch_cdp(
+    session: &GhostSession,
+    name: &str,
+    p: &Value,
+    t: &WindowTarget,
+    r: &ghost_session::cdp_route::CdpRoute,
+) -> std::result::Result<Value, String> {
+    let err = |e: ghost_session::GhostError| e.to_string();
+    let limit_of = |p: &Value| match p.get("limit").and_then(|v| v.as_u64()) {
+        Some(0) => 5_000usize,
+        Some(n) => n as usize,
+        None => DEFAULT_ELEMENT_LIMIT,
+    };
+    match name {
+        "ghost_see" => match p["mode"].as_str().unwrap_or("full") {
+            "text" => {
+                let max_chars = p
+                    .get("limit")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as usize)
+                    .filter(|v| *v > 0)
+                    .unwrap_or(20_000);
+                let mut text = r.tab.text("").await.map_err(|e| e.to_string())?;
+                let truncated = text.len() > max_chars;
+                if truncated {
+                    let mut cut = max_chars;
+                    while cut > 0 && !text.is_char_boundary(cut) {
+                        cut -= 1;
+                    }
+                    text.truncate(cut);
+                }
+                Ok(json!({ "text": text, "chars": text.len(), "truncated": truncated, "coords": "viewport" }))
+            }
+            _ => {
+                let els = session.cdp_describe(r, limit_of(p), None, None).await.map_err(err)?;
+                let descriptors: Vec<_> = els.iter().map(|e| e.to_descriptor()).collect();
+                let mut out = elements_response(&descriptors, p);
+                out["coords"] = json!("viewport");
+                Ok(out)
+            }
+        },
+        "ghost_snapshot" => {
+            let els = session.cdp_describe(r, limit_of(p), None, None).await.map_err(err)?;
+            let descriptors: Vec<_> = els.iter().map(|e| e.to_descriptor()).collect();
+            let mut out = snapshot_response(&descriptors, p);
+            out["coords"] = json!("viewport");
+            Ok(out)
+        }
+        "ghost_find" => {
+            let by = parse_by(p)?;
+            let idx = p["index"].as_u64().map(|i| i as usize);
+            let (e, matches) = session.cdp_find(r, &by, idx).await.map_err(|e| format!("ghost_find: {e}"))?;
+            let (cx, cy) = e.center();
+            Ok(json!({
+                "ok": true, "name": e.name, "role": e.role, "selector": e.selector,
+                "center": { "x": cx, "y": cy },
+                "rect": { "left": e.rect.0, "top": e.rect.1, "right": e.rect.2, "bottom": e.rect.3 },
+                "has_rect": true, "hwnd": t.hwnd, "window": t.title, "source": "cdp",
+                "confidence": 1.0, "dispatch_mode": "cdp", "index": idx, "matches": matches,
+                "escalated": false, "coords": "viewport",
+            }))
+        }
+        "ghost_act" => {
+            let action = p["action"]
+                .as_str()
+                .ok_or("missing param: action (click|type|double_click|right_click|hover)")?;
+            let text = p["text_input"].as_str().or_else(|| p["text"].as_str());
+            let by = parse_by(p)?;
+            let (e, _) = session.cdp_find(r, &by, None).await.map_err(err)?;
+            if !e.enabled {
+                return Err(format!("Element not interactable: {} - element is disabled", e.name));
+            }
+            let (cx, cy) = e.center();
+            let tab = &r.tab;
+            let (verified, note): (Option<bool>, Option<String>) = match action {
+                "click" => {
+                    tab.click(&e.selector, 5_000).await.map_err(|x| x.to_string())?;
+                    (Some(true), None)
+                }
+                "double_click" => {
+                    let (x, y) = tab.element_center(&e.selector).await.map_err(|x| x.to_string())?;
+                    tab.click_at_ex(x, y, "left", 2).await.map_err(|x| x.to_string())?;
+                    (Some(true), None)
+                }
+                "right_click" => {
+                    let (x, y) = tab.element_center(&e.selector).await.map_err(|x| x.to_string())?;
+                    tab.click_at_ex(x, y, "right", 1).await.map_err(|x| x.to_string())?;
+                    (Some(true), Some("context menu events dispatched to the page; native browser context menus are not visible to CDP".into()))
+                }
+                "hover" => {
+                    tab.hover(&e.selector, 5_000).await.map_err(|x| x.to_string())?;
+                    (Some(true), None)
+                }
+                "type" => {
+                    let value = text.ok_or("ghost_act: action=type requires text_input")?;
+                    let clear = p["clear"].as_bool().unwrap_or(true);
+                    tab.type_text(&e.selector, value, clear).await.map_err(|x| x.to_string())?;
+                    // Read back through the DOM: the value the page holds is the
+                    // only honest verification of a type.
+                    let got = tab.value_of(&e.selector).await.unwrap_or_default();
+                    let ok = got.contains(value);
+                    (Some(ok), if ok { None } else { Some(format!("read-back {:?} does not contain the typed text; the field may be controlled by a framework that rewrites it", got.chars().take(80).collect::<String>())) })
+                }
+                other => return Err(format!("ghost_act: unknown action '{other}' (use click|type|double_click|right_click|hover)")),
+            };
+            let mut out = json!({
+                "ok": true, "mode": "cdp", "action": action, "name": e.name, "selector": e.selector,
+                "center": { "x": cx, "y": cy }, "coords": "viewport", "window": t.title,
+                "verified": verified, "focus_preserved": true, "cursor_preserved": true,
+            });
+            if let Some(n) = note {
+                out["note"] = Value::String(n);
+            }
+            Ok(out)
+        }
+        "ghost_key" => {
+            let keys = p["keys"].as_str().ok_or("ghost_key: missing 'keys' param")?;
+            let (mods, key) = parse_key_combo(keys)?;
+            r.tab.press(&key, &mods).await.map_err(|e| e.to_string())?;
+            Ok(json!({
+                "ok": true, "mode": "cdp", "key": keys, "window": t.title,
+                "focus_preserved": true, "cursor_preserved": true, "verified": Value::Null,
+                "note": "trusted key event dispatched to the page's focused element (modifier combos are supported through CDP)",
+            }))
+        }
+        "ghost_click_at" => {
+            let x = p["x"].as_i64().ok_or("missing param: x")? as i32;
+            let y = p["y"].as_i64().ok_or("missing param: y")? as i32;
+            let viewport = p["coords"].as_str() == Some("viewport");
+            let (vx, vy) = if viewport {
+                (x as f64, y as f64)
+            } else {
+                session.cdp_screen_to_viewport(r, x, y).await.map_err(err)?
+            };
+            r.tab.click_at(vx, vy).await.map_err(|e| e.to_string())?;
+            Ok(json!({
+                "ok": true, "mode": "cdp", "action": "click_at", "x": x, "y": y,
+                "viewport": { "x": vx, "y": vy }, "window": t.title,
+                "verified": Value::Null, "focus_preserved": true, "cursor_preserved": true,
+            }))
+        }
+        "ghost_scroll" => {
+            let direction = p["direction"].as_str().ok_or("missing param: direction")?;
+            let amount = p["amount"].as_i64().unwrap_or(3).max(1) as f64;
+            let step = 120.0 * amount;
+            let (dx, dy) = match direction {
+                "up" => (0.0, -step),
+                "down" => (0.0, step),
+                "left" => (-step, 0.0),
+                "right" => (step, 0.0),
+                other => return Err(format!("ghost_scroll: unknown direction '{other}'; use up|down|left|right")),
+            };
+            if p.get("until_name").is_some() || p.get("until_role").is_some() {
+                let by = if let Some(n) = p["until_name"].as_str() {
+                    ghost_session::By::name(n)
+                } else {
+                    ghost_session::By::role(p["until_role"].as_str().unwrap_or(""))
+                };
+                let max_scrolls = p["max_scrolls"].as_u64().unwrap_or(20).min(100);
+                for _ in 0..max_scrolls {
+                    if session.cdp_find(r, &by, None).await.is_ok() {
+                        return Ok(json!({ "ok": true, "found": true, "mode": "cdp" }));
+                    }
+                    r.tab.scroll("", dx, dy).await.map_err(|e| e.to_string())?;
+                    tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+                }
+                let found = session.cdp_find(r, &by, None).await.is_ok();
+                return Ok(json!({ "ok": found, "found": found, "mode": "cdp" }));
+            }
+            r.tab.scroll("", dx, dy).await.map_err(|e| e.to_string())?;
+            Ok(json!({ "ok": true, "mode": "cdp", "window": t.title, "direction": direction, "amount": amount }))
+        }
+        "ghost_assert" => {
+            let predicate = p["predicate"].as_str().ok_or("ghost_assert: missing 'predicate' param")?;
+            match predicate {
+                "element-exists" => {
+                    let by = parse_by(p)?;
+                    session.cdp_find(r, &by, None).await.map_err(|e| format!("assert failed: element not found - {e}"))?;
+                    Ok(json!({ "ok": true, "predicate": predicate, "passed": true }))
+                }
+                "value-equals" | "value-contains" => {
+                    let expected = p["text"].as_str().ok_or("ghost_assert: value-equals/value-contains requires 'text'")?;
+                    let by = parse_by(p)?;
+                    let (e, _) = session.cdp_find(r, &by, None).await.map_err(|e| format!("assert failed: element not found - {e}"))?;
+                    let actual = r.tab.value_of(&e.selector).await.unwrap_or_default();
+                    let passed = if predicate == "value-equals" { actual == expected } else { actual.contains(expected) };
+                    if passed {
+                        Ok(json!({ "ok": true, "predicate": predicate, "passed": true, "value": actual }))
+                    } else {
+                        Err(format!("assert failed: predicate={predicate}, expected={expected:?}, actual={actual:?}"))
+                    }
+                }
+                "text-present" | "text-absent" => {
+                    let needle = p["text"].as_str().ok_or("ghost_assert: text-present/text-absent requires 'text'")?;
+                    let body = r.tab.text("").await.map_err(|e| e.to_string())?;
+                    let found = body.contains(needle);
+                    let expected = predicate == "text-present";
+                    if found == expected {
+                        Ok(json!({ "ok": true, "predicate": predicate, "passed": true }))
+                    } else {
+                        Err(format!("assert failed: predicate={predicate}, text={needle:?}, found={found}"))
+                    }
+                }
+                other => Err(format!("ghost_assert: unknown predicate '{other}'")),
+            }
+        }
+        "ghost_wait" => match p["for"].as_str().unwrap_or("ms") {
+            "element" => {
+                let appears = p["appears"].as_bool().unwrap_or(true);
+                let timeout_ms = p["timeout_ms"].as_u64().unwrap_or(5000);
+                let by = parse_by(p)?;
+                let start = std::time::Instant::now();
+                loop {
+                    let present = session.cdp_find(r, &by, None).await.is_ok();
+                    if present == appears {
+                        return Ok(json!({ "ok": true, "appeared": appears }));
+                    }
+                    if start.elapsed() >= std::time::Duration::from_millis(timeout_ms) {
+                        return Err(format!("Timeout after {timeout_ms}ms waiting for: wait_for_element:{by:?}:appears={appears} (cdp)"));
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+            }
+            "value" => {
+                let pred = p["predicate"].as_str().unwrap_or("equals");
+                let expected = p["text"].as_str().unwrap_or("");
+                let timeout_ms = p["timeout_ms"].as_u64().unwrap_or(5000);
+                let by = parse_by(p)?;
+                let start = std::time::Instant::now();
+                let read = || async {
+                    match session.cdp_find(r, &by, None).await {
+                        Ok((e, _)) => r.tab.value_of(&e.selector).await.unwrap_or_default(),
+                        Err(_) => String::new(),
+                    }
+                };
+                let initial = read().await;
+                loop {
+                    let value = read().await;
+                    let done = match pred {
+                        "contains" => value.contains(expected),
+                        "changes" => value != initial,
+                        _ => value == expected,
+                    };
+                    if done {
+                        return Ok(json!({ "ok": true, "value": value }));
+                    }
+                    if start.elapsed() >= std::time::Duration::from_millis(timeout_ms) {
+                        return Err(format!("Timeout after {timeout_ms}ms waiting for: value {pred} {expected:?} (last {value:?})"));
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+            }
+            "idle" => {
+                r.tab.wait_for_load(p["timeout_ms"].as_u64().unwrap_or(5000)).await.map_err(|e| e.to_string())?;
+                Ok(json!({ "ok": true, "idle": true, "mode": "cdp" }))
+            }
+            other => Err(format!("ghost_wait for={other} has no CDP path; use for=element, for=value or for=idle")),
+        },
+        other => Err(format!("{other} has no CDP path")),
+    }
 }
 
 /// The window-scoped verbs against a window on a hidden desktop. Same argument
