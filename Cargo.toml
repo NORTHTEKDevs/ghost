@@ -12,6 +12,7 @@ members = [
     "crates/ghost-linux",
     "crates/ghost-macos",
     "crates/ghost-browser",
+    "crates/ghost-testbed",
 ]
 resolver = "2"
 
@@ -35,6 +36,8 @@ windows = { version = "0.58", features = [
     "Win32_System_RemoteDesktop",
     "Win32_System_Threading",
     "Win32_System_Diagnostics_Debug",
+    "Win32_System_SystemInformation",
+    "Win32_System_LibraryLoader",
     "Wdk_System_Threading",
     "Win32_System_StationsAndDesktops",
     "Win32_UI_HiDpi",

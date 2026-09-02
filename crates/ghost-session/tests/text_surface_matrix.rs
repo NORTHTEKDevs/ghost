@@ -110,6 +110,14 @@ async fn probe(exe: &str, window_hint: &str, text: &str) -> Result<Probe, String
 #[tokio::test]
 #[ignore]
 async fn winui_document_surface_resolves_via_alias() {
+    // Windows 11 Notepad is a single-instance Store app that RESTORES THE
+    // USER'S OWN TABS into whatever instance starts, so typing into "the first
+    // document" can type into the user's unsaved file. Opt in explicitly, on a
+    // machine where that is acceptable.
+    if std::env::var("GHOST_LIVE_NOTEPAD").map(|v| v == "1").unwrap_or(false) == false {
+        eprintln!("SKIP winui_document_surface: set GHOST_LIVE_NOTEPAD=1 to drive Notepad (it restores the user's tabs)");
+        return;
+    }
     let p = probe("notepad.exe", "Notepad", "ghost-winui-probe")
         .await
         .expect("WinUI text surface must resolve");

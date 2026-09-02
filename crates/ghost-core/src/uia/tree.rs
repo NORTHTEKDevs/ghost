@@ -208,6 +208,84 @@ impl UiaTree {
         }
     }
 
+    /// `describe_hwnd` with the walker's `*BuildCache` variants, so each node's
+    /// properties arrive with the node (one cross-process call per node instead
+    /// of five). NOT wired into the product: measured 2026-09-01 on the live
+    /// Electron windows available (10-15 elements) it was equal to the plain
+    /// walk within noise (15-30 ms both) and returned one element fewer, and no
+    /// heavy tree was on screen to measure the case it exists for. Kept with
+    /// `tests/describe_walk_bench.rs` so the measurement can be repeated on a
+    /// large page before deciding.
+    pub fn describe_hwnd_cached(&self, hwnd: isize) -> Result<Vec<ElementDescriptor>, CoreError> {
+        unsafe {
+            let req = self.describe_cache_request()?;
+            let root = self
+                .automation
+                .ElementFromHandleBuildCache(HWND(hwnd as *mut _), &req)
+                .map_err(|e| CoreError::ComInit(e.to_string()))?;
+            let walker = self.get_walker()?;
+            let mut results = Vec::new();
+            let mut budget = DESCRIBE_NODE_BUDGET;
+            self.collect_interactive_cached(&root, &req, &walker, &mut results, 0, &mut budget)?;
+            Ok(results)
+        }
+    }
+
+    /// The cache request the describe walk uses: exactly the properties a
+    /// descriptor needs, fetched with the element in one round trip.
+    unsafe fn describe_cache_request(&self) -> Result<IUIAutomationCacheRequest, CoreError> {
+        let req = self
+            .automation
+            .CreateCacheRequest()
+            .map_err(|e| CoreError::ComInit(format!("CreateCacheRequest: {e}")))?;
+        for pid in [
+            UIA_NamePropertyId,
+            UIA_ControlTypePropertyId,
+            UIA_BoundingRectanglePropertyId,
+            UIA_IsEnabledPropertyId,
+        ] {
+            req.AddProperty(pid)
+                .map_err(|e| CoreError::ComInit(format!("AddProperty {pid:?}: {e}")))?;
+        }
+        Ok(req)
+    }
+
+    /// `collect_interactive` with the walker's `*BuildCache` variants: each node
+    /// arrives with its four properties already attached, so the walk costs one
+    /// cross-process call per node instead of five.
+    unsafe fn collect_interactive_cached(
+        &self,
+        element: &IUIAutomationElement,
+        req: &IUIAutomationCacheRequest,
+        walker: &IUIAutomationTreeWalker,
+        results: &mut Vec<ElementDescriptor>,
+        depth: usize,
+        budget: &mut usize,
+    ) -> Result<(), CoreError> {
+        if results.len() >= 500 || depth > 50 || *budget == 0 {
+            return Ok(());
+        }
+        *budget -= 1;
+        if let Some(desc) = super::cached_walker::descriptor_from_cached(element) {
+            if INTERACTIVE_ROLES.contains(&desc.role.as_str())
+                && !desc.name.is_empty()
+                && desc.right > desc.left
+                && desc.bottom > desc.top
+            {
+                results.push(desc);
+            }
+        }
+        let mut child = walker.GetFirstChildElementBuildCache(element, req).ok();
+        while let Some(c) = child {
+            self.collect_interactive_cached(&c, req, walker, results, depth + 1, budget)?;
+            if results.len() >= 500 || *budget == 0 {
+                break;
+            }
+            child = walker.GetNextSiblingElementBuildCache(&c, req).ok();
+        }
+        Ok(())
+    }
+
     /// `collect_text` scoped to the window behind `hwnd` (see `describe_hwnd`).
     pub fn collect_text_in_hwnd(
         &self,
@@ -298,7 +376,13 @@ impl UiaTree {
         }
         *budget -= 1;
         let el = UiaElement(element.clone());
-        if el.name().to_lowercase().contains(name) {
+        // depth > 0: never match the subtree ROOT. When the search is scoped to a
+        // window, the root IS that window, and its name is the title - so a search
+        // for a control whose name also appears in the title (a "Quit" button in
+        // "Ghost Testbed quit", a "Save" button in "Save dialog") returned the
+        // frame, whose handle accepts BM_CLICK and does nothing. The role search
+        // has always had this guard; the name search did not.
+        if depth > 0 && el.name().to_lowercase().contains(name) {
             return Ok(Some(el));
         }
         let mut child = walker.GetFirstChildElement(element).ok();

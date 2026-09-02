@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use ghost_session::{GhostSession, LocateMode, Target, TargetSource, WindowTarget};
 
+mod audit;
 mod ext;
 use std::io::{BufRead, Write};
 use std::sync::OnceLock;
@@ -341,6 +342,8 @@ fn main() {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .init();
+    // Independent proof that the foreground is never taken: see audit.rs.
+    audit::start();
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -453,6 +456,9 @@ async fn async_main() {
             // later (observed on this machine after the server lost a task).
             let deadline = tool_deadline(req.params.as_ref());
             let label = tool_label(&req);
+            // Registered as in flight so the audit can name the call if the
+            // foreground changes synthetically while it runs.
+            let _in_flight = audit::begin(&label);
             let work_session = session.clone();
             let method = req.method.clone();
             let params = req.params.clone();
@@ -641,13 +647,25 @@ fn encode_response<T: Serialize>(value: &T) -> Vec<u8> {
     }
 }
 
+fn pretty_json() -> bool {
+    matches!(std::env::var("GHOST_PRETTY_JSON"), Ok(v) if matches!(v.trim(), "1" | "true" | "on"))
+}
+
 /// Wrap a tool dispatch result into an MCP content[] envelope.
 /// On success: {content:[{type:"text",text:<pretty json>}]}
 /// On error:   {content:[{type:"text",text:<msg>}], isError:true}
 fn wrap_tool_result(r: std::result::Result<Value, (i64, String)>) -> Value {
     match r {
         Ok(v) => {
-            let text = serde_json::to_string_pretty(&v).unwrap_or_else(|_| v.to_string());
+            // Compact by default: the reader is a model, and pretty-printing a
+            // 150-element describe adds roughly two tokens per key (newline +
+            // indent) - measured ~35% of the payload. GHOST_PRETTY_JSON=1 restores
+            // the indented form for humans reading a transcript.
+            let text = if pretty_json() {
+                serde_json::to_string_pretty(&v).unwrap_or_else(|_| v.to_string())
+            } else {
+                serde_json::to_string(&v).unwrap_or_else(|_| v.to_string())
+            };
             json!({ "content": [{ "type": "text", "text": text }] })
         }
         Err((_code, msg)) => {
@@ -843,7 +861,20 @@ async fn dispatch_cdp(
                 .ok_or("missing param: action (click|type|double_click|right_click|hover)")?;
             let text = p["text_input"].as_str().or_else(|| p["text"].as_str());
             let by = parse_by(p)?;
-            let (e, _) = session.cdp_find(r, &by, None).await.map_err(err)?;
+            // For type by name, a <label> carries the field's name too: prefer an
+            // editable match (input/textarea/contenteditable) over the label.
+            let (e, _) = match (&by, action) {
+                (ghost_session::By::Name(n), "type") => {
+                    let matches = session.cdp_describe(r, 16, Some(n), None).await.map_err(err)?;
+                    let total = matches.len();
+                    let pos = matches.iter().position(|m| m.role == "edit" || m.role == "combobox" || m.value.is_some()).unwrap_or(0);
+                    match matches.into_iter().nth(pos) {
+                        Some(m) => (m, total),
+                        None => session.cdp_find(r, &by, None).await.map_err(err)?,
+                    }
+                }
+                _ => session.cdp_find(r, &by, None).await.map_err(err)?,
+            };
             if !e.enabled {
                 return Err(format!("Element not interactable: {} - element is disabled", e.name));
             }
@@ -1914,6 +1945,7 @@ async fn handle_tool(
                 "uia_mirror": serde_json::to_value(uia_stats).map_err(|e| e.to_string())?,
                 "locator": serde_json::to_value(loc_stats).map_err(|e| e.to_string())?,
                 "grounding": serde_json::to_value(grounding).map_err(|e| e.to_string())?,
+                "interference_audit": audit::snapshot(),
             }))
         }
         "ghost_render_marks" => {

@@ -63,6 +63,25 @@ impl Region {
     }
 }
 
+/// Read-back is the only honest verification of a type. Providers update their
+/// accessible value asynchronously (Chromium's AX tree in particular), so poll
+/// briefly instead of judging one stale read. Newlines are folded because some
+/// providers store `\r\n` for a typed `\n`.
+async fn read_back_matches(el: crate::GhostElement, want: &str) -> (crate::GhostElement, bool) {
+    let fold = |s: &str| s.replace("\r\n", "\n");
+    let deadline = std::time::Instant::now() + Duration::from_millis(600);
+    loop {
+        let got = el.get_text();
+        if got.trim() == want.trim() || fold(&got).contains(&fold(want)) {
+            return (el, true);
+        }
+        if std::time::Instant::now() >= deadline {
+            return (el, false);
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
 /// Upper bound on the on-device WinRT OCR call (typical cost is 50-200ms).
 const OCR_TIMEOUT_MS: u64 = 3000;
 
@@ -1866,18 +1885,34 @@ impl GhostSession {
         // Chromium builds its accessibility tree lazily: the first UIA query on a
         // fresh window switches it on and sees almost nothing, so a miss on a
         // Chromium window is retried once after a short pause.
+        // For action=type by NAME the label next to a field carries the field's
+        // name and comes first in the tree (the Win32 proxy names an EDIT after
+        // its STATIC), so among the name matches the first editable role wins.
         let lookup = || match &by {
+            By::Name(n) if action == "type" => {
+                let all = self.tree.find_all_in_hwnd(hwnd, Some(n), None, 16).map_err(GhostError::Core)?;
+                let pos = all
+                    .iter()
+                    .position(|el| crate::engine::uia::patterns::is_editable_role(el.control_type()))
+                    .unwrap_or(0);
+                Ok(all.into_iter().nth(pos))
+            }
             By::Name(n) => self.tree.find_by_name_in_hwnd(hwnd, n).map_err(GhostError::Core),
             By::Role(r) => self.tree.find_by_role_in_hwnd(hwnd, r).map_err(GhostError::Core),
             By::Description(d) => Err(GhostError::Vision(format!(
                 "ghost_act background: description targets need vision grounding (foreground); desc={d}"
             ))),
         };
-        let mut el = lookup()?;
-        if el.is_none() && crate::hidden::is_chromium_window(hwnd) {
-            tokio::time::sleep(Duration::from_millis(450)).await;
-            el = lookup()?;
-        }
+        // The raw COM element must not be alive across the await (it is not
+        // Send), so the retry arm holds nothing while it sleeps.
+        let el = match lookup()? {
+            Some(e) => Some(e),
+            None if crate::hidden::is_chromium_window(hwnd) => {
+                tokio::time::sleep(Duration::from_millis(450)).await;
+                lookup()?
+            }
+            None => None,
+        };
         let el = el.map(crate::GhostElement::new).ok_or_else(|| GhostError::ElementNotFound {
             query: format!("{by:?} in window '{window}'"),
             screenshot: None,
@@ -1940,24 +1975,55 @@ impl GhostSession {
             Ok(())
         };
 
+        let mut typed_via: &str = "";
         let (verified, note): (Option<bool>, Option<&str>) = match action {
             "type" => {
                 let t = text.ok_or_else(|| GhostError::Vision("ghost_act: action=type requires text param".into()))?;
                 let via_message = ctrl_hwnd != 0;
+                let mut rung: &str;
+                let mut note: Option<&str> = None;
                 if via_message {
-                    // Real Win32 control: WM_SETTEXT. A failure here PROPAGATES - 
+                    // Real Win32 control: WM_SETTEXT. A failure here PROPAGATES -
                     // we do NOT silently fall back to the focus-stealing UIA path.
                     crate::engine::input::BackgroundClicker::set_text(ctrl_hwnd, t).map_err(GhostError::Core)?;
+                    rung = "wm_settext";
                 } else {
                     // Windowless control - UIA ValuePattern (may activate the window).
-                    el.type_text_background(t)?;
+                    rung = "value_pattern";
+                    if let Err(e) = el.type_text_background(t) {
+                        // No ValuePattern (contenteditable editors, some custom
+                        // widgets): go straight to the keystroke rung below.
+                        tracing::debug!("ValuePattern type failed, trying posted keys: {e}");
+                        rung = "";
+                    }
                 }
-                // Read back via ValuePattern.CurrentValue - no pixels needed.
-                let got = el.get_text();
-                let ok = got.trim() == t.trim() || got.contains(t);
-                (Some(ok), if via_message { None } else {
-                    Some("typed via UIA ValuePattern (windowless control) — the window may have activated; check focus_preserved")
-                })
+                let (el, mut ok) = if rung.is_empty() { (el, false) } else { read_back_matches(el, t).await };
+                if !ok && !via_message {
+                    // Second rung: give the field focus with a posted click at its
+                    // centre, then post the characters to whatever the window's
+                    // thread now reports as focused. Verified by the same read-back;
+                    // proven with the window active, unproven while inactive.
+                    let (sx, sy) = screen_center;
+                    crate::engine::input::BackgroundClicker::click_screen(hwnd_raw, sx, sy).map_err(GhostError::Core)?;
+                    tokio::time::sleep(Duration::from_millis(40)).await;
+                    let target = crate::engine::input::BackgroundClicker::focused_control(hwnd_raw);
+                    for ch in t.chars() {
+                        crate::engine::input::BackgroundClicker::send_char(target, ch).map_err(GhostError::Core)?;
+                    }
+                    rung = "posted_keys";
+                    let (_el, ok2) = read_back_matches(el, t).await;
+                    ok = ok2;
+                    if !ok {
+                        note = Some("neither the UIA ValuePattern nor posted keystrokes read back the text; the control may be framework-controlled - confirm by other means or use the foreground policy");
+                    }
+                }
+                if note.is_none() && rung == "value_pattern" {
+                    note = Some("typed via UIA ValuePattern (windowless control) - the window may have activated; check focus_preserved");
+                } else if note.is_none() && rung == "posted_keys" {
+                    note = Some("ValuePattern did not take; typed via a posted click + posted keystrokes and the field read the text back");
+                }
+                typed_via = rung;
+                (Some(ok), note)
             }
             "click" => {
                 let before = crate::engine::capture::capture_window_printwindow(hwnd_raw).ok();
@@ -2025,6 +2091,7 @@ impl GhostSession {
             "ok": true,
             "mode": "background",
             "action": action,
+            "via": typed_via,
             "name": name,
             "rect": rect_json,
             "window": win.name,

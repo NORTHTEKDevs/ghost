@@ -45,6 +45,7 @@ pub async fn dispatch(
                 "foreground_window": snap.foreground_title,
                 "cursor": [snap.cursor.0, snap.cursor.1],
                 "policy": session.focus_policy(),
+                "interference_audit": crate::audit::snapshot(),
             }))
         }
 

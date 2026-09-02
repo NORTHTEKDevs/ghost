@@ -467,67 +467,25 @@ def task_screenshot_element(g):
 
 
 def task_value_equals_assert(g):
-    """Assertion: value-equals reads a real element value (uses a fresh Notepad tab
-    so it never touches the user's open documents)."""
-    g.call("ghost_window", {"op": "launch", "exe": "notepad.exe"})
-    _sleep(1500)
-    g.call("ghost_wait", {"for": "idle", "window": "Notepad", "timeout_ms": 4000})
-    g.call("ghost_key", {"keys": "Ctrl+N", "window": "Notepad"})  # fresh tab
+    """Assertion: value-equals reads a real element value. Uses the Ghost Testbed
+    window (crates/ghost-testbed) on the hidden desktop: Notepad restores the
+    user's own tabs into any instance, so it must never be a bench target."""
+    exe = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "target", "release", "ghost-testbed.exe")
+    if not os.path.exists(exe):
+        return (False, "testbed not built (cargo build -p ghost-testbed --release)", None)
+    g.call("ghost_window", {"op": "launch", "exe": exe})
     _sleep(600)
     try:
-        g.call(
-            "ghost_act",
-            {
-                "action": "type",
-                "name": "Text editor",
-                "role": "document",
-                "text_input": "benchmark-value",
-            },
-        )
-        # Independent re-read of the field value via get_text (not the assert tool
-        # that could self-report), THEN the assert as a second signal.
-        renv, _, _ = g.data("ghost_get_text", {"role": "document"})
+        g.call("ghost_act", {"action": "type", "role": "edit", "text_input": "benchmark-value", "window": "Ghost Testbed"})
+        renv, _, _ = g.data("ghost_see", {"mode": "text", "window": "Ghost Testbed"})
         actual = renv.get("text", "") if isinstance(renv, dict) else (renv or "")
-        env, err, _ = g.call(
-            "ghost_assert",
-            {
-                "predicate": "value-contains",
-                "name": "Text editor",
-                "role": "document",
-                "text": "benchmark-value",
-            },
-        )
-        d = env.get("data") or {}
-        ok = (
-            (actual.strip() == "benchmark-value")
-            and (not err)
-            and d.get("passed") is True
-        )
-        return (
-            ok,
-            f"read_back={actual.strip()!r} assert_passed={d.get('passed')}",
-            "uia",
-        )
+        aenv, aerr, _ = g.data("ghost_assert", {"predicate": "value-contains", "role": "edit", "text": "benchmark-value", "window": "Ghost Testbed"})
+        passed = isinstance(aenv, dict) and aenv.get("passed") is True
+        ok = ("benchmark-value" in actual) and passed
+        first = actual.strip().splitlines()[0] if actual.strip() else ""
+        return (ok, f"read_back={first!r} assert_passed={passed}", None if ok else (aerr or "value mismatch"))
     finally:
-        # Discard the fresh tab; never save. All cleanup is scoped to Notepad so a
-        # stray dialog in another app can never be clicked.
-        g.call("ghost_key", {"keys": "Ctrl+A", "window": "Notepad"})
-        g.call("ghost_key", {"keys": "Delete", "window": "Notepad"})
-        g.call("ghost_key", {"keys": "Ctrl+W", "window": "Notepad"})
-        _sleep(500)
-        env, _, _ = g.call("ghost_see", {"mode": "fast", "window": "Notepad"})
-        els = (env.get("data") or {}).get("elements", [])
-        if any(e.get("name") == "Don't save" for e in els):
-            g.call(
-                "ghost_act",
-                {
-                    "action": "click",
-                    "name": "Don't save",
-                    "role": "button",
-                    "window": "Notepad",
-                },
-            )
-        _sleep(300)
+        g.call("ghost_desktop_close", {"id": "auto"})
 
 
 def task_clipboard_roundtrip(g):

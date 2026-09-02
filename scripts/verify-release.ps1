@@ -30,10 +30,12 @@ try {
     cargo test --workspace --release
     if ($LASTEXITCODE -ne 0) { $failed += 'workspace suite' }
 
-    Write-Host "`n=== 2/3 live desktop suite ===" -ForegroundColor Cyan
-    Write-Host 'Drives real windows. Do not touch the mouse or keyboard.' -ForegroundColor DarkGray
+    Write-Host "`n=== 2/3 live desktop suite (on a hidden desktop) ===" -ForegroundColor Cyan
+    Write-Host 'Drives real windows on a desktop you cannot see - keep working.' -ForegroundColor DarkGray
+    cargo build --release -p ghost-testbed
+    if ($LASTEXITCODE -ne 0) { $failed += 'testbed build' }
     $before = @(Get-Process Notepad -ErrorAction SilentlyContinue).Id
-    cargo test --workspace --release --no-fail-fast -- --ignored --test-threads=1
+    & (Join-Path $PSScriptRoot 'live-on-hidden-desktop.ps1')
     if ($LASTEXITCODE -ne 0) { $failed += 'live desktop suite' }
 
     # Some live tests drive WinUI apps, and killing the pid returned by launch()

@@ -105,6 +105,30 @@ fn find_in(
     }
 }
 
+/// For `action=type` by NAME: the label next to a field carries the same name
+/// as the field (the Win32 proxy names an EDIT after its STATIC), and the label
+/// comes first in the tree. Typing must land in the editable one, so among the
+/// name matches the first editable role wins; otherwise the first match.
+fn find_for_typing(tree: &UiaTree, hwnd: isize, by: &By) -> Result<(UiaElement, usize)> {
+    let By::Name(n) = by else { return find_in(tree, hwnd, by, None) };
+    let all = core(tree.find_all_in_hwnd(hwnd, Some(n), None, 16))?;
+    if all.is_empty() {
+        return find_in(tree, hwnd, by, None);
+    }
+    let total = all.len();
+    let pos = all
+        .iter()
+        .position(|el| patterns::is_editable_role(el.control_type()))
+        .unwrap_or(0);
+    all.into_iter()
+        .nth(pos)
+        .map(|el| (el, total))
+        .ok_or_else(|| GhostError::ElementNotFound {
+            query: format!("{by:?} in the hidden-desktop window"),
+            screenshot: None,
+        })
+}
+
 fn find_in_once(
     tree: &UiaTree,
     hwnd: isize,
@@ -145,6 +169,25 @@ fn find_in_once(
             query: format!("{by:?} (index {idx}, {total} match(es)) in the hidden-desktop window"),
             screenshot: None,
         })
+}
+
+/// An element's current text: the UIA value, or `WM_GETTEXT` on the control's
+/// own handle when the value is empty. The Win32 proxy reports an empty value
+/// for a classic EDIT on a non-displayed desktop while the control's text is
+/// readable directly; the text is also what the proxy uses as the NAME after
+/// typing, so name-based lookups of edits are not stable there - use role.
+fn element_value(el: &UiaElement) -> String {
+    let v = el.get_text();
+    if !v.is_empty() {
+        return v;
+    }
+    let ctrl = el.native_window_handle();
+    if ctrl != 0 {
+        if let Some(t) = BackgroundClicker::read_text(ctrl) {
+            return t;
+        }
+    }
+    v
 }
 
 /// PrintWindow before/after delta of the whole window. `None` when it cannot
@@ -373,7 +416,11 @@ impl GhostSession {
         let text = text.map(str::to_string);
         let out: Result<Value> = core(d.with_uia(move |tree| -> Result<Value> {
             let t_start = Instant::now();
-            let (el, _) = find_in(tree, hwnd, &by, None)?;
+            let (el, _) = if action == "type" {
+                find_for_typing(tree, hwnd, &by)?
+            } else {
+                find_in(tree, hwnd, &by, None)?
+            };
             let info = Located::of(&el);
             let t_find = t_start.elapsed().as_millis() as u64;
             let t_action_start = Instant::now();
@@ -462,7 +509,7 @@ impl GhostSession {
                     let deadline = Instant::now() + Duration::from_millis(600);
                     let mut ok = false;
                     loop {
-                        let got = el.get_text();
+                        let got = element_value(&el);
                         if got.trim() == value.trim() || fold(&got).contains(&fold(&value)) {
                             ok = true;
                             break;
@@ -620,7 +667,7 @@ impl GhostSession {
         let d = self.desktop_for(t).await?;
         let hwnd = t.hwnd;
         let v: Result<String> = core(d.with_uia(move |tree| {
-            find_in(tree, hwnd, &by, None).map(|(el, _)| el.get_text())
+            find_in(tree, hwnd, &by, None).map(|(el, _)| element_value(&el))
         }))?;
         v
     }

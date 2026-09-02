@@ -300,12 +300,21 @@ impl BackgroundClicker {
     /// which is the blind success this whole codebase exists to avoid. So: use the
     /// focused control when there genuinely is one, otherwise find a real text
     /// control, and if neither exists say so rather than posting into the void.
+    ///
+    /// Order matters, and it is NOT "focused first": on a freshly created window
+    /// the GUI thread's focus is often a BUTTON, where WM_SETTEXT rewrites the
+    /// button's label and WM_CHAR is discarded. Measured on the testbed - typing
+    /// landed one character and the read-back proved it. So a real text control
+    /// wins whenever the focused control is not one.
     pub fn text_target(window_hwnd_raw: isize) -> Option<isize> {
         let focused = Self::focused_control(window_hwnd_raw);
-        if focused != window_hwnd_raw && unsafe { IsWindow(hwnd_of(focused)) }.as_bool() {
+        let focused_is_real =
+            focused != window_hwnd_raw && unsafe { IsWindow(hwnd_of(focused)) }.as_bool();
+        if focused_is_real && Self::is_text_control(hwnd_of(focused)) {
             return Some(focused);
         }
         Self::first_text_control(window_hwnd_raw)
+            .or(if focused_is_real { Some(focused) } else { None })
     }
 
     /// Read a control's text with WM_GETTEXT. This is the read-back that turns a
@@ -316,27 +325,42 @@ impl BackgroundClicker {
             return None;
         }
         unsafe {
-            let len = SendMessageTimeoutW(
+            // `SendMessageTimeoutW` RETURNS whether the send succeeded; the
+            // message's own result arrives in the out parameter. Passing `None`
+            // here made `len` the success flag - 1 - so every read-back returned
+            // the FIRST CHARACTER of the control's text and typing verification
+            // reported TypePartial on text that had landed in full.
+            let mut text_len: usize = 0;
+            let sent = SendMessageTimeoutW(
                 hwnd,
                 WM_GETTEXTLENGTH,
                 WPARAM(0),
                 LPARAM(0),
                 SEND_MESSAGE_TIMEOUT_FLAGS(SMTO_ABORTIFHUNG),
                 1000,
-                None,
+                Some(&mut text_len),
             );
-            let len = len.0 as usize;
-            let mut buf = vec![0u16; len + 1];
-            SendMessageTimeoutW(
+            if sent.0 == 0 {
+                return None;
+            }
+            // +1 for the terminator, and a floor so an empty control still gets a
+            // buffer to write into.
+            let mut buf = vec![0u16; text_len.min(1 << 20) + 2];
+            let mut copied: usize = 0;
+            let sent = SendMessageTimeoutW(
                 hwnd,
                 WM_GETTEXT,
                 WPARAM(buf.len()),
                 LPARAM(buf.as_mut_ptr() as isize),
                 SEND_MESSAGE_TIMEOUT_FLAGS(SMTO_ABORTIFHUNG),
                 1000,
-                None,
+                Some(&mut copied),
             );
-            let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+            if sent.0 == 0 {
+                return None;
+            }
+            let end = copied.min(buf.len());
+            let end = buf[..end].iter().position(|&c| c == 0).unwrap_or(end);
             Some(String::from_utf16_lossy(&buf[..end]))
         }
     }

@@ -111,7 +111,7 @@ impl<'a> CachedTreeWalker<'a> {
     }
 }
 
-fn descriptor_from_cached(el: &IUIAutomationElement) -> Option<ElementDescriptor> {
+pub(crate) fn descriptor_from_cached(el: &IUIAutomationElement) -> Option<ElementDescriptor> {
     unsafe {
         let name = el.CachedName().ok()?.to_string();
         let ct = el.CachedControlType().ok()?.0 as u32;

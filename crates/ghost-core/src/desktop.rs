@@ -290,11 +290,25 @@ impl DesktopSession {
             };
             let read = || crate::input::BackgroundClicker::read_text(target).unwrap_or_default();
             let before = read();
-            for ch in t.chars() {
-                crate::input::BackgroundClicker::send_char(target, ch)?;
-            }
             if t.is_empty() {
                 return Ok(());
+            }
+            // WM_SETTEXT first: it is atomic and cannot land half the string.
+            // Posted characters are the fallback for controls that ignore it
+            // (measured: a classic EDIT on a non-displayed desktop accepted the
+            // first WM_CHAR and dropped the rest, so the posted path alone
+            // reported TypePartial).
+            if crate::input::BackgroundClicker::set_text(target, &t).is_ok() {
+                let deadline = std::time::Instant::now() + std::time::Duration::from_millis(400);
+                while std::time::Instant::now() < deadline {
+                    if read().contains(&t) {
+                        return Ok(());
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+            }
+            for ch in t.chars() {
+                crate::input::BackgroundClicker::send_char(target, ch)?;
             }
             // Let the posted characters drain: stop as soon as the expected text is
             // present, or when the value has held still across two reads.
@@ -394,7 +408,13 @@ impl DesktopSession {
         F: FnOnce(&crate::uia::tree::UiaTree) -> T + Send + 'static,
     {
         self.exec(move || {
-            crate::uia::init_com()?;
+            // The guard must OUTLIVE the tree: `init_com()?;` drops it at the
+            // semicolon, which calls CoUninitialize before the automation object
+            // is created. That only appeared to work because some other thread
+            // (GhostSession's own guard) kept the process MTA alive; in a process
+            // without one - the live test binary - every call here failed with
+            // CO_E_NOTINITIALIZED.
+            let _com = crate::uia::init_com()?;
             let tree = crate::uia::tree::UiaTree::new()?;
             Ok::<T, CoreError>(f(&tree))
         })?
@@ -436,7 +456,8 @@ impl DesktopSession {
 /// a non-displayed desktop where SendInput is refused. The read-back is the
 /// proof: SetValue reported success means nothing if the value did not change.
 fn type_text_via_uia(hwnd: isize, text: &str) -> Result<(), CoreError> {
-    crate::uia::init_com()?;
+    // See `with_uia`: the guard has to outlive the tree.
+    let _com = crate::uia::init_com()?;
     let tree = crate::uia::tree::UiaTree::new()?;
     for role in ["edit", "document", "combobox"] {
         let candidates = tree.find_all_in_hwnd(hwnd, None, Some(role), 10)?;
