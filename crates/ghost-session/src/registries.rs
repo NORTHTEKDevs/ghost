@@ -123,8 +123,9 @@ impl GhostSession {
             "browser": which.unwrap_or("default"),
             "mode": format!("{mode:?}").to_lowercase(),
         });
-        if opts.desktop.is_some() {
-            info["desktop"] = serde_json::Value::String(crate::hidden::AUTO_DESKTOP.into());
+        if let Some(desktop) = opts.desktop.as_deref() {
+            let _ = desktop;
+            info["desktop"] = serde_json::Value::String("auto".into());
             info["note"] = serde_json::Value::String(
                 "windowed browser started on the hidden desktop 'auto': never on your screen, \
                  never takes focus. Drive tabs with ghost_tab_*; the window itself is also \

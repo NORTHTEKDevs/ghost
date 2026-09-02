@@ -321,6 +321,24 @@ impl GhostSession {
     }
 }
 
+/// Off Windows there is no posted-wheel path yet; the background policy is not
+/// enforced there either, so the user-desktop scroll never routes here at
+/// runtime. The stub keeps the shared MCP dispatcher compiling on every engine.
+#[cfg(not(windows))]
+impl GhostSession {
+    pub async fn scroll_background(
+        &self,
+        t: &WindowTarget,
+        _direction: &str,
+        _amount: i32,
+    ) -> Result<Value> {
+        Err(GhostError::Config(format!(
+            "background scroll of '{}' is not available on this platform",
+            t.title
+        )))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
