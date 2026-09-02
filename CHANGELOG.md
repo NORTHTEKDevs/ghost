@@ -57,6 +57,18 @@
   assert, key combo, foreground unchanged, audit 0 (Comet's native title stays
   "Comet" there; the window-to-tab binding carries the route).
 
+- **Browsers cannot outlive the server that launched them.** Every browser
+  Ghost starts is assigned to a Windows job object with KILL_ON_JOB_CLOSE, so a
+  server that is killed, crashes, or has its terminal closed takes its browsers
+  with it (`ghost_browser_launch` reports `dies_with_server`). A startup sweep
+  ends the ones earlier servers already abandoned, recognising them by the
+  profile root on their command line and by a parent that is gone or whose pid
+  has been reused; `ghost_stats.orphan_sweep` lists what it ended. Found by
+  two headless Chromes from dead servers still running days later, 32 processes
+  between them. Measured: 10 browser processes before a hard `taskkill` of the
+  server, 0 after; a deliberately orphaned browser ended by the next server's
+  sweep.
+
 **Defects those tests found, all real and all fixed:** `read_text` returned only
 the FIRST CHARACTER of a control (the message result was discarded, so the
 length was the send's success flag) - every isolated-desktop typing check was

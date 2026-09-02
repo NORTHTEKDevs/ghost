@@ -1,6 +1,8 @@
 pub mod manager;
 #[cfg(windows)]
 pub mod cmdline;
+#[cfg(windows)]
+pub mod orphans;
 pub use manager::{find_pid_by_name, launch, kill};
 
 #[cfg(test)]

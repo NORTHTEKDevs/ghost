@@ -7,6 +7,7 @@ pub mod session;
 pub mod target;
 pub mod cdp_route;
 pub mod suggest;
+pub mod orphans;
 #[cfg(windows)]
 pub mod hidden;
 pub mod registries;

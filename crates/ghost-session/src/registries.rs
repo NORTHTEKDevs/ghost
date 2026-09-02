@@ -120,6 +120,7 @@ impl GhostSession {
             "id": id,
             "port": browser.port(),
             "pid": browser.pid(),
+            "dies_with_server": browser.job_bound(),
             "browser": which.unwrap_or("default"),
             "mode": format!("{mode:?}").to_lowercase(),
         });

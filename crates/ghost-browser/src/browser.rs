@@ -38,6 +38,11 @@ impl Browser {
         self.info.pid
     }
 
+    /// True when the process is in this server's kill-on-close job.
+    pub fn job_bound(&self) -> bool {
+        self.info.job_bound
+    }
+
     pub fn is_owned(&self) -> bool {
         self.owned
     }

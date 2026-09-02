@@ -78,9 +78,14 @@ impl Default for LaunchOptions {
 /// A profile directory unique to this process, so two ghost processes started at the
 /// same moment cannot collide on one Chrome profile lock.
 pub fn default_profile_dir() -> PathBuf {
+    profiles_root().join(format!("p{}", std::process::id()))
+}
+
+/// Where every Ghost-launched browser keeps its profile. The path is on each
+/// browser's command line, which is how the orphan sweep recognises them.
+pub fn profiles_root() -> PathBuf {
     let mut base = std::env::temp_dir();
     base.push("ghost-browser-profiles");
-    base.push(format!("p{}", std::process::id()));
     base
 }
 
@@ -209,9 +214,86 @@ pub fn base_args(opts: &LaunchOptions) -> Vec<String> {
     args
 }
 
+/// Browsers die with the server that launched them.
+///
+/// A Windows job object with KILL_ON_JOB_CLOSE, created once per process;
+/// every browser Ghost launches is assigned to it right after it starts. When
+/// this process ends - normally, by taskkill, or by a crash - the kernel closes
+/// the job's last handle and terminates every process in it. Before this, a
+/// server that was killed left its browsers running invisibly (two headless
+/// Chromes, 32 processes between them, found on 2026-09-01).
+#[cfg(windows)]
+pub mod job {
+    use std::sync::OnceLock;
+    use windows::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+    use windows::Win32::System::Threading::{OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE};
+
+    /// A kill-on-close job. Dropping it - or this process ending - ends its members.
+    pub struct Job(HANDLE);
+    unsafe impl Send for Job {}
+    unsafe impl Sync for Job {}
+
+    impl Job {
+        pub fn new() -> Result<Self, String> {
+            unsafe {
+                let h = CreateJobObjectW(None, windows::core::PCWSTR::null()).map_err(|e| e.to_string())?;
+                let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+                info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+                if let Err(e) = SetInformationJobObject(
+                    h,
+                    JobObjectExtendedLimitInformation,
+                    &info as *const _ as *const core::ffi::c_void,
+                    std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                ) {
+                    let _ = CloseHandle(h);
+                    return Err(e.to_string());
+                }
+                Ok(Job(h))
+            }
+        }
+
+        /// Put the process (and everything it starts from now on) in this job.
+        pub fn adopt(&self, pid: u32) -> Result<(), String> {
+            unsafe {
+                let p = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, false, pid)
+                    .map_err(|e| e.to_string())?;
+                let r = AssignProcessToJobObject(self.0, p).map_err(|e| e.to_string());
+                let _ = CloseHandle(p);
+                r
+            }
+        }
+    }
+
+    impl Drop for Job {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = CloseHandle(self.0);
+            }
+        }
+    }
+
+    static SERVER_JOB: OnceLock<Option<Job>> = OnceLock::new();
+
+    /// Bind the process to this server's lifetime. An error is reported, never
+    /// fatal: the next server's startup sweep ends a browser that slips through.
+    pub fn bind_to_this_process(pid: u32) -> Result<(), String> {
+        match SERVER_JOB.get_or_init(|| Job::new().ok()) {
+            Some(job) => job.adopt(pid),
+            None => Err("the server job object could not be created".into()),
+        }
+    }
+}
+
 /// A launched browser process plus the DevTools endpoint to talk to it.
 pub struct LaunchedBrowser {
     pub pid: u32,
+    /// The process is in this server's kill-on-close job: it cannot outlive us.
+    pub job_bound: bool,
     pub port: u16,
     pub ws_url: String,
     pub user_data_dir: PathBuf,
@@ -259,6 +341,17 @@ pub async fn launch(opts: &LaunchOptions) -> Result<LaunchedBrowser> {
         }
     };
 
+    #[cfg(windows)]
+    let job_bound = match job::bind_to_this_process(pid) {
+        Ok(()) => true,
+        Err(e) => {
+            tracing::warn!(pid, error = %e, "browser not bound to this server's lifetime; a later server's sweep ends it if this one dies");
+            false
+        }
+    };
+    #[cfg(not(windows))]
+    let job_bound = false;
+
     let port = wait_for_port(&port_file, opts.startup_timeout_ms).await?;
     let ws_url = browser_ws_url(port).await?;
 
@@ -271,6 +364,7 @@ pub async fn launch(opts: &LaunchOptions) -> Result<LaunchedBrowser> {
 
     Ok(LaunchedBrowser {
         pid,
+        job_bound,
         port,
         ws_url,
         user_data_dir: opts.user_data_dir.clone(),
@@ -413,6 +507,8 @@ pub async fn attach(port: u16) -> Result<LaunchedBrowser> {
     let ws_url = browser_ws_url(port).await?;
     Ok(LaunchedBrowser {
         pid: 0,
+        // Not ours: an attached browser belongs to whoever started it.
+        job_bound: false,
         port,
         ws_url,
         user_data_dir: PathBuf::new(),
@@ -549,6 +645,32 @@ mod tests {
     fn port_is_always_delegated_to_chrome_to_avoid_cross_process_races() {
         let args = base_args(&LaunchOptions::default());
         assert!(args.iter().any(|a| a == "--remote-debugging-port=0"));
+    }
+
+    /// The mechanism itself, with a throwaway process: closing the job ends it.
+    #[cfg(windows)]
+    #[test]
+    fn a_job_member_dies_when_the_job_closes() {
+        use std::os::windows::process::CommandExt;
+        use std::time::{Duration, Instant};
+        let job = job::Job::new().expect("job");
+        let mut child = std::process::Command::new("ping.exe")
+            .args(["-n", "30", "127.0.0.1"])
+            .stdout(std::process::Stdio::null())
+            .creation_flags(0x0800_0000)
+            .spawn()
+            .expect("child");
+        job.adopt(child.id()).expect("adopt");
+        assert!(child.try_wait().unwrap().is_none(), "alive while the job is open");
+        drop(job);
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while child.try_wait().unwrap().is_none() {
+            if Instant::now() > deadline {
+                let _ = child.kill();
+                panic!("the member outlived the job");
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
     }
 
     #[test]

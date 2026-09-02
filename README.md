@@ -333,6 +333,11 @@ calls, the client's own terminal usually retakes OS focus. Ghost is built for th
 - **Every action response is honest**: `verified` (did the screen actually change),
   `focus_confirmed` (was the right window foreground), and a `warning` when either is off - 
   never a blind `ok:true`. Check `verified` before re-issuing an action.
+- **Nothing is left running.** Browsers Ghost launches are in a kill-on-close job
+  object: when the server ends, however it ends, they end with it
+  (`dies_with_server` on the launch response). At startup the server also sweeps
+  browsers abandoned by earlier servers and reports them in
+  `ghost_stats.orphan_sweep`.
 - **Anchor to a window** - `ghost_see`, `ghost_find`, `ghost_act`, `ghost_key`,
   `ghost_click_at`, `ghost_scroll`, `ghost_wait`, `ghost_assert` and `ghost_screenshot`
   (unless `full=true`) all take `window`

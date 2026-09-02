@@ -344,6 +344,15 @@ fn main() {
         .init();
     // Independent proof that the foreground is never taken: see audit.rs.
     audit::start();
+    // Browsers left behind by servers that are gone (ghost_core::process::orphans):
+    // off the boot path, reported by ghost_stats.
+    std::thread::spawn(|| {
+        let ended = ghost_session::orphans::sweep_orphaned_browsers();
+        if !ended.is_empty() {
+            tracing::info!(count = ended.len(), "ended browsers orphaned by earlier ghost servers");
+        }
+        let _ = ORPHAN_SWEEP.set(ended);
+    });
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -593,6 +602,9 @@ fn crash_log_path() -> Option<std::path::PathBuf> {
 /// Append every panic to the crash log, then run the default hook (stderr).
 /// Installed once at boot; cheap, and the only way a panic on a worker thread
 /// (STA pool, desktop worker, event pump) leaves a trace after the process is gone.
+/// What the startup sweep for orphaned browsers found (set once it has run).
+static ORPHAN_SWEEP: std::sync::OnceLock<Vec<Value>> = std::sync::OnceLock::new();
+
 fn install_crash_log() {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -2013,6 +2025,10 @@ async fn handle_tool(
                 "locator": serde_json::to_value(loc_stats).map_err(|e| e.to_string())?,
                 "grounding": serde_json::to_value(grounding).map_err(|e| e.to_string())?,
                 "interference_audit": audit::snapshot(),
+                "orphan_sweep": match ORPHAN_SWEEP.get() {
+                    Some(ended) => json!({ "done": true, "ended": ended }),
+                    None => json!({ "done": false }),
+                },
             }))
         }
         "ghost_render_marks" => {
