@@ -3,8 +3,6 @@ use crate::error::CoreError;
 use crate::focus;
 use windows::Win32::Foundation::POINT;
 use windows::Win32::Foundation::{BOOL, FALSE, HWND, LPARAM, TRUE, WPARAM};
-use windows::Win32::System::Com::CoCreateInstance;
-use windows::Win32::System::Com::CLSCTX_INPROC_SERVER;
 use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
 use windows::Win32::UI::Accessibility::*;
 use windows::Win32::UI::WindowsAndMessaging::WindowFromPoint;
@@ -83,7 +81,7 @@ const TEXT_NAME_ROLES: &[&str] = &[
 /// Roles whose ValuePattern (get_text) carries the content.
 const TEXT_VALUE_ROLES: &[&str] = &["edit", "document"];
 
-/// Truncate `s` to at most `max` bytes WITHOUT splitting a UTF-8 character —
+/// Truncate `s` to at most `max` bytes WITHOUT splitting a UTF-8 character - 
 /// `String::truncate` panics off a char boundary, which would crash the whole
 /// server on ordinary Unicode content (accents, CJK, emoji).
 fn truncate_at_char_boundary(s: &mut String, max: usize) {
@@ -111,12 +109,16 @@ unsafe impl Sync for UiaTree {}
 
 impl UiaTree {
     pub fn new() -> Result<Self, CoreError> {
-        unsafe {
-            let automation: IUIAutomation =
-                CoCreateInstance(&CUIAutomation8, None, CLSCTX_INPROC_SERVER)
-                    .map_err(|e| CoreError::ComInit(e.to_string()))?;
-            Ok(Self { automation })
-        }
+        // Deadlines are set inside `create_automation`; there is no other
+        // constructor for the automation object anywhere in the workspace.
+        let automation = super::create_automation()?;
+        Ok(Self { automation })
+    }
+
+    /// The (connection, transaction) deadlines this tree's automation object
+    /// carries, in milliseconds.
+    pub fn timeouts(&self) -> Result<(u32, u32), CoreError> {
+        super::automation_timeouts(&self.automation)
     }
 
     /// Find first element whose name contains `name` (case-insensitive).
@@ -395,7 +397,7 @@ impl UiaTree {
         window_name: Option<&str>,
     ) -> Result<Vec<ElementDescriptor>, CoreError> {
         unsafe {
-            // Acquire walker once — used for both the window-title scan and the collect pass.
+            // Acquire walker once - used for both the window-title scan and the collect pass.
             let walker = self.get_walker()?;
             let root = self.resolve_scope_root(&walker, window_name)?;
             let mut results = Vec::new();
@@ -465,7 +467,7 @@ impl UiaTree {
             let er = role_id_to_name(el.control_type());
             er == r || role_alias_matches(r, er)
         });
-        // depth > 0: never match the subtree root (the window element itself) —
+        // depth > 0: never match the subtree root (the window element itself) - 
         // a window title containing the searched name would otherwise become
         // match #0 and shift every real element's index.
         if depth > 0 && name_ok && role_ok {
@@ -484,7 +486,7 @@ impl UiaTree {
 
     /// Extract readable text from a window (or the full desktop). Walks the
     /// subtree collecting accessible names of text-carrying roles plus
-    /// ValuePattern content of edit/document elements — the cheap way to READ
+    /// ValuePattern content of edit/document elements - the cheap way to READ
     /// a page or app (vs screenshots/element dumps). Returns (text, truncated).
     pub fn collect_text(
         &self,
@@ -569,7 +571,7 @@ impl UiaTree {
         budget: &mut usize,
     ) -> Result<(), CoreError> {
         // `budget` caps TOTAL nodes visited. The 500-result / depth-50 caps bound
-        // output and vertical depth but not breadth — a wide, shallow tree (a big
+        // output and vertical depth but not breadth - a wide, shallow tree (a big
         // list/grid, a Chromium/Electron DOM with thousands of non-interactive
         // nodes) would otherwise be walked in full, hanging the single-threaded
         // server on one describe call. Matches the other walkers' budget pattern.
@@ -699,13 +701,13 @@ pub fn list_windows() -> Result<Vec<WindowInfo>, CoreError> {
 /// Returns Ok(true) if foreground confirmed within `timeout_ms`, Ok(false) if timed out.
 ///
 /// MEDIUM-5 fixes:
-/// (a) GetForegroundWindow() called once, value reused — eliminates the double-call TOCTOU.
+/// (a) GetForegroundWindow() called once, value reused - eliminates the double-call TOCTOU.
 /// (b) AttachThreadInput only called when thread IDs differ, and only detached for threads
-///     that were actually attached — prevents the self-attach failure that ERROR_INVALID_PARAMETER.
+///     that were actually attached - prevents the self-attach failure that ERROR_INVALID_PARAMETER.
 pub fn ensure_foreground(hwnd_raw: isize, timeout_ms: u64) -> Result<bool, CoreError> {
     let hwnd = HWND(hwnd_raw as *mut core::ffi::c_void);
     unsafe {
-        // Single call to GetForegroundWindow — reuse throughout to avoid TOCTOU.
+        // Single call to GetForegroundWindow - reuse throughout to avoid TOCTOU.
         let fg = GetForegroundWindow();
         if fg == hwnd {
             return Ok(true);
@@ -714,7 +716,7 @@ pub fn ensure_foreground(hwnd_raw: isize, timeout_ms: u64) -> Result<bool, CoreE
         let fg_tid = GetWindowThreadProcessId(fg, None);
         let tgt_tid = GetWindowThreadProcessId(hwnd, None);
 
-        // Only attach when IDs differ — AttachThreadInput fails (E_INVALIDARG) on self-attach.
+        // Only attach when IDs differ - AttachThreadInput fails (E_INVALIDARG) on self-attach.
         let attached_fg = fg_tid != cur_tid && fg_tid != 0;
         let attached_tgt = tgt_tid != cur_tid && tgt_tid != 0 && tgt_tid != fg_tid;
 
@@ -725,7 +727,7 @@ pub fn ensure_foreground(hwnd_raw: isize, timeout_ms: u64) -> Result<bool, CoreE
             let _ = AttachThreadInput(cur_tid, tgt_tid, TRUE);
         }
 
-        // A minimized window can't receive foreground — restore it first.
+        // A minimized window can't receive foreground - restore it first.
         if IsIconic(hwnd).as_bool() {
             let _ = ShowWindow(hwnd, SW_RESTORE);
         }
@@ -760,7 +762,7 @@ pub fn ensure_foreground(hwnd_raw: isize, timeout_ms: u64) -> Result<bool, CoreE
 ///   3. `ensure_foreground(hwnd, 600)`.
 ///
 /// Returns `Ok(true)` if foreground was confirmed, `Ok(false)` on timeout
-/// (callers should warn and continue — consistent with the tolerant act strategy).
+/// (callers should warn and continue - consistent with the tolerant act strategy).
 /// Returns `Err` only when Windows APIs are unavailable (not on focus timeout).
 ///
 /// # Safety
@@ -883,7 +885,7 @@ mod tests {
     }
 
     /// MEDIUM-8: search_subtree_by_name depth constant is 50; verify alias function is depth-agnostic.
-    /// (Full recursive stack-overflow guard is validated by the limit constant itself —
+    /// (Full recursive stack-overflow guard is validated by the limit constant itself - 
     /// tested here indirectly since we can't construct a 51-deep live UIA tree in unit tests.)
     #[test]
     fn search_depth_limit_constant_is_fifty() {
@@ -894,11 +896,11 @@ mod tests {
     }
 
     /// HIGH-1: focus_window_under_point with an off-screen coord returns Ok (not an error).
-    /// The helper is tolerant — it returns Ok(false) for invalid/off-screen points.
+    /// The helper is tolerant - it returns Ok(false) for invalid/off-screen points.
     #[test]
     fn focus_window_under_point_off_screen_coord_returns_ok() {
         // A point far off-screen (negative, or beyond any reasonable monitor) should not
-        // panic or return Err — it should return Ok(false) (no window found there).
+        // panic or return Err - it should return Ok(false) (no window found there).
         // This exercises the invalid-HWND code path without a live window.
         let result = focus_window_under_point(-99999, -99999);
         assert!(
@@ -926,7 +928,7 @@ mod tests {
         // Fetch the current foreground window; ensure_foreground should return Ok(true) immediately.
         let hwnd = unsafe { GetForegroundWindow() };
         if hwnd.is_invalid() {
-            // No foreground window (headless CI) — skip rather than fail.
+            // No foreground window (headless CI) - skip rather than fail.
             return;
         }
         let result = ensure_foreground(hwnd.0 as isize, 0);

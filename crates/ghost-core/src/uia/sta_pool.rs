@@ -73,17 +73,16 @@ impl StaPool {
                 unsafe {
                     let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok();
                 }
-                let uia: IUIAutomation = unsafe {
-                    CoCreateInstance(&CUIAutomation8, None, CLSCTX_INPROC_SERVER)
-                }
-                .expect("CUIAutomation8");
+                // Same deadline-carrying constructor as the session tree.
+                let uia: IUIAutomation =
+                    crate::uia::create_automation().expect("CUIAutomation8");
                 while let Ok((job, reply)) = rx.recv() {
                     let uia_ref = &uia;
                     let result = catch_unwind(AssertUnwindSafe(|| job(uia_ref)));
                     match result {
                         Ok(r) => {
                             // MEDIUM-9: if caller already timed out (channel closed),
-                            // this was an orphaned job — decrement counter and log.
+                            // this was an orphaned job - decrement counter and log.
                             if reply.send(r).is_err() {
                                 let remaining = orphaned_jobs.fetch_sub(1, Ordering::AcqRel).saturating_sub(1);
                                 tracing::warn!(worker = id, orphaned_remaining = remaining, "ghost-sta: orphaned job completed (caller already timed out)");

@@ -335,6 +335,7 @@ fn main() {
     // exist there (see docs/macos-build.md).
     #[cfg(any(windows, target_os = "linux"))]
     crate::engine::system::dpi::ensure_process_dpi_aware();
+    install_crash_log();
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .init();
@@ -444,7 +445,21 @@ async fn async_main() {
         // Every request is its own task: a slow wait in one tool cannot delay
         // another, and three tabs plus a desktop app can all be mid-operation.
         tokio::spawn(async move {
-            let result = handle(&session, &req.method, req.params.as_ref()).await;
+            // The call runs under a guard: a panic inside a tool, or a tool that
+            // outlives its deadline, becomes an error RESPONSE. Without this the
+            // client saw nothing at all and its own idle timeout fired 1,800 s
+            // later (observed on this machine after the server lost a task).
+            let deadline = tool_deadline(req.params.as_ref());
+            let label = tool_label(&req);
+            let work_session = session.clone();
+            let method = req.method.clone();
+            let params = req.params.clone();
+            let result = guarded(
+                async move { handle(&work_session, &method, params.as_ref()).await },
+                deadline,
+                label,
+            )
+            .await;
             // Notifications have no id and get no response.
             let Some(id) = req.id else { return };
             let resp = match result {
@@ -460,9 +475,140 @@ async fn async_main() {
         });
     }
 
-    // stdin closed: drop our sender and let in-flight responses drain.
+    // stdin closed: drop our sender and let in-flight responses drain. Say so
+    // on stderr - an unexplained exit is otherwise indistinguishable from a
+    // crash when the client's log is all there is to go on.
+    eprintln!("[ghost-mcp] stdin closed by the client; exiting after in-flight responses drain");
     drop(out_tx);
     let _ = writer.await;
+}
+
+/// Default outer deadline for one tool call, in milliseconds.
+const DEFAULT_TOOL_DEADLINE_MS: u64 = 180_000;
+/// Slack added on top of a tool's own explicit timeout so the guard never fires
+/// before the tool's own, more specific, timeout error can.
+const DEADLINE_SLACK_MS: u64 = 10_000;
+
+/// The outer deadline for one call. `GHOST_TOOL_DEADLINE_MS` sets the base; a
+/// tool that carries its own larger `timeout_ms` (ghost_shell, ghost_wait
+/// for=element...) or `ms` (ghost_wait) gets that plus slack, so the guard is
+/// always the LAST line of defence, never the first.
+fn tool_deadline(params: Option<&Value>) -> std::time::Duration {
+    let base = std::env::var("GHOST_TOOL_DEADLINE_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(DEFAULT_TOOL_DEADLINE_MS)
+        .max(1_000);
+    let args = params.map(|p| p.get("arguments").unwrap_or(p));
+    let explicit = args
+        .and_then(|a| {
+            a.get("timeout_ms")
+                .and_then(|v| v.as_u64())
+                .or_else(|| a.get("ms").and_then(|v| v.as_u64()))
+        })
+        .unwrap_or(0);
+    std::time::Duration::from_millis(base.max(explicit.saturating_add(DEADLINE_SLACK_MS)))
+}
+
+/// What to call the tool in a guard error: the tool name for `tools/call`,
+/// otherwise the raw method.
+fn tool_label(req: &McpRequest) -> String {
+    if req.method == "tools/call" {
+        if let Some(n) = req
+            .params
+            .as_ref()
+            .and_then(|p| p.get("name"))
+            .and_then(|n| n.as_str())
+        {
+            return n.to_string();
+        }
+    }
+    req.method.clone()
+}
+
+/// Run one tool future on its own task and turn the two silent failure modes
+/// into error results: a panic (the task dies, nobody answers) and an overrun
+/// (a blocking call that no client-side timeout can cancel). On overrun the work
+/// is NOT aborted - it may be a blocking COM call that cannot be - so the error
+/// says the work continues and the caller must re-check state before retrying.
+async fn guarded<F>(
+    fut: F,
+    deadline: std::time::Duration,
+    label: String,
+) -> std::result::Result<Value, String>
+where
+    F: std::future::Future<Output = std::result::Result<Value, String>> + Send + 'static,
+{
+    let handle = tokio::spawn(fut);
+    match tokio::time::timeout(deadline, handle).await {
+        Ok(Ok(result)) => result,
+        Ok(Err(join)) => {
+            let why = if join.is_panic() {
+                panic_message(join.into_panic())
+            } else {
+                "task cancelled".to_string()
+            };
+            Err(format!(
+                "{label} panicked inside the server: {why} (logged to the ghost crash log; \
+                 the server is still up - re-check state with ghost_see before retrying)"
+            ))
+        }
+        Err(_) => Err(format!(
+            "{label} timed out: exceeded the {}s tool deadline (GHOST_TOOL_DEADLINE_MS). The \
+             work was not cancelled and may still complete - re-check state with ghost_see \
+             before retrying",
+            deadline.as_secs()
+        )),
+    }
+}
+
+fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "non-string panic payload".to_string()
+    }
+}
+
+/// Where panics are appended so an unexplained server death leaves evidence.
+fn crash_log_path() -> Option<std::path::PathBuf> {
+    let base = if cfg!(windows) {
+        std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from)
+    } else {
+        std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/state"))
+    }?;
+    Some(base.join("ghost").join("crash.log"))
+}
+
+/// Append every panic to the crash log, then run the default hook (stderr).
+/// Installed once at boot; cheap, and the only way a panic on a worker thread
+/// (STA pool, desktop worker, event pump) leaves a trace after the process is gone.
+fn install_crash_log() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if let Some(path) = crash_log_path() {
+            if let Some(dir) = path.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            let epoch = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let thread = std::thread::current();
+            let line = format!(
+                "epoch={epoch} pid={} version={} thread={} {info}\n",
+                std::process::id(),
+                env!("CARGO_PKG_VERSION"),
+                thread.name().unwrap_or("?"),
+            );
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+                let _ = f.write_all(line.as_bytes());
+            }
+        }
+        previous(info);
+    }));
 }
 
 /// Detect a stop request on the raw wire line, before dispatch. Matches both
@@ -2620,6 +2766,83 @@ fn base64_encode(data: &[u8]) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn rt() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime")
+    }
+
+    #[test]
+    fn guarded_turns_a_panic_into_an_error_response() {
+        let r = rt().block_on(guarded(
+            async {
+                if json!(true).as_bool().unwrap() {
+                    panic!("boom-{}", 7);
+                }
+                Ok(json!(1))
+            },
+            std::time::Duration::from_secs(5),
+            "ghost_x".into(),
+        ));
+        let e = r.expect_err("a panic must become an error, not silence");
+        assert!(e.contains("ghost_x panicked"), "{e}");
+        assert!(e.contains("boom-7"), "{e}");
+    }
+
+    #[test]
+    fn guarded_turns_an_overrun_into_a_timeout_error() {
+        let r = rt().block_on(guarded(
+            async {
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                Ok(json!(1))
+            },
+            std::time::Duration::from_millis(50),
+            "ghost_wait".into(),
+        ));
+        let e = r.expect_err("an overrun must become an error");
+        assert!(e.contains("ghost_wait timed out"), "{e}");
+        // Classified as a timeout so the client gets the timeout suggestion.
+        assert_eq!(classify_error(&e).0, -32003);
+    }
+
+    #[test]
+    fn guarded_passes_a_normal_result_through() {
+        let r = rt().block_on(guarded(
+            async { Ok(json!({ "a": 1 })) },
+            std::time::Duration::from_secs(5),
+            "ghost_see".into(),
+        ));
+        assert_eq!(r.unwrap(), json!({ "a": 1 }));
+    }
+
+    #[test]
+    fn tool_deadline_defaults_and_honours_explicit_timeouts() {
+        std::env::remove_var("GHOST_TOOL_DEADLINE_MS");
+        assert_eq!(tool_deadline(None).as_millis(), 180_000);
+        // A tool with its own larger timeout gets that plus slack: the guard is
+        // the last line of defence, never the first.
+        let p = json!({ "name": "ghost_shell", "arguments": { "timeout_ms": 400_000 } });
+        assert_eq!(tool_deadline(Some(&p)).as_millis(), 410_000);
+        let p = json!({ "name": "ghost_wait", "arguments": { "ms": 1_000 } });
+        assert_eq!(tool_deadline(Some(&p)).as_millis(), 180_000);
+        // Legacy raw-method params carry the arguments at the top level.
+        let raw = json!({ "timeout_ms": 500_000 });
+        assert_eq!(tool_deadline(Some(&raw)).as_millis(), 510_000);
+    }
+
+    #[test]
+    fn tool_label_prefers_the_tool_name() {
+        let req = McpRequest {
+            id: Some(json!(1)),
+            method: "tools/call".into(),
+            params: Some(json!({ "name": "ghost_act", "arguments": {} })),
+        };
+        assert_eq!(tool_label(&req), "ghost_act");
+        let raw = McpRequest { id: None, method: "ghost_see".into(), params: None };
+        assert_eq!(tool_label(&raw), "ghost_see");
+    }
 
     fn desc(name: &str, l: i32, t: i32, r: i32, b: i32) -> crate::engine::uia::ElementDescriptor {
         crate::engine::uia::ElementDescriptor {
