@@ -55,6 +55,19 @@ fn cursor_unchanged(before: Option<(i32, i32)>, after: Option<(i32, i32)>) -> bo
     }
 }
 
+/// Chromium and Electron windows report the `chrome_widgetwin_*` class. Their
+/// accessibility tree is built lazily, so a first lookup that misses is worth
+/// one retry. Windows-only knowledge; elsewhere nothing is treated as Chromium.
+#[cfg(windows)]
+fn is_chromium_window(hwnd: isize) -> bool {
+    crate::hidden::is_chromium_window(hwnd)
+}
+
+#[cfg(not(windows))]
+fn is_chromium_window(_hwnd: isize) -> bool {
+    false
+}
+
 pub struct Region;
 
 impl Region {
@@ -1907,7 +1920,7 @@ impl GhostSession {
         // Send), so the retry arm holds nothing while it sleeps.
         let el = match lookup()? {
             Some(e) => Some(e),
-            None if crate::hidden::is_chromium_window(hwnd) => {
+            None if is_chromium_window(hwnd) => {
                 tokio::time::sleep(Duration::from_millis(450)).await;
                 lookup()?
             }
