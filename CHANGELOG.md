@@ -1,5 +1,54 @@
 # Changelog
 
+## [0.21.0] - The user's own browser, honest misses, and tests that stay off your screen
+
+- **CDP routing for any browser with a debugging port.** Three weeks of
+  transcripts showed the agent's most-driven windows were the user's own Comet
+  (1,000+ anchored calls) and that `ghost_browser_attach` had been tried against
+  its port 13 times. When a window's process was started with
+  `--remote-debugging-port` (read from its command line through the PEB;
+  `=0` resolves via DevToolsActivePort), the window-scoped verbs now go through
+  CDP: `ghost_see`/`ghost_snapshot` return the accessible DOM (aria-label/text/
+  placeholder names, tag-derived roles, selectors that survive re-renders),
+  `ghost_find`/`ghost_act`/`ghost_click_at`/`ghost_scroll`/`ghost_assert`/
+  `ghost_wait` act through trusted input events into the right renderer,
+  `ghost_key` supports full modifier combos, and focus emulation makes the page
+  behave as focused. Coordinates there are viewport pixels (`coords`).
+  `GHOST_CDP_ROUTE=off` disables. Proven live against a Chrome Ghost did not
+  launch: every verb routed in single-digit milliseconds; a Chrome without a
+  port fell back unchanged.
+- **"Did you mean" on element misses.** A miss now names the closest element
+  names in the target window on every route, instead of costing the agent a
+  `ghost_see` round trip to learn the spelling.
+- **Typing ladder.** A windowless control whose ValuePattern does not take gets
+  a posted click plus posted characters, verified by the same read-back; the
+  response reports which rung landed (`via`). Type-by-name prefers an editable
+  match over a same-named `<label>`.
+- **Built-in interference audit.** An independent sampler (foreground +
+  `GetLastInputInfo`, every 100 ms) records any foreground change with no real
+  hardware input in the previous 1.5 s as SYNTHETIC, with the tool calls in
+  flight. `ghost_stats` and `ghost_session_state` report it, so the headline
+  claim is proven continuously rather than once by `ghost verify`.
+  `GHOST_AUDIT=off` disables.
+- **Compact responses.** Tool results are no longer pretty-printed: 2707 ->
+  1492 bytes measured on a 15-element describe. `GHOST_PRETTY_JSON=1` restores.
+- **Live tests moved off the user's desktop.** `crates/ghost-testbed` is a
+  deterministic Win32 target; `scripts/live-on-hidden-desktop.ps1` runs any
+  command on a hidden desktop; the Notepad tests are gone and the WinUI probe
+  needs `GHOST_LIVE_NOTEPAD=1` (Win11 Notepad restores the user's own tabs into
+  any instance, so a test could type into their unsaved file).
+
+**Defects those tests found, all real and all fixed:** `read_text` returned only
+the FIRST CHARACTER of a control (the message result was discarded, so the
+length was the send's success flag) - every isolated-desktop typing check was
+judging on one character; a name search scoped to a window could match the
+window FRAME, because the root's name is the title; `DesktopSession::with_uia`
+dropped its COM guard before creating the automation object and only worked
+while another thread kept the process MTA alive; `type_text` now tries the
+atomic WM_SETTEXT before posted characters, and the text target prefers a real
+text control over the focused one (on a fresh window the focus is often a
+BUTTON, where WM_SETTEXT rewrites the label).
+
 ## [0.20.0] - Background by construction
 
 Evidence first: three weeks of Claude Code transcripts (10,323 Ghost calls) and four

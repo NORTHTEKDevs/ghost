@@ -342,8 +342,24 @@ calls, the client's own terminal usually retakes OS focus. Ghost is built for th
   raising under the background policy; `op=anchor` sets, clears or reports it; every
   response carries `target {hwnd, title, surface, source}`. A title that matches
   nothing lists the open windows and returns code -32007.
+- **Your own browser, through its own protocol** - when a window's process was started
+  with `--remote-debugging-port` (Comet, Chrome, Edge, Brave), the same anchored verbs
+  route through the DevTools protocol instead of UI Automation: DOM names and
+  `aria-label`s rather than a sparse tree, selectors that survive re-renders, trusted
+  input events into that renderer, full modifier combos, and focus emulation so pages
+  that check `document.hasFocus()` still accept typing. Nothing about it can reach your
+  foreground. The response carries `route: {browser, port, tab}` and `coords: viewport`;
+  a browser without a port keeps the UI Automation path unchanged. `GHOST_CDP_ROUTE=off`
+  turns it off. Start Comet or Chrome once with `--remote-debugging-port=9333` to get it.
+- **Misses name the alternatives** - "element not found" is followed by the closest
+  element names in that window, so an agent does not spend a round trip on `ghost_see`
+  to learn what the app calls the thing.
 - **Disambiguate duplicates** - `index` selects the nth match when several elements share a
   name/role (multiple "Close Tab" buttons); responses carry a `matches` count.
+- **It audits itself** - an independent sampler watches the foreground window and the
+  OS's last-input time; any foreground change with no real hardware input behind it is
+  recorded as synthetic, with the tool calls that were in flight. `ghost_stats` reports
+  the tally, so the headline claim is proven continuously, not once.
 - **Read, don't screenshot** - `ghost_see mode=text` extracts a window/page's readable text
   straight from the accessibility tree: faster and ~10x cheaper in tokens than images.
 - **Latency is visible**: every response carries `ms`, and `escalated: true` flags when a
