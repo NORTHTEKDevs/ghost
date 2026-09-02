@@ -1092,6 +1092,40 @@ impl GhostSession {
         .map_err(|e| GhostError::Core(crate::engine::error::CoreError::WorkerPanic(e.to_string())))?
     }
 
+    /// Screenshot of ONE window by handle (PrintWindow: works while covered),
+    /// optionally cropped to a screen-space rect inside it.
+    pub async fn screenshot_window(
+        &self,
+        hwnd: isize,
+        crop: Option<(i32, i32, i32, i32)>,
+        max_dim: Option<u32>,
+        jpeg_quality: Option<u8>,
+    ) -> Result<Vec<u8>> {
+        let format = match jpeg_quality {
+            Some(q) => crate::engine::capture::CaptureFormat::Jpeg(q),
+            None => crate::engine::capture::CaptureFormat::Png,
+        };
+        tokio::task::spawn_blocking(move || {
+            crate::engine::capture::capture_window_encoded(hwnd, crop, max_dim, format)
+                .map_err(GhostError::Core)
+        })
+        .await
+        .map_err(|e| GhostError::Core(crate::engine::error::CoreError::WorkerPanic(e.to_string())))?
+    }
+
+    /// OCR one window by handle (works while covered) for `needle`.
+    pub async fn find_text_in_window(&self, needle: &str, hwnd: isize) -> Result<Option<(i32, i32)>> {
+        let needle = needle.to_string();
+        let task = tokio::task::spawn_blocking(move || {
+            crate::engine::ocr::find_text_in_window(&needle, hwnd).map_err(GhostError::Core)
+        });
+        match timeout(Duration::from_millis(OCR_TIMEOUT_MS), task).await {
+            Ok(joined) => joined
+                .map_err(|e| GhostError::Core(crate::engine::error::CoreError::WorkerPanic(e.to_string())))?,
+            Err(_elapsed) => Err(GhostError::Core(crate::engine::error::CoreError::JobTimeout)),
+        }
+    }
+
     /// Bounding rect of the foreground window: (left, top, right, bottom) or None if no window focused.
     /// Useful as the rect arg to screenshot_region for tight vision crops.
     pub fn foreground_window_rect(&self) -> Option<(i32, i32, i32, i32)> {

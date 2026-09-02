@@ -334,7 +334,8 @@ calls, the client's own terminal usually retakes OS focus. Ghost is built for th
   `focus_confirmed` (was the right window foreground), and a `warning` when either is off - 
   never a blind `ok:true`. Check `verified` before re-issuing an action.
 - **Anchor to a window** - `ghost_see`, `ghost_find`, `ghost_act`, `ghost_key`,
-  `ghost_click_at`, `ghost_scroll`, `ghost_wait` and `ghost_assert` all take `window`
+  `ghost_click_at`, `ghost_scroll`, `ghost_wait`, `ghost_assert` and `ghost_screenshot`
+  (unless `full=true`) all take `window`
   (a title substring, resolved across your desktop and Ghost's hidden desktops: exact
   title beats prefix beats substring, a window that is not minimised wins ties). The
   match becomes the session **anchor**: later calls without `window` target it, never

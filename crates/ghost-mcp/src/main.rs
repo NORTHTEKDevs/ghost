@@ -1064,6 +1064,12 @@ async fn dispatch_cdp(
             }
             other => Err(format!("ghost_wait for={other} has no CDP path; use for=element, for=value or for=idle")),
         },
+        "ghost_screenshot" => {
+            // The page's own render through CDP: never the screen, never the
+            // human's window.
+            let png = r.tab.screenshot(false).await.map_err(|e| e.to_string())?;
+            Ok(json!({ "png_base64": base64_encode(&png), "size_bytes": png.len(), "window": t.title, "mode": "cdp", "occlusion_proof": true }))
+        }
         other => Err(format!("{other} has no CDP path")),
     }
 }
@@ -1175,11 +1181,39 @@ async fn dispatch_hidden(
                         Err(format!("assert failed: predicate={predicate}, expected={expected:?}, actual={actual:?}"))
                     }
                 }
-                other => Err(format!(
-                    "ghost_assert: predicate '{other}' is screen-based (OCR) and has no hidden-desktop path; \
-                     use element-exists or value-equals/value-contains, or ghost_see mode=text"
-                )),
+                "text-present" | "text-absent" => {
+                    let needle = p["text"].as_str().ok_or("ghost_assert: text-present/text-absent requires 'text'")?;
+                    let found = session.hidden_find_text(t, needle).await.map_err(err)?.is_some();
+                    let expected = predicate == "text-present";
+                    if found == expected {
+                        Ok(json!({ "ok": true, "predicate": predicate, "passed": true }))
+                    } else {
+                        Err(format!("assert failed: predicate={predicate}, text={needle:?}, found={found}"))
+                    }
+                }
+                other => Err(format!("ghost_assert: unknown predicate '{other}'")),
             }
+        }
+        "ghost_screenshot" => {
+            let (_, max_dim, jpeg_quality) = screenshot_default_opts(p);
+            let crop = if p.get("name").is_some() || p.get("role").is_some() {
+                let by = parse_by(p)?;
+                let (e, _) = session.hidden_find(t, by, None).await.map_err(err).and_then(|v| {
+                    let r = &v["rect"];
+                    match (r["left"].as_i64(), r["top"].as_i64(), r["right"].as_i64(), r["bottom"].as_i64()) {
+                        (Some(l), Some(tp), Some(rr), Some(b)) => Ok(((l as i32, tp as i32, rr as i32, b as i32), ())),
+                        _ => Err("ghost_screenshot: element has no bounding rect".to_string()),
+                    }
+                })?;
+                Some(e)
+            } else {
+                None
+            };
+            let bytes = session
+                .hidden_capture_encoded(t, crop, Some(max_dim), Some(jpeg_quality))
+                .await
+                .map_err(err)?;
+            Ok(json!({ "jpeg_base64": base64_encode(&bytes), "size_bytes": bytes.len(), "window": t.title, "occlusion_proof": true }))
         }
         "ghost_wait" => match p["for"].as_str().unwrap_or("ms") {
             "element" => {
@@ -1243,6 +1277,9 @@ fn is_window_scoped(name: &str, args: &Value) -> bool {
         ),
         "ghost_find" | "ghost_act" | "ghost_key" | "ghost_click_at" | "ghost_snapshot"
         | "ghost_assert" | "ghost_scroll" => true,
+        // A full-screen capture is explicitly the whole screen; everything else
+        // is "the window the agent is working in".
+        "ghost_screenshot" => !args["full"].as_bool().unwrap_or(false),
         "ghost_wait" => matches!(
             args["for"].as_str().unwrap_or("ms"),
             "element" | "value" | "idle" | "text"
@@ -1510,6 +1547,36 @@ async fn handle_tool(
                 Ok(json!({ "jpeg_base64": base64_encode(&bytes), "size_bytes": bytes.len() }))
             } else {
                 let (rect_mode, max_dim, jpeg_quality) = screenshot_default_opts(p);
+                // A targeted window (explicit or the session anchor): capture THAT
+                // window by handle, occlusion-proof, never the human's foreground.
+                // With name/role the crop is resolved inside that same window.
+                if let Some(window) = p["window"].as_str() {
+                    let t = session.resolve_target(Some(window)).await.map_err(|e| e.to_string())?;
+                    let crop = if p.get("name").is_some() || p.get("role").is_some() {
+                        let by = parse_by(p)?;
+                        let found = session.find_background(&t.title, by, None).await.map_err(|e| e.to_string())?;
+                        let r = &found["rect"];
+                        match (r["left"].as_i64(), r["top"].as_i64(), r["right"].as_i64(), r["bottom"].as_i64()) {
+                            (Some(l), Some(tp), Some(rr), Some(b)) => Some((l as i32, tp as i32, rr as i32, b as i32)),
+                            _ => return Err("ghost_screenshot: element has no bounding rect".into()),
+                        }
+                    } else if let Some(arr) = p.get("rect").and_then(|r| r.as_array()) {
+                        if arr.len() != 4 { return Err("ghost_screenshot: rect must be [left,top,right,bottom]".into()); }
+                        Some((
+                            arr[0].as_i64().ok_or("rect[0] not int")? as i32,
+                            arr[1].as_i64().ok_or("rect[1] not int")? as i32,
+                            arr[2].as_i64().ok_or("rect[2] not int")? as i32,
+                            arr[3].as_i64().ok_or("rect[3] not int")? as i32,
+                        ))
+                    } else {
+                        None
+                    };
+                    let bytes = session
+                        .screenshot_window(t.hwnd, crop, Some(max_dim), Some(jpeg_quality))
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    return Ok(json!({ "jpeg_base64": base64_encode(&bytes), "size_bytes": bytes.len(), "window": t.title, "occlusion_proof": true }));
+                }
                 // Element/region scope: if name/role given, crop to that element's
                 // rect; if an explicit rect [l,t,r,b] is given, use it. Lets an
                 // agent screenshot a single component for VLM-in-the-loop checks.
@@ -2591,11 +2658,18 @@ async fn handle_ghost_assert(
     match predicate {
         "text-present" | "text-absent" => {
             let text = p["text"].as_str().ok_or("ghost_assert: predicate text-present/text-absent requires 'text'")?;
-            let foreground = p["foreground"].as_bool().unwrap_or(true);
-            let find_args = json!({ "text": text, "foreground": foreground });
-            let found = match handle_tool(session, "ghost_find_text_local", &find_args).await {
-                Ok(v) => v["found"].as_bool().unwrap_or(false),
-                Err(_) => false,
+            // A targeted window (explicit or anchored) is OCR'd by handle -
+            // occlusion-proof, and never the human's foreground window.
+            let found = if let Some(window) = p["window"].as_str() {
+                let t = session.resolve_target(Some(window)).await.map_err(|e| e.to_string())?;
+                session.find_text_in_window(text, t.hwnd).await.map_err(|e| e.to_string())?.is_some()
+            } else {
+                let foreground = p["foreground"].as_bool().unwrap_or(true);
+                let find_args = json!({ "text": text, "foreground": foreground });
+                match handle_tool(session, "ghost_find_text_local", &find_args).await {
+                    Ok(v) => v["found"].as_bool().unwrap_or(false),
+                    Err(_) => false,
+                }
             };
             let expected = predicate == "text-present";
             if found == expected {
@@ -3065,7 +3139,8 @@ fn lean_tools_schema() -> Value {
               "text": { "type": "string", "description": "Text to check (text-present/absent) or expected value (value-equals/contains)" },
               "name": { "type": "string", "description": "Element name (element-exists|value-*)" },
               "role": { "type": "string", "description": "Element role (element-exists|value-*)" },
-              "foreground": { "type": "boolean", "default": true }
+              "window": { "type": "string", "description": "Title substring of the window to check (anchors it). Omit to use the anchor. text-present/absent then OCR THAT window by handle, never the foreground." },
+              "foreground": { "type": "boolean", "default": true, "description": "Only without a window/anchor: OCR the foreground window (true) or the whole screen" }
           }}},
         // --- Flow ---
         { "name": "ghost_run",
@@ -3079,10 +3154,11 @@ fn lean_tools_schema() -> Value {
           }}},
         // --- Screenshot ---
         { "name": "ghost_screenshot",
-          "description": "Capture screenshot. Default: foreground window, max 768px, JPEG q=75 (~20-100KB). Pass name/role to crop to ONE element, or rect=[l,t,r,b] for a region (great for VLM-in-the-loop checks). full=true: full screen at max 1280px JPEG (max_dim=0 = native-res lossless PNG). Always includes size_bytes.",
+          "description": "Capture a screenshot of the window the agent is working in. Target = window= or the session anchor: that window is captured BY HANDLE (works while covered, on a hidden desktop, or via CDP for a routed browser) at max 768px JPEG q=75 (~20-100KB). Only with no anchor does it fall back to the foreground window. Pass name/role to crop to ONE element inside the target, or rect=[l,t,r,b] (great for VLM-in-the-loop checks). full=true: the whole screen at max 1280px JPEG (max_dim=0 = native-res lossless PNG). Always includes size_bytes.",
           "inputSchema": { "type": "object", "properties": {
+              "window": { "type": "string", "description": "Title substring of the window to capture (anchors it). Omit to use the anchor." },
               "full": { "type": "boolean", "description": "Full-screen capture (default false)" },
-              "foreground": { "type": "boolean", "description": "Crop to foreground window (default true)" },
+              "foreground": { "type": "boolean", "description": "Only without a window/anchor: crop to the foreground window (default true)" },
               "name": { "type": "string", "description": "Crop to the element with this accessible name" },
               "role": { "type": "string", "description": "Crop to the element with this role" },
               "rect": { "type": "array", "items": { "type": "integer" }, "minItems": 4, "maxItems": 4, "description": "Crop to [left,top,right,bottom] region" },
@@ -3184,9 +3260,10 @@ fn legacy_tools_schema_full() -> Value {
               "hwnd": { "type": "integer", "description": "Target window handle (from ghost_find) - pins the click to that window even when occluded" }
           }}},
         { "name": "ghost_screenshot",
-          "description": "Capture a screenshot. Default: foreground window, max 768px longest edge, JPEG quality 75 - typically 20-100KB. Pass \"full\": true for a full-screen lossless PNG (1-5MB). Always includes size_bytes.",
+          "description": "Capture a screenshot of the window the agent is working in (window= or the session anchor, captured by handle - works while covered or on a hidden desktop). Falls back to the foreground window only with no anchor. Max 768px longest edge, JPEG quality 75 - typically 20-100KB. Pass \"full\": true for a full-screen lossless PNG (1-5MB). Always includes size_bytes.",
           "inputSchema": { "type": "object", "properties": {
-              "full": { "type": "boolean", "description": "If true, capture the full screen as lossless PNG. Default false (foreground+JPEG)." }
+              "window": { "type": "string", "description": "Title substring of the window to capture (anchors it). Omit to use the anchor." },
+              "full": { "type": "boolean", "description": "If true, capture the full screen as lossless PNG. Default false (target window + JPEG)." }
           }}},
         { "name": "ghost_screenshot_region",
           "description": "Capture a screen region with optional downscale and PNG/JPEG encoding. For vision payloads, use foreground=true + max_dim=768 + jpeg_quality=75 (10-50x smaller than full PNG, 3-5x faster vision inference).",

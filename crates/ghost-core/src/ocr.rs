@@ -162,6 +162,31 @@ pub fn find_text_local(
     })
 }
 
+/// OCR one WINDOW by handle (PrintWindow, so it works while the window is
+/// covered or lives on a hidden desktop) and return the screen-pixel centre of
+/// the first word containing `needle`. This is what `ghost_assert
+/// text-present` uses once a window is anchored: OCR of the "foreground" would
+/// read the human's window.
+pub fn find_text_in_window(needle: &str, hwnd: isize) -> Result<Option<(i32, i32)>, CoreError> {
+    run_with_com(|| {
+        let (rgba, w, h) = crate::capture::capture_window_printwindow(hwnd)?;
+        let (ox, oy) = crate::system::window_rect(hwnd)
+            .map(|(l, t, _, _)| (l, t))
+            .unwrap_or((0, 0));
+        let mut bgra = rgba;
+        rgba_to_bgra_in_place(&mut bgra);
+        let bitmap = create_bitmap_from_bgra(&bgra, w as u32, h as u32)?;
+        let needle_lower = needle.to_lowercase();
+        for word in run_ocr(&bitmap)? {
+            if word.text.to_lowercase().contains(&needle_lower) {
+                let (cx, cy) = word.rect.center();
+                return Ok(Some((cx + ox, cy + oy)));
+            }
+        }
+        Ok(None)
+    })
+}
+
 /// Wrap raw BGRA bytes as a SoftwareBitmap for OCR.
 /// Uses IBufferByteAccess to memcpy our buffer into a WinRT IBuffer.
 fn create_bitmap_from_bgra(bgra: &[u8], width: u32, height: u32) -> Result<SoftwareBitmap, CoreError> {

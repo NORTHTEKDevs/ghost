@@ -259,3 +259,43 @@ fn quit_ends_the_process_and_the_window_goes_away() {
         bed.desktop.windows().map(|w| w.into_iter().map(|x| x.title).collect::<Vec<_>>())
     );
 }
+
+/// A screenshot of a hidden window is that window's own pixels, and a text
+/// assertion OCRs those pixels - the anchored `ghost_screenshot` /
+/// `ghost_assert text-present` path. Both go by handle, so the result is the
+/// same whether or not anything covers the window.
+#[test]
+#[ignore]
+fn capture_and_ocr_read_the_hidden_window() {
+    let Some(bed) = testbed("shot") else { return };
+    let hwnd = bed.hwnd;
+    let jpeg = bed
+        .desktop
+        .exec(move || {
+            ghost_core::capture::capture_window_encoded(
+                hwnd,
+                None,
+                Some(768),
+                ghost_core::capture::CaptureFormat::Jpeg(75),
+            )
+        })
+        .expect("worker")
+        .expect("capture");
+    assert!(
+        jpeg.len() > 1_000 && jpeg.starts_with(&[0xFF, 0xD8]),
+        "not a JPEG of a real window: {} bytes",
+        jpeg.len()
+    );
+    let hit = bed
+        .desktop
+        .exec(move || ghost_core::ocr::find_text_in_window("Increment", hwnd))
+        .expect("worker")
+        .expect("ocr");
+    assert!(hit.is_some(), "OCR must find the Increment button's label on the hidden window");
+    let miss = bed
+        .desktop
+        .exec(move || ghost_core::ocr::find_text_in_window("Zebra Quokka", hwnd))
+        .expect("worker")
+        .expect("ocr");
+    assert!(miss.is_none(), "OCR must not find text that is not there: {miss:?}");
+}

@@ -662,6 +662,35 @@ impl GhostSession {
         core(d.capture(t.hwnd, false))
     }
 
+    /// Screenshot of a hidden-desktop window, optionally cropped to a
+    /// screen-space rect inside it, downscaled and encoded like `ghost_screenshot`.
+    pub async fn hidden_capture_encoded(
+        &self,
+        t: &WindowTarget,
+        crop: Option<(i32, i32, i32, i32)>,
+        max_dim: Option<u32>,
+        jpeg_quality: Option<u8>,
+    ) -> Result<Vec<u8>> {
+        let d = self.desktop_for(t).await?;
+        let hwnd = t.hwnd;
+        let format = match jpeg_quality {
+            Some(q) => crate::engine::capture::CaptureFormat::Jpeg(q),
+            None => crate::engine::capture::CaptureFormat::Png,
+        };
+        core(core(d.exec(move || {
+            crate::engine::capture::capture_window_encoded(hwnd, crop, max_dim, format)
+        }))?)
+    }
+
+    /// OCR a hidden-desktop window for `needle` (PrintWindow on the desktop's
+    /// worker, recognition here).
+    pub async fn hidden_find_text(&self, t: &WindowTarget, needle: &str) -> Result<Option<(i32, i32)>> {
+        let d = self.desktop_for(t).await?;
+        let hwnd = t.hwnd;
+        let needle = needle.to_string();
+        core(core(d.exec(move || crate::engine::ocr::find_text_in_window(&needle, hwnd)))?)
+    }
+
     /// The current value (ValuePattern / text) of an element on a hidden window.
     pub async fn hidden_value(&self, t: &WindowTarget, by: By) -> Result<String> {
         let d = self.desktop_for(t).await?;

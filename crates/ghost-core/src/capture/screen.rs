@@ -623,6 +623,37 @@ fn encode_region(
     }
 }
 
+/// Capture ONE WINDOW by handle - occlusion-proof (PrintWindow renders the
+/// window itself, not whatever is on top of it) and desktop-independent - then
+/// optionally crop to a screen-space rect inside it and encode.
+///
+/// This is what `ghost_screenshot` uses once a window is anchored: a screen
+/// crop of the "foreground" would capture the human's window, and a screen crop
+/// of an occluded window would capture whatever covers it.
+pub fn capture_window_encoded(
+    hwnd: isize,
+    crop_screen: Option<(i32, i32, i32, i32)>,
+    max_dim: Option<u32>,
+    format: CaptureFormat,
+) -> Result<Vec<u8>, CoreError> {
+    let (rgba, w, h) = capture_window_printwindow(hwnd)?;
+    let (rgba, w, h) = match (crop_screen, crate::system::window_rect(hwnd)) {
+        (Some((l, t, r, b)), Some((wl, wt, _, _))) => {
+            let cl = (l - wl).clamp(0, w as i32) as usize;
+            let ct = (t - wt).clamp(0, h as i32) as usize;
+            let cr = (r - wl).clamp(0, w as i32) as usize;
+            let cb = (b - wt).clamp(0, h as i32) as usize;
+            if cr > cl && cb > ct {
+                (crop_rgba(&rgba, w, cl, ct, cr - cl, cb - ct), cr - cl, cb - ct)
+            } else {
+                (rgba, w, h)
+            }
+        }
+        _ => (rgba, w, h),
+    };
+    encode_region(rgba, w, h, max_dim, format)
+}
+
 fn init_capture_state() -> Result<CaptureContext, CoreError> {
     unsafe {
         use windows::core::Interface;

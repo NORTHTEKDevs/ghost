@@ -38,6 +38,16 @@
   needs `GHOST_LIVE_NOTEPAD=1` (Win11 Notepad restores the user's own tabs into
   any instance, so a test could type into their unsaved file).
 
+- **`ghost_screenshot` and `ghost_assert text-present/absent` follow the
+  anchor too.** They were the last two window-scoped verbs still reading the
+  human's foreground window under an anchor. Now the target window (explicit
+  `window=` or the session anchor) is captured BY HANDLE on every surface -
+  the user's desktop (works while the window is covered), a hidden desktop, or
+  the page's own render through CDP - and the text predicates OCR that capture.
+  `name`/`role`/`rect` crop inside the target; `full=true` is still the
+  whole screen. Measured: an anchored hidden window in 17 ms, a covered
+  Calculator on the user desktop in 33 ms, foreground unchanged, audit 0.
+
 **Defects those tests found, all real and all fixed:** `read_text` returned only
 the FIRST CHARACTER of a control (the message result was discarded, so the
 length was the send's success flag) - every isolated-desktop typing check was
