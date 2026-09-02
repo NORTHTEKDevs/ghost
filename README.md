@@ -17,13 +17,22 @@ once and behave the same on both. [Platform support](#platforms) ·
 
 - **Runs in the background, and that is enforced.** An agent can click, type, and
   use shortcuts inside an app *while you keep working in another window* - no focus
-  steal, no cursor jump. It posts window messages to real controls; most tools can
-  only drive whatever is in the foreground. Since 0.19 this is a policy, not a
-  preference: the focus policy defaults to `background`, and every call that could
-  only work by grabbing your cursor or foreground window *fails* with an error
-  naming the action instead of quietly taking the screen. Raise it per target with
+  steal, no cursor jump. It posts window messages to real controls and uses UI
+  Automation patterns on windowless ones; most tools can only drive whatever is in
+  the foreground. Since 0.19 this is a policy, not a preference: the focus policy
+  defaults to `background`. Since 0.20 it is also *constructive*: anything Ghost
+  starts (an app, a windowed browser) is born on a hidden desktop that has its own
+  input queue and cannot take your foreground, and the ordinary verbs drive it there
+  by window title. A call that truly has no background path fails naming the action
+  instead of quietly taking the screen. Raise the policy per target with
   `ghost_set_focus_policy` when you actually want real input.
   ([how](#background-mode-agent-harness--computer-use))
+- **Never your window by accident.** The session remembers the last window the
+  agent named or launched and every window-scoped verb targets it by default. The
+  human's foreground window is used only when nothing was ever anchored, and the
+  response says so. Three weeks of real transcripts showed "element not found in the
+  foreground window" as the top failure before this; it was the agent searching the
+  window *you* had open.
 - **Many agents at once.** Requests are dispatched in parallel, so a 15-second wait
   in one tab does not stall an instant query behind it, and a second Ghost process
   runs its own browser alongside the first without contending for the mouse.
@@ -62,13 +71,17 @@ Ship it three ways:
 
 The MCP surface is 20 desktop verbs, 19 `ghost_browser_*` / `ghost_tab_*` tools for
 driving individual browser tabs in the background (Chrome, Comet, Edge, Brave), and
-15 Windows-only tools: the focus policy plus `ghost_desktop_*`, which runs an app on
-an isolated Windows desktop the user never sees. UIA and capture work fully there.
-Input is limited to what an app accepts by window message: real `SendInput` does not
-work off the input desktop because Windows refuses it, and typing is proven by
-reading the control's value back, so a target that drops posted characters returns an
-error rather than a false success. The desktop verbs and the browser tools build on
-Linux as well; the focus policy and isolated desktops are Windows-only.
+15 Windows-only tools: the focus policy plus `ghost_desktop_*` for explicit control of
+isolated Windows desktops the user never sees. Under the default policy you rarely
+need the latter: `ghost_window op=launch` already starts the app on the hidden
+desktop `auto`, and `ghost_see` / `ghost_act` / `ghost_key` / `ghost_scroll` reach it
+with `window=<title>` exactly as they reach a window on your own desktop
+(`target.surface` in the response tells you which). UIA, window messages and capture
+work fully there. Real `SendInput` does not, because Windows refuses it off the
+input desktop, and typing is proven by reading the control's value back, so a target
+that drops posted characters returns an error rather than a false success. The
+desktop verbs and the browser tools build on Linux as well; the focus policy and
+hidden desktops are Windows-only.
 
 No Claude required. No browser required. No CDP. It drives apps through the OS's
 own automation and input APIs, so it works with native apps that have no API and
@@ -296,6 +309,9 @@ tools, or launching apps. `op=run` is a one-shot (`powershell`/`pwsh`/`cmd`); `o
 starts a persistent PowerShell whose variables and cwd survive across `op=send` calls.
 Output is merged stdout+stderr, tail-capped for the agent's context window; a timed-out
 command keeps running and is drained with `op=read`; `ghost_stop` kills a runaway.
+`op=run` with the default `powershell` is served from a pre-spawned spare process, so
+a command costs about 85 ms instead of the 230-450 ms a fresh PowerShell start takes
+(the spare is single-use and replaced immediately; `GHOST_SHELL_WARM=off` disables it).
 
 Spawn a fresh Claude Code session from the agent:
 `ghost_shell op=run cmd='Start-Process wt -ArgumentList "pwsh","-NoExit","-Command","claude"'`,
@@ -317,9 +333,15 @@ calls, the client's own terminal usually retakes OS focus. Ghost is built for th
 - **Every action response is honest**: `verified` (did the screen actually change),
   `focus_confirmed` (was the right window foreground), and a `warning` when either is off - 
   never a blind `ok:true`. Check `verified` before re-issuing an action.
-- **Anchor to a window** - `ghost_key`, `ghost_find`, and `ghost_act` all take `window`;
-  with it, input/resolution is guaranteed to target that window or the call errors. Use it
-  for any multi-window flow.
+- **Anchor to a window** - `ghost_see`, `ghost_find`, `ghost_act`, `ghost_key`,
+  `ghost_click_at`, `ghost_scroll`, `ghost_wait` and `ghost_assert` all take `window`
+  (a title substring, resolved across your desktop and Ghost's hidden desktops: exact
+  title beats prefix beats substring, a window that is not minimised wins ties). The
+  match becomes the session **anchor**: later calls without `window` target it, never
+  the window the human happens to be using. `ghost_window op=focus` anchors without
+  raising under the background policy; `op=anchor` sets, clears or reports it; every
+  response carries `target {hwnd, title, surface, source}`. A title that matches
+  nothing lists the open windows and returns code -32007.
 - **Disambiguate duplicates** - `index` selects the nth match when several elements share a
   name/role (multiple "Close Tab" buttons); responses carry a `matches` count.
 - **Read, don't screenshot** - `ghost_see mode=text` extracts a window/page's readable text
@@ -347,37 +369,55 @@ unblock it. Set `GHOST_FOCUS_POLICY` in the server env, or call
 back afterwards. `ghost_focus_policy` reports the current setting.
 
 ```jsonc
-// Drive Calculator-in-the-background style call:
-ghost_act { "background": true, "window": "Character Map",
-            "action": "click", "name": "Select", "role": "button" }
+// Drive an app while the human keeps working. No flag needed: background is the default.
+ghost_window { "op": "launch", "exe": "notepad.exe" }
+// -> { "surface": "hidden", "desktop": "auto", "window": { "title": "Notepad", ... }, "target": {...} }
+ghost_act { "role": "edit", "action": "type", "text_input": "hello" }   // targets the anchor
+// -> { "verified": true, "focus_preserved": true, "cursor_preserved": true, "mode": "hidden" }
+ghost_act { "window": "Comet", "name": "Post", "action": "click" }      // a window on YOUR desktop
 // -> { "verified": true, "focus_preserved": true, "cursor_preserved": true, "mode": "background" }
 ```
 
+- **Launches never surface.** Measured on this repo's CI box: Edge and Chrome
+  activate their first window on launch in every launch style (normal, hidden,
+  minimised, from a background parent, placed at -32000,-32000). A window created on
+  your desktop takes your keyboard the moment it exists. So under the background
+  policy Ghost never creates one there: `ghost_window op=launch`, `ghost_run` launch
+  steps and `ghost_browser_launch mode=windowed` start on a hidden desktop with its
+  own input queue, and the window is anchored so the next `ghost_see` shows it. An
+  independent observer sampling the foreground at 100 ms across a full
+  launch-drive-close run reported zero changes.
 - **True background via posted window messages.** Real Win32 controls are driven
-  with `BM_CLICK` / `WM_LBUTTONDOWN·UP` (click) and `WM_SETTEXT` (type). These do
-  not activate the window - unlike UIA `Invoke`/`SetValue`, whose providers pull
-  the window to the foreground.
+  with `BM_CLICK` / `WM_LBUTTONDOWN·UP` (click), `WM_SETTEXT` (type) and
+  `WM_MOUSEWHEEL` (scroll). These do not activate the window.
+- **Windowless controls, without the screen.** UWP/WinUI/Chromium/Electron controls
+  have no window handle. Ghost drives them with UI Automation patterns - `Invoke` for
+  a click, `ValuePattern` for typing - which web content services without raising the
+  window (measured on Chrome: a page button clicked and a page `<input>` filled, with
+  input events firing, `focus_preserved: true`). Views-level chrome such as the
+  address bar can still activate; `focus_preserved` reports the truth. Posted single
+  keys reach the page's focused element.
 - **Verified even while occluded.** `type` is confirmed by reading the control's
   value back; `click` by a `PrintWindow` before/after delta that renders a window
   that isn't visible. Every response carries `verified`, `focus_preserved`,
   `cursor_preserved` - Ghost never claims a background action it can't confirm.
-- **Honest about the edge.** Windowless controls (UWP/WinUI/Chromium - no window
-  handle) can't be message-posted by *any* tool. Under the default policy Ghost
-  refuses those rather than reaching for the screen, and the error names the action
-  and the policy that would allow it; raise the policy and it falls back to UIA
-  dispatch, which activates the window, and says so in the response. Classic Win32
-  line-of-business apps - the software that has no API and most needs automating -
-  drive cleanly in the background.
-- **Or give it a desktop of its own.** `ghost_desktop_*` runs an app on a separate
-  Windows desktop that is never displayed, so UIA, window messages and capture all
-  work on a window the user cannot see. Real `SendInput` still does not work there:
-  Windows refuses it off the input desktop, and making that desktop the input desktop
-  would put it on screen. An app that answers *only* real hardware input needs the
-  `foreground` policy on your own desktop.
+- **Hidden desktops are the same vocabulary.** A window on the hidden desktop is
+  driven with the same `window=<title>` calls; `target.surface: "hidden"` is the only
+  difference. Chromium and Electron windows there are driven by posted messages
+  rather than UIA actions (Chromium services `Invoke`/`SetValue` on a non-composited
+  desktop only after a ~2 s internal wait; a posted click lands in ~100 ms), and pixel
+  verification is skipped for them because a software render there costs seconds -
+  confirm through `ghost_tab_eval` or `ghost_see`. Real `SendInput` still does not
+  work on a hidden desktop (Windows refuses it off the input desktop), so an app that
+  answers *only* real hardware input needs the `foreground` policy on your own desktop.
+- **Honest about single-instance apps.** Windows 11 Notepad, Explorer, or a browser on
+  its default profile hand a launch to their already-running process, whose windows
+  live on your desktop. Ghost cannot prevent that; it reports `surface: "user"` with a
+  warning rather than claiming the app is hidden.
 
-Supports `click`, `type`, `double_click`, `right_click`, and `hover` (posted mouse
-messages), plus `ghost_key background=true` for single keys (Enter/Tab/F-keys/char
-via `WM_KEYDOWN`/`WM_CHAR`).
+Supports `click`, `type`, `double_click`, `right_click`, `hover` and scrolling, plus
+`ghost_key` for single keys (Enter/Tab/F-keys/char via `WM_KEYDOWN`/`WM_CHAR`). The
+`background: true` flag is accepted for compatibility; it is the default behaviour.
 
 The clipboard and edit combos work in the background too - Ctrl+C, Ctrl+X, Ctrl+V,
 Ctrl+Z and Ctrl+A are sent as the semantic messages an app actually implements

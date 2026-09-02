@@ -153,6 +153,19 @@ pub fn require_foreground_allowed(action: &'static str) -> Result<(), CoreError>
     }
 }
 
+/// Serialises the tests in this crate that change the process-global policy.
+///
+/// Without it two tests race: one flips the policy to `Foreground` for a moment
+/// while another asserts that a real click is refused - and under `Foreground`
+/// that click is REAL, at whatever coordinates the test used, on the human's
+/// desktop. Observed once as a flaky failure of the desktop test; the click it
+/// implies is the worse outcome. Every test that calls `set_policy` holds this.
+#[cfg(test)]
+pub(crate) fn policy_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 /// Run `f` while temporarily forcing `p`, restoring the previous policy afterwards.
 /// Used by callers that explicitly opt a single action into foreground input.
 pub fn with_policy<T>(p: FocusPolicy, f: impl FnOnce() -> T) -> T {
@@ -171,6 +184,7 @@ mod tests {
     // avoid cross-test interference from cargo's parallel test threads.
     #[test]
     fn policy_parsing_and_gating() {
+        let _serial = policy_test_lock();
         assert_eq!(
             "background".parse::<FocusPolicy>(),
             Ok(FocusPolicy::Background)
@@ -202,7 +216,7 @@ mod tests {
         set_policy(FocusPolicy::Foreground);
         assert!(foreground_allowed());
 
-        let seen = with_policy(FocusPolicy::Background, || policy());
+        let seen = with_policy(FocusPolicy::Background, policy);
         assert_eq!(seen, FocusPolicy::Background);
         assert_eq!(policy(), FocusPolicy::Foreground, "policy must be restored");
 

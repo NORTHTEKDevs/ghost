@@ -1,6 +1,57 @@
 # Changelog
 
-## [Unreleased] - background-routing completion + bench restored to 14/14
+## [0.20.0] - Background by construction
+
+Evidence first: three weeks of Claude Code transcripts (10,323 Ghost calls) and four
+live experiments on the development machine. Design record:
+`docs/plans/2026-09-01-background-by-construction-design.md`.
+
+- **Window anchoring.** The top failure class was "element not found in the
+  foreground window": with no `window=` the verbs acted on whatever window the human
+  had focused, and agents compensated with `op=focus` and the `foreground` policy -
+  the screen-stealing the policy exists to prevent. The session now keeps an anchor
+  (the last window named or launched); window-scoped verbs default to it, the
+  human's foreground is used only when nothing was ever anchored and the response
+  says so (`target.source`). `ghost_window op=focus` anchors instead of raising under
+  the background policy; `op=anchor` sets/clears/reports; every window-scoped response
+  carries `target {hwnd, title, surface, source}`; a miss lists the open windows and
+  returns -32007. Titles resolve exact > prefix > substring, non-minimised first.
+- **Launches go to a hidden desktop.** Measured: Edge and Chrome activate their first
+  window on launch in every launch style, even from a background parent and placed
+  off-screen, so `ghost_browser_launch mode=windowed` handed the human's keyboard to
+  an invisible window. Under the background policy `ghost_window op=launch`,
+  `ghost_run` launch steps and windowed browsers now start on the hidden desktop
+  `auto` (`STARTUPINFO.lpDesktop`), the new window is anchored, and a single-instance
+  app that surfaces on the user's desktop is reported as `surface: "user"` with a
+  warning. Independent 100 ms observer over a launch/drive/close run: zero foreground
+  changes.
+- **One vocabulary for hidden desktops.** `ghost_see/find/act/key/click_at/scroll/
+  snapshot/assert/wait` resolve `window=` across the user desktop and every hidden
+  desktop and run against hidden windows through that desktop's worker
+  (`ghost_session::hidden`), same argument names and result shapes. Chromium/Electron
+  windows there are driven by posted messages (UIA Invoke/SetValue against Chromium on
+  a non-composited desktop returns only after a ~2 s internal wait; posted input lands
+  in ~100 ms) and pixel verification is skipped for them (no DWM -> multi-second
+  software render). `ghost_scroll` gains a background path on the user desktop too.
+- **Honest tool descriptions.** `ghost_act` said it "anchors OS foreground to the
+  target's window", `ghost_key` that the target "is focused+confirmed first" - the
+  pre-0.19 behaviour. Descriptions now state the enforced background behaviour and
+  the anchor semantics; `background: true` is accepted for compatibility.
+- **UIA calls have real deadlines.** Every automation object is created through one
+  constructor that asks `CUIAutomation8` for `IUIAutomation2` and sets
+  `ConnectionTimeout`/`TransactionTimeout` (3 s / 5 s, env-overridable). The old code
+  cast to plain `IUIAutomation` and never reached the setters, so a walker call blocked
+  on a busy target app indefinitely (a measured 1.8% stall rate under load).
+- **A dead tool call answers.** Each request runs under a guard: a panic inside a
+  tool, or a call outliving its deadline (`GHOST_TOOL_DEADLINE_MS`, lifted for tools
+  with a larger explicit timeout), becomes an error response instead of silence that
+  left the client waiting 1,800 s. Panics are appended to
+  `%LOCALAPPDATA%ghostcrash.log`.
+- **Warm PowerShell.** `ghost_shell op=run shell=powershell` (60% of all calls) is
+  served from a pre-spawned spare running the sentinel driver: 82-87 ms measured, from
+  232-447 ms. Single-use, replaced immediately, `GHOST_SHELL_WARM=off` disables.
+
+## [Unreleased, shipped in 0.20.0] - background-routing completion + bench restored to 14/14
 
 - **Background-policy routing for anchored verbs**: `ghost_find`, `ghost_act`,
   `ghost_key` (single keys) and `ghost_click_at` with a `window` anchor now

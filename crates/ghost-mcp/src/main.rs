@@ -2611,7 +2611,7 @@ fn lean_tools_schema() -> Value {
               "limit": { "type": "integer", "description": "Max elements (default 150) or chars for mode=text (default 20000); 0 = unlimited elements" }
           }}},
         { "name": "ghost_find",
-          "description": "Locate an element (name|role|description|text) and return center, rect, source, confidence, escalated (true = a network VLM call was paid). Target window = window= (anchored) or the session anchor; else the foreground. Under the default background policy nothing is focused or raised: the lookup is scoped to the window's own UIA subtree, so it works while the window is covered or lives on a hidden desktop.",
+          "description": "Locate an element (name|role|description|text) and return center (always), rect (has_rect=true for UIA/cache hits), source, confidence, name, escalated (true = a network VLM call was paid). Target window = window= (anchored) or the session anchor; else the foreground. Under the default background policy nothing is focused or raised: the lookup is scoped to the window's own UIA subtree, so it works while the window is covered or lives on a hidden desktop.",
           "inputSchema": { "type": "object", "properties": {
               "name": { "type": "string", "description": "Accessible name (case-insensitive substring)" },
               "role": { "type": "string", "description": "Control type: button, edit, checkbox, list, menu, tab, toolbar" },

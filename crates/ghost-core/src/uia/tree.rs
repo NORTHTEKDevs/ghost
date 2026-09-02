@@ -860,6 +860,7 @@ mod tests {
         // focus_window is a foreground action, so under the default background policy
         // it is refused before the name lookup. Allow foreground for this unit, then
         // a missing window still surfaces ProcessNotFound.
+        let _serial = crate::focus::policy_test_lock();
         crate::focus::set_policy(crate::focus::FocusPolicy::Foreground);
         let result = focus_window("__ghost_nonexistent_window_xyzzy__");
         crate::focus::set_policy(crate::focus::FocusPolicy::Background);

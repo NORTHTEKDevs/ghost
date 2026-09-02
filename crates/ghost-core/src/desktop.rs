@@ -612,17 +612,21 @@ mod tests {
 
     #[test]
     fn creating_a_desktop_binds_a_worker_and_exempts_it_from_the_focus_policy() {
+        let _serial = crate::focus::policy_test_lock();
         crate::focus::set_policy(crate::focus::FocusPolicy::Background);
         let d = DesktopSession::create("unit").expect("create desktop");
         assert!(d.name().starts_with("ghost-"));
         assert!(d.name().ends_with("unit"), "{}", d.name());
 
-        // The calling thread is still bound by the policy...
+        // The calling thread is still bound by the policy... Checked through
+        // the gate itself rather than a real `mouse::click`: if the policy were
+        // ever not `Background` here, that click would land on the human's
+        // desktop at (5, 5).
         assert!(!crate::focus::on_isolated_desktop());
-        assert!(crate::input::mouse::click(5, 5).is_err());
+        assert!(crate::focus::require_foreground_allowed("click").is_err());
 
         // ...but the desktop worker is not, because its input cannot reach the user.
-        let exempt = d.exec(|| crate::focus::on_isolated_desktop()).unwrap();
+        let exempt = d.exec(crate::focus::on_isolated_desktop).unwrap();
         assert!(exempt, "worker thread must be marked isolated");
     }
 
