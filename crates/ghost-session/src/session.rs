@@ -86,7 +86,7 @@ pub struct GhostSession {
     /// Cumulative grounding cascade telemetry. Mutex because `ground()` takes
     /// `&self` from concurrent request tasks and needs to mutate stats.
     grounding_stats: Mutex<GroundingStats>,
-    /// Keeps COM initialized for the session lifetime — calls CoUninitialize on drop.
+    /// Keeps COM initialized for the session lifetime - calls CoUninitialize on drop.
     _com_guard: ComGuard,
     /// Persistent shell sessions (ghost_shell op=open/send/read/kill).
     pub(crate) shells: Mutex<crate::shell::ShellRegistry>,
@@ -97,6 +97,9 @@ pub struct GhostSession {
     #[cfg(windows)]
     pub(crate) desktops:
         tokio::sync::Mutex<std::collections::HashMap<String, Arc<ghost_core::DesktopSession>>>,
+    /// The window unanchored verbs act on (see `target.rs`): the last window the
+    /// agent named or launched. Never the human's foreground by accident.
+    pub(crate) anchor: Mutex<Option<crate::target::WindowTarget>>,
 }
 
 impl GhostSession {
@@ -108,7 +111,7 @@ impl GhostSession {
         let tree = UiaTree::new().map_err(GhostError::Core)?;
 
         // Log which vision providers are configured (presence only, never values).
-        // Treat empty/whitespace-only values the same as unset — an empty key causes
+        // Treat empty/whitespace-only values the same as unset - an empty key causes
         // confusing provider 500s rather than a clear error.
         let nvidia_ok = env_key_is_set("NVIDIA_API_KEY");
         let anthropic_ok = env_key_is_set("ANTHROPIC_API_KEY");
@@ -136,6 +139,7 @@ impl GhostSession {
             browsers: tokio::sync::Mutex::new(crate::registries::BrowserRegistry::default()),
             #[cfg(windows)]
             desktops: tokio::sync::Mutex::new(std::collections::HashMap::new()),
+            anchor: Mutex::new(None),
         })
     }
 
@@ -281,7 +285,7 @@ impl GhostSession {
                         let validated = match self.tree.element_from_point(cx, cy).map_err(GhostError::Core)? {
                             Some(el) => {
                                 let matches = match &by {
-                                    // MEDIUM-7: equality for cache validation — contains can match wrong element
+                                    // MEDIUM-7: equality for cache validation - contains can match wrong element
                                     By::Name(n) => el.name().to_lowercase() == n.to_lowercase(),
                                     By::Role(r) => {
                                         let role = crate::engine::uia::element::role_id_to_name(el.control_type());
@@ -305,7 +309,7 @@ impl GhostSession {
                                 return Ok(crate::GhostElement::new(el));
                             }
                             None => {
-                                // Stale cache entry — invalidate and fall through to walk.
+                                // Stale cache entry - invalidate and fall through to walk.
                                 tracing::debug!("locator cache STALE, invalidating");
                                 self.locator_cache.invalidate(key);
                             }
@@ -326,7 +330,7 @@ impl GhostSession {
                     if let Some(ref key) = cache_key {
                         if let Some(rect) = el.bounding_rect() {
                             self.locator_cache.upsert(key.clone(), (rect.left, rect.top, rect.right, rect.bottom));
-                            // HIGH-3: bump_seq instead of apply_snapshot(empty) — advancing seq
+                            // HIGH-3: bump_seq instead of apply_snapshot(empty) - advancing seq
                             // without corrupting nodes or archiving the snapshot.
                             self.cache.bump_seq();
                         }
@@ -444,7 +448,7 @@ impl GhostSession {
     }
 
     /// Debug: the Set-of-Marks annotated screenshot (raw JPEG bytes) plus the
-    /// numbered label list — exactly what the VLM sees when grounding by
+    /// numbered label list - exactly what the VLM sees when grounding by
     /// description. The fastest way to diagnose "why did grounding pick wrong".
     /// Returns (Some(jpeg) or None if nothing to mark, marks_json).
     pub async fn render_marks(&self) -> Result<(Option<Vec<u8>>, Vec<serde_json::Value>)> {
@@ -566,7 +570,7 @@ impl GhostSession {
                 self.reflection.lock().unwrap().record_success(obs, format!("som '{description}' -> ({sx},{sy})"));
                 return Ok((sx, sy));
             }
-            Ok(None) => { /* no marks or model picked none — fall back to coord regression */ }
+            Ok(None) => { /* no marks or model picked none - fall back to coord regression */ }
             Err(e) => { tracing::warn!(error=%e, "set-of-marks grounding failed; falling back to coordinate regression"); }
         }
 
@@ -1077,8 +1081,8 @@ impl GhostSession {
 
     /// Press and release a named key: Enter, Tab, Escape, F5, ArrowUp, Ctrl, etc.
     /// A single character with no VK mapping (an operator/punctuation symbol like
-    /// `*`, `/`, `-`, `.`, `=`) is sent as a Unicode character — layout-independent
-    /// and exactly the intended glyph — instead of failing. Multi-char unknown
+    /// `*`, `/`, `-`, `.`, `=`) is sent as a Unicode character - layout-independent
+    /// and exactly the intended glyph - instead of failing. Multi-char unknown
     /// names still error.
     pub async fn press(&self, key: &str) -> Result<()> {
         if is_stopped() { return Err(GhostError::Stopped); }
@@ -1109,7 +1113,7 @@ impl GhostSession {
         // Release held modifiers on EVERY exit path so a SendInput failure can
         // never leave Ctrl/Shift/Alt stuck down (a stuck modifier corrupts all
         // later keyboard input system-wide). This must cover a failure DURING the
-        // modifiers-down loop too — if key-down succeeds for Ctrl but fails for
+        // modifiers-down loop too - if key-down succeeds for Ctrl but fails for
         // Shift, the already-pressed Ctrl must still be released before returning.
         let mut pressed = Vec::new();
         let down_result: Result<()> = (|| {
@@ -1212,7 +1216,7 @@ impl GhostSession {
     }
 
     /// Bring the window whose title contains `name` to the foreground and confirm it,
-    /// restoring it first if minimized. Errors loudly on failure — callers use this
+    /// restoring it first if minimized. Errors loudly on failure - callers use this
     /// to guarantee keyboard input lands in the intended window.
     pub async fn ensure_window_foreground(&self, name: &str) -> Result<()> {
         let n = name.to_string();
@@ -1447,7 +1451,7 @@ impl GhostSession {
         url: &str,
         idle_timeout_ms: u64,
     ) -> Result<()> {
-        // Tolerate transient FocusFailed — the navigation action itself will surface a real
+        // Tolerate transient FocusFailed - the navigation action itself will surface a real
         // error if the window is truly unreachable. Other errors (ProcessNotFound, etc.) still propagate.
         if let Err(e) = self.focus_window(window_name).await {
             match e {
@@ -1665,7 +1669,7 @@ impl GhostSession {
     ) -> Result<serde_json::Value> {
         let name = el.name();
 
-        // Fail fast on disabled controls for ALL actions — the coordinate paths
+        // Fail fast on disabled controls for ALL actions - the coordinate paths
         // (double_click/right_click/hover) previously bypassed the click/type
         // disabled guard and clicked a dead control, returning a misleading ok.
         if !el.is_enabled() {
@@ -1688,7 +1692,7 @@ impl GhostSession {
         // UIA SetFocus alone fails silently for a background console process
         // (foreground-lock timeout), and every SendInput fallback (double_click,
         // right_click, pattern-miss type path) routes to whichever window holds
-        // OS focus — which between MCP calls is usually the client's terminal.
+        // OS focus - which between MCP calls is usually the client's terminal.
         let focus_confirmed = match rect {
             Some((l, t, r, b)) => {
                 let (cx, cy) = ((l + r) / 2, (t + b) / 2);
@@ -1713,7 +1717,7 @@ impl GhostSession {
         // Retry-until-verified: dispatch, then check for a screen change. If the
         // action produced NO detected change, re-focus and dispatch once more.
         //
-        // ONLY `type` is retryable — it is idempotent (ValuePattern.SetValue and
+        // ONLY `type` is retryable - it is idempotent (ValuePattern.SetValue and
         // the clear-then-type fallback both REPLACE the field, so a second
         // dispatch can't double the text). click/double_click/right_click are
         // NOT retried: a verified=false is ambiguous (the effect may simply be
@@ -1741,7 +1745,7 @@ impl GhostSession {
                     let t = text.ok_or_else(|| GhostError::Vision("ghost_act: action=type requires text param".into()))?;
                     el.type_text(t)?;
                 }
-                // HIGH-2: no clean UIA pattern — dispatch coordinate equivalents.
+                // HIGH-2: no clean UIA pattern - dispatch coordinate equivalents.
                 "double_click" | "right_click" | "hover" => {
                     let (cx, cy) = rect.map(|(l, t, r, b)| ((l + r) / 2, (t + b) / 2))
                         .ok_or_else(|| GhostError::Vision(format!("ghost_act: action={action} requires element with bounding rect")))?;
@@ -1764,7 +1768,7 @@ impl GhostSession {
             if changed || !retryable || !can_verify || attempts >= 2 {
                 break;
             }
-            // No change and we can verify — re-anchor focus and try once more.
+            // No change and we can verify - re-anchor focus and try once more.
             if let Some((l, t, r, b)) = rect {
                 let (cx, cy) = ((l + r) / 2, (t + b) / 2);
                 let _ = tokio::task::spawn_blocking(move || {
@@ -1816,7 +1820,7 @@ impl GhostSession {
 
     /// Background action: act on an element inside a NAMED window without
     /// bringing it to the foreground or moving the real cursor. This is the
-    /// agent-harness mode — an agent can drive an app while the human keeps
+    /// agent-harness mode - an agent can drive an app while the human keeps
     /// working in another window.
     ///
     /// Dispatch is UIA-pattern-only: `click` -> InvokePattern, `type` ->
@@ -1855,7 +1859,7 @@ impl GhostSession {
         let fg_before = crate::engine::system::foreground_window();
         let cur_before = crate::engine::system::cursor_pos();
 
-        // Find the element WITHIN that window's subtree — no foreground, no set_focus.
+        // Find the element WITHIN that window's subtree - no foreground, no set_focus.
         let el = match &by {
             By::Name(n) => self.tree.find_by_name_in_hwnd(hwnd, n).map_err(GhostError::Core)?,
             By::Role(r) => self.tree.find_by_role_in_hwnd(hwnd, r).map_err(GhostError::Core)?,
@@ -1871,14 +1875,14 @@ impl GhostSession {
         let rect = el.bounding_rect();
 
         // A nonzero native window handle means the control is a real Win32 window
-        // we can drive with posted messages (BM_CLICK / WM_SETTEXT / WM_LBUTTON*) —
+        // we can drive with posted messages (BM_CLICK / WM_SETTEXT / WM_LBUTTON*) - 
         // TRULY non-activating. UIA Invoke/SetValue providers, by contrast,
         // activate the target window, so they're only a last-resort fallback for
         // windowless (UWP/WinUI/Chromium) controls, and we flag when we use them.
         let ctrl_hwnd = el.native_window_handle();
         const UIA_BUTTON: u32 = 50000;
 
-        // Window screen origin — used to convert the element's screen rect into the
+        // Window screen origin - used to convert the element's screen rect into the
         // window-relative ROI for scoped click verification.
         let win_origin = crate::engine::system::window_rect(hwnd).map(|(l, t, _, _)| (l, t));
 
@@ -1930,14 +1934,14 @@ impl GhostSession {
                 let t = text.ok_or_else(|| GhostError::Vision("ghost_act: action=type requires text param".into()))?;
                 let via_message = ctrl_hwnd != 0;
                 if via_message {
-                    // Real Win32 control: WM_SETTEXT. A failure here PROPAGATES —
+                    // Real Win32 control: WM_SETTEXT. A failure here PROPAGATES - 
                     // we do NOT silently fall back to the focus-stealing UIA path.
                     crate::engine::input::BackgroundClicker::set_text(ctrl_hwnd, t).map_err(GhostError::Core)?;
                 } else {
-                    // Windowless control — UIA ValuePattern (may activate the window).
+                    // Windowless control - UIA ValuePattern (may activate the window).
                     el.type_text_background(t)?;
                 }
-                // Read back via ValuePattern.CurrentValue — no pixels needed.
+                // Read back via ValuePattern.CurrentValue - no pixels needed.
                 let got = el.get_text();
                 let ok = got.trim() == t.trim() || got.contains(t);
                 (Some(ok), if via_message { None } else {
@@ -1986,7 +1990,7 @@ impl GhostSession {
                 let (sx, sy) = screen_center;
                 crate::engine::input::BackgroundClicker::right_click_screen(ctrl_hwnd, sx, sy).map_err(GhostError::Core)?;
                 // A context menu opens as a separate popup window outside this
-                // window's pixels — not verifiable via PrintWindow here.
+                // window's pixels - not verifiable via PrintWindow here.
                 (None, Some("background right_click posted (focus preserved); the context menu is a separate popup — screenshot/read to confirm"))
             }
             "hover" => {
@@ -2040,7 +2044,7 @@ impl GhostSession {
         let win_hwnd = win.hwnd;
         let target = crate::engine::input::BackgroundClicker::focused_control(win_hwnd);
         // focused_control falls back to the top-level frame when nothing in the
-        // window's thread holds focus — a key posted to the frame usually has no
+        // window's thread holds focus - a key posted to the frame usually has no
         // text-editing effect, so surface it rather than a falsely-clean result.
         let no_focused_control = target == win_hwnd;
 
@@ -2048,7 +2052,7 @@ impl GhostSession {
         let cur_before = crate::engine::system::cursor_pos();
 
         // A single printable char goes as WM_CHAR (edits need WM_CHAR to insert
-        // text — a posted WM_KEYDOWN alone won't, with no message pump to translate
+        // text - a posted WM_KEYDOWN alone won't, with no message pump to translate
         // it). Named keys (Enter/Tab/F5/arrows/Backspace/...) go as a virtual key.
         let mut chars = key.chars();
         match (chars.next(), chars.next()) {
@@ -2080,7 +2084,7 @@ impl GhostSession {
     }
 
     /// Background clipboard/edit shortcut: dispatch copy|cut|paste|undo|select_all
-    /// to a named window's focused control as a semantic message (WM_COPY etc.) —
+    /// to a named window's focused control as a semantic message (WM_COPY etc.) - 
     /// the reliable, background-safe way to do the common Ctrl+ shortcuts without
     /// foreground/cursor change. Returns {focus_preserved, cursor_preserved}.
     pub async fn edit_command_background(&self, window: &str, cmd: &str) -> Result<serde_json::Value> {
@@ -2144,7 +2148,7 @@ impl GhostSession {
 
         // Occlusion diagnostic: what element actually sits at (x,y) right now?
         // This is a blind coordinate dispatch (OCR/VLM tier), so the point may be
-        // covered by a modal/tooltip that appeared after grounding. Non-fatal —
+        // covered by a modal/tooltip that appeared after grounding. Non-fatal - 
         // surfaced as hit_element so a mis-hit is diagnosable instead of silent.
         // Also capture whether the hit element is a text field, to gate the
         // destructive clear-before-type below (a mis-grounded type onto an
@@ -2168,7 +2172,7 @@ impl GhostSession {
                 let t = text.ok_or_else(|| GhostError::Vision("act_at: action=type requires text param".into()))?;
                 self.click_at(x, y).await?;
                 // Clear existing content first so type replaces rather than
-                // appends — but ONLY when the point is a known text field. On a
+                // appends - but ONLY when the point is a known text field. On a
                 // non-editable hit (a file row, a button, the desktop) Ctrl+A +
                 // Delete would select-all + delete, so skip the clear there.
                 if hit_is_editable {

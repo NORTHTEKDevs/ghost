@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use ghost_session::{GhostSession, Target, LocateMode};
+use ghost_session::{GhostSession, LocateMode, Target, TargetSource, WindowTarget};
 
 mod ext;
 use std::io::{BufRead, Write};
@@ -192,7 +192,9 @@ fn foreground_info() -> Value {
 /// (GhostError Display + the handlers above); unmatched errors stay generic.
 fn classify_error(msg: &str) -> (i64, Option<&'static str>) {
     let m = msg.to_lowercase();
-    if m.contains("not found") || m.contains("elementnotfound") || m.contains("no element") {
+    if m.contains("no open window matches") {
+        (-32007, Some("no open window has that title - pick a title from ghost_window op=list (hidden-desktop windows are listed too), or start the app with ghost_window op=launch exe=<path>"))
+    } else if m.contains("not found") || m.contains("elementnotfound") || m.contains("no element") {
         (-32001, Some("element not found - call ghost_see to confirm the window is focused and the name/role are right, or retry ghost_find with mode=deliberate to escalate to the VLM"))
     } else if m.contains("disabled") || m.contains("occluded") || m.contains("not interactable") {
         (-32002, Some("element exists but isn't actionable (disabled or covered) - call ghost_see and check is_enabled/rect, or dismiss the covering element first"))
@@ -674,8 +676,13 @@ fn dispatch_tool_inner<'a>(
         if ext::owns(name) {
             return ext::dispatch(session, name, args).await;
         }
+        // Window anchoring (ghost_session::target): a window-scoped verb with no
+        // `window=` acts on the session anchor, never silently on the human's
+        // foreground; every such response reports what it targeted.
+        let prepared = prepare_window_target(session, name, args).await?;
+        let args: &Value = prepared.args.as_ref().unwrap_or(args);
         // Route lean verbs first, fall through to legacy handle_tool for all others.
-        match name {
+        let result = match name {
             "ghost_see" => handle_ghost_see(session, args).await,
             "ghost_snapshot" => handle_ghost_snapshot(session, args).await,
             "ghost_key" => handle_ghost_key(session, args).await,
@@ -688,8 +695,119 @@ fn dispatch_tool_inner<'a>(
             "ghost_query" => handle_ghost_query(session, args).await,
             // All other names (lean verbs with existing impls + all 48 legacy aliases).
             _ => handle_tool(session, name, args).await,
-        }
+        };
+        attach_target(session, result, prepared.target)
     })
+}
+
+/// The outcome of window resolution for one call: possibly rewritten arguments
+/// (the implicit window filled in, or `window="foreground"` stripped) and the
+/// target that was chosen.
+struct PreparedTarget {
+    args: Option<Value>,
+    target: Option<WindowTarget>,
+}
+
+/// Which calls are window-scoped, i.e. act inside one window and therefore
+/// need the anchor when the caller names none.
+fn is_window_scoped(name: &str, args: &Value) -> bool {
+    match name {
+        "ghost_see" => matches!(
+            args["mode"].as_str().unwrap_or("fast"),
+            "fast" | "full" | "text"
+        ),
+        "ghost_find" | "ghost_act" | "ghost_key" | "ghost_click_at" | "ghost_snapshot"
+        | "ghost_assert" => true,
+        "ghost_wait" => matches!(
+            args["for"].as_str().unwrap_or("ms"),
+            "element" | "value" | "idle" | "text"
+        ),
+        _ => false,
+    }
+}
+
+/// Resolve the window a window-scoped call should act on and rewrite its
+/// arguments so the verb lands on exactly that window.
+///
+/// - `window=` given: resolved (and anchored); the argument is normalised to the
+///   window's exact current title so the verb's own substring match cannot pick
+///   a different window than the one reported.
+/// - no `window=`, live anchor: the anchor's title is filled in.
+/// - neither: the human's foreground window, arguments untouched (the verbs'
+///   historical default), and the response will say so.
+/// - `window="foreground"`: the foreground explicitly; the argument is stripped
+///   so no verb goes looking for a window titled "foreground".
+///
+/// `ghost_see` on a resolved window is a scoped full walk: `mode=fast` is a
+/// foreground-only path and would silently describe the human's window.
+async fn prepare_window_target(
+    session: &GhostSession,
+    name: &str,
+    args: &Value,
+) -> std::result::Result<PreparedTarget, String> {
+    if !is_window_scoped(name, args) {
+        return Ok(PreparedTarget { args: None, target: None });
+    }
+    let explicit = args
+        .get("window")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let target = session
+        .resolve_target(explicit.as_deref())
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut new_args: Option<Value> = None;
+    let mut set = |key: &str, v: Value| {
+        let a = new_args.get_or_insert_with(|| args.clone());
+        a[key] = v;
+    };
+    match target.source {
+        TargetSource::Explicit | TargetSource::Anchor => {
+            if !target.title.is_empty() && explicit.as_deref() != Some(target.title.as_str()) {
+                set("window", Value::String(target.title.clone()));
+            }
+            if name == "ghost_see" && args["mode"].as_str().unwrap_or("fast") == "fast" {
+                set("mode", Value::String("full".into()));
+            }
+        }
+        TargetSource::Foreground => {
+            if explicit.is_some() {
+                let a = new_args.get_or_insert_with(|| args.clone());
+                if let Some(m) = a.as_object_mut() {
+                    m.remove("window");
+                }
+            }
+        }
+    }
+    Ok(PreparedTarget { args: new_args, target: Some(target) })
+}
+
+/// Add `target` to a successful window-scoped result. When the call fell
+/// through to the human's foreground under the background policy, say so: that
+/// is the exact situation that used to send agents hunting for the focus tools.
+fn attach_target(
+    session: &GhostSession,
+    result: std::result::Result<Value, String>,
+    target: Option<WindowTarget>,
+) -> std::result::Result<Value, String> {
+    let Some(t) = target else { return result };
+    match result {
+        Ok(Value::Object(mut m)) => {
+            m.insert("target".into(), t.to_json());
+            if t.source == TargetSource::Foreground && session.is_background_only() {
+                m.entry("target_note").or_insert(Value::String(
+                    "no window anchored: this acted on the human's current foreground window. \
+                     Pass window=<title substring> (or ghost_window op=anchor name=...) so the \
+                     automation's own window is the target from here on."
+                        .into(),
+                ));
+            }
+            Ok(Value::Object(m))
+        }
+        Ok(other) => Ok(json!({ "result": other, "target": t.to_json() })),
+        Err(e) => Err(e),
+    }
 }
 
 /// The `initialize` result. The version comes from the crate so it cannot drift
@@ -1033,13 +1151,33 @@ async fn handle_tool(
         }
         "ghost_list_windows" => {
             let windows = session.list_windows().await.map_err(|e| e.to_string())?;
-            let list: Vec<serde_json::Value> = windows.iter().map(|w| json!({
+            let mut list: Vec<serde_json::Value> = windows.iter().map(|w| json!({
                 "name": w.name,
                 "pid": w.pid,
+                "hwnd": w.hwnd,
                 "focused": w.focused,
                 "state": w.state,
+                "surface": "user",
             })).collect();
-            Ok(json!({ "windows": list }))
+            // Windows on Ghost's hidden desktops are listed too, so an app that
+            // was launched invisibly is discoverable by title like any other.
+            for c in session.hidden_candidates().await {
+                let desktop = match &c.surface {
+                    ghost_session::Surface::Hidden { desktop } => desktop.clone(),
+                    ghost_session::Surface::User => continue,
+                };
+                list.push(json!({
+                    "name": c.title,
+                    "pid": c.pid,
+                    "hwnd": c.hwnd,
+                    "focused": false,
+                    "state": "normal",
+                    "surface": "hidden",
+                    "desktop": desktop,
+                }));
+            }
+            let anchor = session.live_anchor().await.map(|t| t.to_json());
+            Ok(json!({ "windows": list, "anchor": anchor }))
         }
         "ghost_focus_window" => {
             let name = p["name"].as_str().ok_or("missing param: name")?;
@@ -1801,10 +1939,60 @@ async fn handle_ghost_window(
     let op = p.get("op").and_then(|v| v.as_str()).unwrap_or("list");
     match op {
         "list" => handle_tool(session, "ghost_list_windows", p).await,
-        "focus" => handle_tool(session, "ghost_focus_window", p).await,
+        "focus" => {
+            let name = p["name"]
+                .as_str()
+                .ok_or("missing param: name (window title substring)")?;
+            let target = session
+                .resolve_target(Some(name))
+                .await
+                .map_err(|e| e.to_string())?;
+            if target.is_hidden() {
+                return Ok(json!({
+                    "ok": true, "anchored": true, "raised": false, "target": target.to_json(),
+                    "note": "this window lives on a hidden desktop: Windows cannot move it onto \
+                             your screen, and it does not need to be - it is anchored, so the \
+                             window-scoped verbs drive it as-is."
+                }));
+            }
+            if session.is_background_only() {
+                // Under the background policy "focus" means ANCHOR. Raising the
+                // window would hand the human's keyboard to it, which is the one
+                // thing the policy forbids - and the anchor makes it unnecessary.
+                return Ok(json!({
+                    "ok": true, "anchored": true, "raised": false, "target": target.to_json(),
+                    "note": "background policy: the window was anchored, not raised. ghost_see, \
+                             ghost_find, ghost_act, ghost_key, ghost_click_at, ghost_wait and \
+                             ghost_assert now default to it and drive it without focus. Only \
+                             ghost_set_focus_policy prefer_background (then op=focus again) \
+                             brings it in front."
+                }));
+            }
+            let mut v = handle_tool(session, "ghost_focus_window", p).await?;
+            v["anchored"] = Value::Bool(true);
+            v["raised"] = Value::Bool(true);
+            v["target"] = target.to_json();
+            Ok(v)
+        }
+        "anchor" => {
+            if p["clear"].as_bool() == Some(true) {
+                session.clear_anchor();
+                return Ok(json!({ "ok": true, "anchor": Value::Null }));
+            }
+            if let Some(name) = p["name"].as_str() {
+                let t = session
+                    .resolve_target(Some(name))
+                    .await
+                    .map_err(|e| e.to_string())?;
+                return Ok(json!({ "ok": true, "anchor": t.to_json() }));
+            }
+            Ok(json!({ "ok": true, "anchor": session.live_anchor().await.map(|t| t.to_json()) }))
+        }
         "state" => handle_tool(session, "ghost_window_state", p).await,
         "launch" => handle_tool(session, "ghost_launch", p).await,
-        other => Err(format!("ghost_window: unknown op '{other}'; use list|focus|state|launch")),
+        other => Err(format!(
+            "ghost_window: unknown op '{other}'; use list|focus|anchor|state|launch"
+        )),
     }
 }
 
@@ -2213,46 +2401,46 @@ fn lean_tools_schema() -> Value {
     json!([
         // --- Perception ---
         { "name": "ghost_see",
-          "description": "Describe the active screen. mode=fast (default, foreground elements, 5-50x faster), mode=full (full walk, scope with window=; unknown window is an ERROR listing open windows), mode=delta (changed elements since since_seq), mode=text (READ the visible text of a window/page - cheapest way to read content, no screenshot needed), mode=marks (DEBUG: the Set-of-Marks annotated screenshot the VLM sees when grounding by description), mode=selection (read the current text SELECTION of a name/role element via TextPattern, without clobbering the clipboard). Elements: off-screen/zero-area filtered, capped at 150 (limit). Text: capped at 20000 chars (limit).",
+          "description": "Describe a window's UI as elements {name, role, rect}. Target = window= (title substring; becomes the session anchor) or the current anchor; with neither, the human's foreground window and the response says so (target.source). Never focuses or raises anything. mode=full (default whenever a window is targeted: scoped walk, works on covered windows and hidden-desktop apps), mode=fast (foreground-only quick path, used only when nothing is targeted), mode=text (READ the visible text - the cheapest way to read content), mode=delta (changed elements since since_seq), mode=marks (DEBUG Set-of-Marks image), mode=selection (selected text of a name/role element). Elements capped at 150 (limit); text at 20000 chars.",
           "inputSchema": { "type": "object", "properties": {
-              "mode": { "type": "string", "enum": ["fast", "full", "delta", "text", "marks", "selection"], "description": "fast=foreground elements (default), full=full tree, delta=changed only, text=readable text content, marks=annotated SoM debug image, selection=selected text of name/role element" },
-              "window": { "type": "string", "description": "Partial title to scope the walk (mode=full|text)" },
+              "mode": { "type": "string", "enum": ["fast", "full", "delta", "text", "marks", "selection"], "description": "full=scoped tree (default with a target), fast=foreground quick path, delta=changed only, text=readable text, marks=SoM debug image, selection=selected text of name/role element" },
+              "window": { "type": "string", "description": "Title substring of the window to describe. Anchors it for later calls. 'foreground' = the human's current window." },
               "name": { "type": "string", "description": "Element name (mode=selection)" },
               "role": { "type": "string", "description": "Element role (mode=selection)" },
               "since_seq": { "type": "integer", "description": "Prior snapshot seq for delta mode" },
               "limit": { "type": "integer", "description": "Max elements (default 150) or chars for mode=text (default 20000); 0 = unlimited elements" }
           }}},
         { "name": "ghost_find",
-          "description": "Ground a target (name|role|description|text|coords) via the cascade: cache→UIA→OCR→VLM. Returns center (always), rect (has_rect=true for UIA/Cache), source, confidence, name, escalated (true = local tiers missed and a network VLM call was paid).",
+          "description": "Locate an element (name|role|description|text) and return center, rect, source, confidence, escalated (true = a network VLM call was paid). Target window = window= (anchored) or the session anchor; else the foreground. Under the default background policy nothing is focused or raised: the lookup is scoped to the window's own UIA subtree, so it works while the window is covered or lives on a hidden desktop.",
           "inputSchema": { "type": "object", "properties": {
               "name": { "type": "string", "description": "Accessible name (case-insensitive substring)" },
               "role": { "type": "string", "description": "Control type: button, edit, checkbox, list, menu, tab, toolbar" },
               "description": { "type": "string", "description": "Natural-language description for VLM grounding" },
               "text": { "type": "string", "description": "On-screen text for OCR-based location" },
-              "window": { "type": "string", "description": "Anchor: focus+confirm this window (title substring) before resolving - use for multi-window flows" },
+              "window": { "type": "string", "description": "Title substring of the window to search (anchors it). Omit to use the anchor." },
               "index": { "type": "integer", "description": "Select the nth match (0-based) when several elements share the name/role; name+role AND-combine on this path; returns matches count" },
               "mode": { "type": "string", "enum": ["instant", "deliberate", "instant_only"], "description": "'instant' (default): local tiers, auto-escalates to VLM on miss. 'deliberate': VLM from first attempt. 'instant_only': no VLM." }
           }}},
         // --- Action ---
         { "name": "ghost_act",
-          "description": "Atomic find→focus→action in one call (eliminates cross-call focus race). Anchors OS foreground to the target's window before input and verifies via screen delta. Returns {ok, verified, focus_confirmed, source, confidence, center}; verified=false means the action dispatched but nothing visibly changed - check state with ghost_see before retrying. Supply name|role|description|text to identify target. Set background=true (with window+name/role) to drive an app WITHOUT taking foreground or moving the cursor (agent-harness mode).",
+          "description": "Find an element and act on it in one call. Target window = window= (anchored) or the session anchor. Under the default background policy the window is NEVER raised and the cursor never moves: click = UIA Invoke or a posted click, type = ValuePattern / WM_SETTEXT with read-back, and the response reports {verified, focus_preserved, cursor_preserved}. Works on covered windows, Chromium/Electron pages and hidden-desktop apps. Identify the element by name|role (description needs vision and a screen-facing window). verified=false = dispatched but nothing visibly changed: ghost_see before retrying. background=true is accepted for compatibility; it is already the default behaviour.",
           "inputSchema": { "type": "object", "required": ["action"], "properties": {
               "name": { "type": "string" }, "role": { "type": "string" },
               "description": { "type": "string" }, "text": { "type": "string" },
               "action": { "type": "string", "enum": ["click", "type", "double_click", "right_click", "hover"],
                           "description": "Action to perform" },
               "text_input": { "type": "string", "description": "Text to type when action=type (use this to avoid param collision with text-target)" },
-              "window": { "type": "string", "description": "Anchor: focus+confirm this window (title substring) before resolving/acting - use for multi-window flows. REQUIRED when background=true." },
-              "background": { "type": "boolean", "description": "Background mode: act inside `window` WITHOUT bringing it to the foreground or moving the cursor (drive an app while the human keeps working). Uses posted window messages on real Win32 controls; supports click|type|double_click|right_click|hover. Returns {verified, focus_preserved, cursor_preserved}. Windowless UWP/WinUI/Chromium controls have no window handle: type/click fall back to UIA (which may activate the window, flagged in the response); double_click/right_click/hover require a windowed control and error otherwise. focus_preserved reports the truth." },
+              "window": { "type": "string", "description": "Title substring of the window to act in (anchors it). Omit to use the anchor." },
+              "background": { "type": "boolean", "description": "Compatibility flag: background dispatch is already the default. Real Win32 controls get posted messages; windowless (WinUI/Chromium/Electron) controls get UIA Invoke/ValuePattern; double_click/right_click/hover need a windowed control. focus_preserved in the response reports the truth." },
               "index": { "type": "integer", "description": "Act on the nth match (0-based) when several elements share the name/role" },
               "mode": { "type": "string", "enum": ["instant", "deliberate", "instant_only"] }
           }}},
         { "name": "ghost_key",
-          "description": "Key input. Single key: keys='Enter'. Combo: keys='Ctrl+C'. Hold/release: keys='down:Shift' / keys='up:Shift'. STRONGLY RECOMMENDED: pass window=<title substring> - keys go to whichever window owns OS focus (often the MCP client's own terminal between calls); with window set, the target is focused+confirmed first and the call fails loudly instead of typing into the wrong app.",
+          "description": "Send a key to a window WITHOUT focusing it. Target = window= (anchored) or the session anchor. Under the default background policy the key is POSTED to the window's focused control: single keys (Enter, Tab, F5, arrows, any character) and the editing shortcuts Ctrl+C/X/V/A/Z (sent as semantic messages). Other modifier combos have no background path and error naming the alternative. For text prefer ghost_act action=type (read-back verified). Hold/release keys='down:Shift' / 'up:Shift' exist only under a foreground policy.",
           "inputSchema": { "type": "object", "required": ["keys"], "properties": {
-              "keys": { "type": "string", "description": "Key spec: 'Enter', 'Ctrl+C', 'Ctrl+Shift+T', 'down:Shift', 'up:Shift'" },
-              "window": { "type": "string", "description": "Target window title substring. Focus is acquired+confirmed before sending; errors if it can't be. REQUIRED when background=true." },
-              "background": { "type": "boolean", "description": "Post keys to `window`'s focused control WITHOUT taking foreground or moving the cursor. Single keys (Enter/Tab/F5/arrows/char) plus the common editing shortcuts Ctrl+C/X/V/A/Z (dispatched as semantic WM_COPY/CUT/PASTE/UNDO/EM_SETSEL messages - reliable in background). Other modifier combos are rejected (posting can't set the modifier state apps read). Returns {focus_preserved, cursor_preserved}." }
+              "keys": { "type": "string", "description": "Key spec: 'Enter', 'a', 'Ctrl+C', 'down:Shift', 'up:Shift'" },
+              "window": { "type": "string", "description": "Title substring of the window to send to (anchors it). Omit to use the anchor. With no anchor at all the key goes to the human's foreground window and the response says so." },
+              "background": { "type": "boolean", "description": "Compatibility flag: background posting is already the default." }
           }}},
         { "name": "ghost_snapshot",
           "description": "Structured, agent-planning view of a window's UI: every element with a stable id, name, role, rect, center, enabled flag, actionable flag, and the actions it accepts (click/type). `actionable` = interactable role AND currently enabled - so a greyed-out button reads actionable:false. Far cheaper than a screenshot to reason over; plan here, then ghost_act by name/role. Params: window? (title substring; omitted = foreground), actionable_only? (only enabled interactable elements), limit?.",
@@ -2283,7 +2471,7 @@ fn lean_tools_schema() -> Value {
           }}},
         // --- Waiting ---
         { "name": "ghost_wait",
-          "description": "Unified wait. for=ms (default): sleep N ms. for=idle: wait for screen stable. for=element: wait for an element (name/role) to appear/disappear WITHOUT clicking. for=value: wait until an element's VALUE equals/contains/changes (forms, async fields, 'wait until the total updates'). for=text: click a target then wait for text. for=event: next foreground change. for=cond: JSONLogic poll. for=navigate: focus window + navigate URL + page idle.",
+          "description": "Unified wait. for=ms (default): sleep N ms. for=idle: wait for screen stable. for=element: wait for an element (name/role) to appear/disappear WITHOUT clicking. for=value: wait until an element's VALUE equals/contains/changes (forms, async fields, 'wait until the total updates'). for=text: click a target then wait for text. for=event: next foreground change. for=cond: JSONLogic poll. for=navigate: focus window + navigate URL + page idle. Target window for element|value|idle|text = window= or the session anchor.",
           "inputSchema": { "type": "object", "properties": {
               "for": { "type": "string", "enum": ["ms","idle","element","value","text","event","cond","navigate"],
                        "description": "What to wait for (default ms)" },
@@ -2341,12 +2529,13 @@ fn lean_tools_schema() -> Value {
           }}},
         // --- Window management ---
         { "name": "ghost_window",
-          "description": "Window management. op=list: all windows incl. minimized (each has name, pid, focused, state). op=focus: bring to foreground, auto-restoring if minimized (name required). op=state: maximize|minimize|restore|close (name+state). op=launch: start exe.",
+          "description": "Window management across the user's desktop AND Ghost's hidden desktops. op=list: every window (name, pid, hwnd, focused, state, surface=user|hidden) plus the current anchor. op=focus: under the default background policy this ANCHORS the window and does NOT raise it (the anchored verbs drive it without focus); under prefer_background/foreground it raises it. op=anchor: name= sets the anchor, clear=true clears it, no args reports it. op=state: maximize|minimize|restore|close (name+state). op=launch: start exe - under the background policy the app starts on a hidden desktop, never on your screen, and is anchored (see target.surface in the response).",
           "inputSchema": { "type": "object", "properties": {
-              "op": { "type": "string", "enum": ["list","focus","state","launch"], "description": "Operation (default list)" },
-              "name": { "type": "string", "description": "Window title (op=focus|state). Also accepted as alias for 'exe' on op=launch." },
+              "op": { "type": "string", "enum": ["list","focus","anchor","state","launch"], "description": "Operation (default list)" },
+              "name": { "type": "string", "description": "Window title substring (op=focus|anchor|state). Also accepted as alias for 'exe' on op=launch." },
+              "clear": { "type": "boolean", "description": "op=anchor: forget the current anchor" },
               "state": { "type": "string", "enum": ["maximize","minimize","restore","close"], "description": window_state_description() },
-              "exe": { "type": "string", "description": "Executable path (op=launch)" }
+              "exe": { "type": "string", "description": "Executable path or command line (op=launch)" }
           }}},
         // --- Shell control ---
         { "name": "ghost_shell",

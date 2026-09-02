@@ -4,6 +4,7 @@ pub mod locator;
 pub mod element;
 pub mod reflection;
 pub mod session;
+pub mod target;
 pub mod registries;
 pub mod shell;
 pub mod tiers;
@@ -18,6 +19,7 @@ pub(crate) fn env_key_is_set(name: &str) -> bool {
 }
 
 pub use session::{GhostSession, Region};
+pub use target::{Candidate, Surface, TargetSource, WindowTarget};
 pub use locator::By;
 pub use element::GhostElement;
 pub use error::GhostError;

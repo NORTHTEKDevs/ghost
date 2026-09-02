@@ -7,11 +7,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 use tokio::sync::oneshot;
-use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
-    COINIT_APARTMENTTHREADED,
-};
-use windows::Win32::UI::Accessibility::{CUIAutomation8, IUIAutomation};
+use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
+use windows::Win32::UI::Accessibility::IUIAutomation;
 
 type Job = Box<
     dyn FnOnce(&IUIAutomation) -> Result<serde_json::Value, CoreError> + Send,
