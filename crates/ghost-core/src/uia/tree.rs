@@ -1008,17 +1008,6 @@ mod tests {
         assert!(!role_alias_matches("list", "menu"));
     }
 
-    /// MEDIUM-8: search_subtree_by_name depth constant is 50; verify alias function is depth-agnostic.
-    /// (Full recursive stack-overflow guard is validated by the limit constant itself - 
-    /// tested here indirectly since we can't construct a 51-deep live UIA tree in unit tests.)
-    #[test]
-    fn search_depth_limit_constant_is_fifty() {
-        // Verify the depth limit used in search_subtree_by_name/role is as specified.
-        // The actual guard is `if depth > 50 { return Ok(None) }`.
-        const MAX_DEPTH: usize = 50;
-        assert!(MAX_DEPTH == 50, "depth limit must be 50 per spec");
-    }
-
     /// HIGH-1: focus_window_under_point with an off-screen coord returns Ok (not an error).
     /// The helper is tolerant - it returns Ok(false) for invalid/off-screen points.
     #[test]
@@ -1061,9 +1050,8 @@ mod tests {
             "ensure_foreground must not panic or error: {:?}",
             result
         );
-        assert_eq!(
+        assert!(
             result.unwrap(),
-            true,
             "already-foreground window should return Ok(true)"
         );
     }

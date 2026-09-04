@@ -32,10 +32,10 @@ struct VlmFixture {
     id: String,
     description: String,
     vlm_response: String,
-    /// Expected normalised [x, y] (both axes 0-1000) — for norm-space VLMs.
+    /// Expected normalised [x, y] (both axes 0-1000) - for norm-space VLMs.
     #[serde(default)]
     expected_norm: Option<[i32; 2]>,
-    /// Expected pixel [x, y] — for pixel-space VLMs.
+    /// Expected pixel [x, y] - for pixel-space VLMs.
     #[serde(default)]
     expected_pixels: Option<[i32; 2]>,
     /// Expected action verb (click, double_click, type, scroll, null).
@@ -157,7 +157,7 @@ fn vlm_parser_accuracy_on_fixtures() {
                     true
                 }
             } else {
-                // No expected coord — just presence is enough.
+                // No expected coord - just presence is enough.
                 true
             }
         } else if f.expected_norm.is_some() || f.expected_pixels.is_some() {
@@ -174,12 +174,12 @@ fn vlm_parser_accuracy_on_fixtures() {
                 Some(ParsedAction::DoubleClick) => expected_action == "double_click",
                 Some(ParsedAction::RightClick) => expected_action == "right_click",
                 Some(ParsedAction::Type(text)) => {
-                    expected_action == "type" && f.expected_type_text.as_deref().map_or(true, |t| t == text)
+                    expected_action == "type" && f.expected_type_text.as_deref().is_none_or(|t| t == text)
                 }
                 Some(ParsedAction::Scroll { direction, amount }) => {
                     expected_action == "scroll"
-                        && f.expected_scroll_direction.as_deref().map_or(true, |d| d == direction)
-                        && f.expected_scroll_amount.map_or(true, |a| a == *amount)
+                        && f.expected_scroll_direction.as_deref().is_none_or(|d| d == direction)
+                        && f.expected_scroll_amount.is_none_or(|a| a == *amount)
                 }
                 Some(ParsedAction::Hover) => expected_action == "hover",
                 Some(ParsedAction::Other(s)) => expected_action == s,
@@ -224,7 +224,7 @@ fn vlm_parser_accuracy_on_fixtures() {
 }
 
 /// ScreenSpot-style hit-rate test for the golden grounding fixtures.
-/// This tests the CONCEPTUAL harness structure — it doesn't run real COM/VLM.
+/// This tests the CONCEPTUAL harness structure - it doesn't run real COM/VLM.
 /// The actual hit-rate for production tiers is measured via live integration tests.
 /// This test verifies that the fixture format is parseable and the hit-check logic works.
 #[test]

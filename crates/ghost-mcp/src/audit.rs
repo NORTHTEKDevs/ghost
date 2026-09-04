@@ -16,11 +16,17 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+#[cfg(windows)]
+use std::time::Duration;
+use std::time::Instant;
+#[cfg(any(windows, test))]
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Real input within this window of a foreground change attributes the change
 /// to the human. Matches the independent observer used during development.
+#[cfg(any(windows, test))]
 const HUMAN_INPUT_WINDOW_MS: u64 = 1_500;
+#[cfg(windows)]
 const SAMPLE_INTERVAL: Duration = Duration::from_millis(100);
 const MAX_RECENT: usize = 20;
 
@@ -81,6 +87,7 @@ pub fn begin(tool: &str) -> InFlight {
     InFlight(ticket)
 }
 
+#[cfg(any(windows, test))]
 fn in_flight_names() -> Vec<String> {
     let mut v: Vec<String> = in_flight()
         .lock()
@@ -95,6 +102,7 @@ fn in_flight_names() -> Vec<String> {
 
 /// The attribution rule, kept pure so it is unit-tested: a foreground change is
 /// the human's when real input arrived within the window, synthetic otherwise.
+#[cfg(any(windows, test))]
 pub fn classify(prev_hwnd: isize, hwnd: isize, idle_ms: u64) -> Option<bool> {
     if prev_hwnd == hwnd {
         return None;
@@ -103,6 +111,7 @@ pub fn classify(prev_hwnd: isize, hwnd: isize, idle_ms: u64) -> Option<bool> {
 }
 
 /// Record one sample. Returns the incident if this sample was a synthetic change.
+#[cfg(any(windows, test))]
 fn observe(prev: &mut Option<isize>, hwnd: isize, title: String, idle_ms: u64) -> Option<Incident> {
     let mut st = state().lock().unwrap_or_else(|p| p.into_inner());
     st.samples += 1;

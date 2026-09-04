@@ -18,7 +18,7 @@
 
 **Step 1: Add reqwest to workspace deps**
 
-In `/c/Users/Krist/projects/active/ghost/Cargo.toml`, add inside `[workspace.dependencies]`:
+In `Cargo.toml`, add inside `[workspace.dependencies]`:
 
 ```toml
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
@@ -35,7 +35,7 @@ reqwest = { workspace = true }
 **Step 3: Verify it compiles**
 
 ```bash
-cd /c/Users/Krist/projects/active/ghost
+cd <repo-root>
 cargo check -p ghost-mcp 2>&1 | tail -5
 ```
 
@@ -165,7 +165,7 @@ for required in &["ghost_find","ghost_click","ghost_type","ghost_screenshot",
 **Step 5: Run tests**
 
 ```bash
-cd /c/Users/Krist/projects/active/ghost
+cd <repo-root>
 cargo test -p ghost-mcp 2>&1 | tail -20
 ```
 
@@ -183,7 +183,7 @@ cargo build -p ghost-mcp --release -q
 python3 -c "
 import subprocess, json
 
-EXE = r'C:\Users\Krist\projects\active\ghost\target\release\ghost-mcp.exe'
+EXE = r'<repo-root>\target\release\ghost-mcp.exe'
 proc = subprocess.Popen([EXE], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
 
 def send(id, method, params=None):
@@ -248,7 +248,7 @@ import mss
 import mss.tools
 from PIL import Image
 
-GHOST_EXE = r"C:\Users\Krist\projects\active\ghost\target\release\ghost-mcp.exe"
+GHOST_EXE = r"<repo-root>\target\release\ghost-mcp.exe"
 MODEL = "claude-sonnet-4-6"
 MAX_LOOPS_PER_TASK = 30   # safety limit per task
 LOOP_DELAY_S = 2          # seconds between vision loops
@@ -470,7 +470,7 @@ Create `ghost-agent/tasks-example.json`:
   {
     "id": "2",
     "title": "Navigate to projects directory",
-    "detail": "Type 'cd C:\\Users\\Krist\\projects\\active' into the terminal and press Enter."
+    "detail": "Type 'cd C:\\projects' into the terminal and press Enter."
   }
 ]
 ```
@@ -478,7 +478,7 @@ Create `ghost-agent/tasks-example.json`:
 **Step 2: Dry-run to verify Claude parses and plans correctly**
 
 ```bash
-cd /c/Users/Krist/projects/active/ghost
+cd <repo-root>
 python3 ghost-agent/agent.py --tasks ghost-agent/tasks-example.json --dry-run
 ```
 

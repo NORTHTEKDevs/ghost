@@ -14,3 +14,6 @@ notepad_test_screenshot.png
 
 # isolated build dir used when target/release is locked by a running ghost-mcp
 target-kit/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/

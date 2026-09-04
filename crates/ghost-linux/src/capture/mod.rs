@@ -19,5 +19,5 @@ pub use marks::{draw_marks, Mark};
 pub use screen::{
     capture_region_marked_jpeg, capture_region_raw, capture_screen, capture_screen_downsample_raw,
     capture_screen_full_rgba, capture_screen_region, capture_screen_region_fast,
-    capture_window_printwindow, crop_rgba, CaptureFormat,
+    capture_window_encoded, capture_window_printwindow, crop_rgba, CaptureFormat,
 };

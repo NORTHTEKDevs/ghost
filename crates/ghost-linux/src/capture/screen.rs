@@ -117,6 +117,49 @@ pub fn capture_screen_region(
     format: CaptureFormat,
 ) -> Result<Vec<u8>> {
     let (rgba, w, h) = capture_region_raw(rect)?;
+    encode_scaled(rgba, w, h, max_dim, format)
+}
+
+/// Identical to `ghost_core::capture::screen::capture_window_encoded`: capture
+/// ONE window by handle (through the compositor where possible, so whatever is
+/// on top of it does not matter), optionally crop to a screen-space rect inside
+/// it, downscale to `max_dim` on the long edge, and encode.
+///
+/// This is what `ghost_screenshot` uses once a window is anchored: a screen
+/// crop of the "foreground" would capture the human's window, and a screen crop
+/// of an occluded window would capture whatever covers it.
+pub fn capture_window_encoded(
+    hwnd: isize,
+    crop_screen: Option<(i32, i32, i32, i32)>,
+    max_dim: Option<u32>,
+    format: CaptureFormat,
+) -> Result<Vec<u8>> {
+    let (rgba, w, h) = capture_window_printwindow(hwnd)?;
+    let (rgba, w, h) = match (crop_screen, crate::system::window::window_rect(hwnd)) {
+        (Some((l, t, r, b)), Some((wl, wt, _, _))) => {
+            let cl = (l - wl).clamp(0, w as i32) as usize;
+            let ct = (t - wt).clamp(0, h as i32) as usize;
+            let cr = (r - wl).clamp(0, w as i32) as usize;
+            let cb = (b - wt).clamp(0, h as i32) as usize;
+            if cr > cl && cb > ct {
+                (crop_rgba(&rgba, w, cl, ct, cr - cl, cb - ct), cr - cl, cb - ct)
+            } else {
+                (rgba, w, h)
+            }
+        }
+        _ => (rgba, w, h),
+    };
+    encode_scaled(rgba, w, h, max_dim, format)
+}
+
+/// Downscale to `max_dim` on the long edge when the image is larger, then encode.
+fn encode_scaled(
+    rgba: Vec<u8>,
+    w: usize,
+    h: usize,
+    max_dim: Option<u32>,
+    format: CaptureFormat,
+) -> Result<Vec<u8>> {
     let img = RgbaImage::from_raw(w as u32, h as u32, rgba)
         .ok_or_else(|| CoreError::Platform("capture buffer does not match dimensions".into()))?;
     let img = match max_dim {
@@ -138,11 +181,11 @@ pub fn capture_screen_region(
 ///
 /// Two paths, best first:
 ///
-/// 1. **XComposite** — `NameWindowPixmap` hands back the window's own backing
+/// 1. **XComposite** - `NameWindowPixmap` hands back the window's own backing
 ///    pixmap, which is exactly what a compositor draws from. Reading that gives
 ///    the window's real content regardless of what overlaps it. Every modern
 ///    desktop runs a compositor, so this is the normal case.
-/// 2. **Screen-rectangle crop** — the fallback when composite is unavailable
+/// 2. **Screen-rectangle crop** - the fallback when composite is unavailable
 ///    (bare X11, no compositor). Here an occluded window really does capture
 ///    whatever is on top, so the result must be treated as "cannot verify".
 pub fn capture_window_printwindow(hwnd_raw: isize) -> Result<(Vec<u8>, usize, usize)> {

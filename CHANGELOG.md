@@ -2,6 +2,14 @@
 
 ## [0.21.0] - The user's own browser, honest misses, and tests that stay off your screen
 
+- **Linux engine keeps parity with the anchored capture path.** `ghost-linux`
+  gained `capture::capture_window_encoded` (window-by-handle capture through the
+  compositor, cropped and encoded) and `ocr::find_text_in_window`, the two
+  functions the shared session layer started calling for `ghost_screenshot` and
+  `ghost_assert` text predicates under an anchor. Without them the Linux build
+  did not compile. `server.json` (MCP registry manifest) now carries the real
+  version and names both platforms.
+
 - **CDP routing for any browser with a debugging port.** Three weeks of
   transcripts showed the agent's most-driven windows were the user's own Comet
   (1,000+ anchored calls) and that `ghost_browser_attach` had been tried against
@@ -301,7 +309,7 @@ leak that can stall the whole MCP server, and a world-readable credential.
 Supersedes 0.17.0 for Linux users. 0.17.0 shipped defects that could hang the
 MCP server; anyone on Linux should take this instead.
 
-### Added — closing the Windows parity gaps
+### Added - closing the Windows parity gaps
 
 - **Window state via EWMH** (`ghost-linux/src/wm.rs`). `ghost_window op=state`
   now supports minimize, maximize, restore and close on X11 and on XWayland
@@ -320,11 +328,11 @@ MCP server; anyone on Linux should take this instead.
 - **Local OCR via Tesseract** when installed, with real per-word boxes.
 - `ghost_scroll` left/right, and a working `release_all_modifiers`.
 
-### Fixed — from the production, code, parity and test-quality reviews
+### Fixed - from the production, code, parity and test-quality reviews
 
 - **The MCP server could hang permanently.** The Wayland Screenshot portal call
   had no timeout, and the server runs a current-thread runtime dispatching
-  serially — a wedged portal froze everything, silently. Now bounded.
+  serially - a wedged portal froze everything, silently. Now bounded.
 - **Every response ran a full AT-SPI walk.** `foreground_info` is attached to all
   tool results; on Linux it enumerated every application under a 20s budget. Now
   400ms-bounded.
@@ -334,7 +342,7 @@ MCP server; anyone on Linux should take this instead.
 - **`mode=background` moved the real cursor** for non-button elements while
   reporting `cursor_preserved: true`. It now drives AT-SPI or refuses.
 - **Zombie processes.** Launched applications were never reaped.
-- **A declined Wayland consent dialog killed input for the whole session** —
+- **A declined Wayland consent dialog killed input for the whole session** - 
   the error was cached in a `OnceLock`. Only success is cached now.
 - **`ghost doctor` raised permission prompts on Wayland.** Diagnostics now report
   which paths would be used instead of exercising them.
@@ -351,7 +359,7 @@ MCP server; anyone on Linux should take this instead.
 
 19 live tests against a real GTK application on Ubuntu and Fedora 41, plus the
 CLI, the installer and an MCP stdio smoke test. The Wayland portal paths remain
-unverified on hardware — CI runs X11 — and are documented as such.
+unverified on hardware - CI runs X11 - and are documented as such.
 
 ## [0.17.0] - 2026-08-01 - Linux support (AT-SPI2)
 
@@ -425,11 +433,11 @@ The Wayland paths - RemoteDesktop portal input and Screenshot portal capture -
 are implemented and compile-verified but have not run on hardware; CI runs X11.
 See `docs/linux-fedora.md` section 3.
 
-## [0.16.0] - 2026-07-19 — Shell control (terminal / PowerShell / CLIs)
+## [0.16.0] - 2026-07-19 - Shell control (terminal / PowerShell / CLIs)
 
 ### Added
 
-- **`ghost_shell`** — run terminal commands and drive persistent shells, so an
+- **`ghost_shell`** - run terminal commands and drive persistent shells, so an
   agent can do more than click GUIs: run builds, git, and CLIs, edit files on
   machines with no file tools, and open apps (including spawning a new Claude
   Code session) from a command line.
@@ -445,7 +453,7 @@ See `docs/linux-fedora.md` section 3.
     never be misread as a later command's result.
   - Emergency-stop (`ghost_stop` / Ctrl+Alt+G) kills a runaway command mid-wait.
   - **Kill-switch:** set `GHOST_SHELL=off` to disable the verb entirely; every op
-    returns a clear error. Ghost is public — deployments that want GUI automation
+    returns a clear error. Ghost is public - deployments that want GUI automation
     without shell access can opt out.
   - To start a new Claude Code session:
     `ghost_shell op=run cmd='Start-Process wt -ArgumentList "pwsh","-NoExit","-Command","claude"'`,
@@ -455,12 +463,12 @@ See `docs/linux-fedora.md` section 3.
     survives), timeout→busy→read drain, kill, and `GHOST_SHELL=off` refusal.
   - 20 lean verbs now advertised (was 19). Boot latency unchanged (~20ms).
 
-## [0.15.1] - 2026-07-05 — Snapshot knows enabled/disabled state
+## [0.15.1] - 2026-07-05 - Snapshot knows enabled/disabled state
 
 ### Changed
 
 - **`ghost_snapshot` now reports `enabled`** per element, and `actionable` means
-  "interactable role AND currently enabled" — so a greyed-out button reads
+  "interactable role AND currently enabled" - so a greyed-out button reads
   `actionable: false` and `actionable_only` drops it. An agent won't waste a call
   clicking a disabled control. Nearly free: `IsEnabled` was already in the UIA
   cache batch. `ElementDescriptor` gained an `enabled` field.
@@ -468,20 +476,20 @@ See `docs/linux-fedora.md` section 3.
     buttons (Recall / Clear / flyout) `enabled:false, actionable:false` while
     digit buttons stayed `enabled:true` (33 of 36 actionable).
 
-## [0.15.0] - 2026-07-05 — Structured agent-planning snapshot
+## [0.15.0] - 2026-07-05 - Structured agent-planning snapshot
 
 ### Added
 
-- **`ghost_snapshot`** — a structured, agent-planning view of a window's UI. Each
+- **`ghost_snapshot`** - a structured, agent-planning view of a window's UI. Each
   element comes back with a stable `id`, `name`, `role`, `rect`, `center`, an
   `actionable` flag, and the `actions` it accepts (`click` / `type`), plus
   `actionable_count`. `actionable_only=true` filters to just the interactable
-  elements. This lets an agent plan over structure — far cheaper in tokens than a
-  screenshot — then `ghost_act` by name/role. Read-only; no foreground change.
+  elements. This lets an agent plan over structure - far cheaper in tokens than a
+  screenshot - then `ghost_act` by name/role. Read-only; no foreground change.
   - Live-verified: a Calculator snapshot returned 36 actionable elements with
     correct centers and click actions.
 
-## [0.14.0] - 2026-07-05 — Background clipboard/edit shortcuts
+## [0.14.0] - 2026-07-05 - Background clipboard/edit shortcuts
 
 Closes the most-used part of the "no modifier combos in background" limit.
 
@@ -490,10 +498,10 @@ Closes the most-used part of the "no modifier combos in background" limit.
 - **Background Ctrl+C / Ctrl+X / Ctrl+V / Ctrl+A / Ctrl+Z** via `ghost_key
   background=true`. The common editing shortcuts are dispatched as their semantic
   window messages (`WM_COPY` / `WM_CUT` / `WM_PASTE` / `WM_UNDO`, `EM_SETSEL` for
-  select-all) instead of a posted modifier+key — so they work reliably in the
+  select-all) instead of a posted modifier+key - so they work reliably in the
   background, without the `GetKeyState` problem that makes raw combos unreliable.
   No foreground, no cursor. Other combos (Ctrl+S, custom accelerators) are still
-  rejected — those genuinely can't be posted reliably.
+  rejected - those genuinely can't be posted reliably.
   - Live-verified: typed text into a background charmap edit, then background
     Ctrl+A + Ctrl+C, and the clipboard read back the text (replacing a sentinel)
     while Calculator kept the foreground.
@@ -503,12 +511,12 @@ New primitive: `BackgroundClicker::edit_command` + `EditCommand`. +3 unit tests.
 ### Honest remaining limits (not closeable here, by design)
 
 - Windowless UWP/WinUI/Chromium controls (no window handle) can't be driven truly
-  in the background by any tool — Ghost falls back to UIA and flags it.
+  in the background by any tool - Ghost falls back to UIA and flags it.
 - Arbitrary modifier combos beyond the clipboard/undo family.
 - A hosted multi-tenant Windows runner is a separate product/infra effort, not a
   library feature.
 
-## [0.13.0] - 2026-07-05 — Full background input + model-agnostic vision
+## [0.13.0] - 2026-07-05 - Full background input + model-agnostic vision
 
 Closes the gaps left by v0.12.0's background dispatch.
 
@@ -517,13 +525,13 @@ Closes the gaps left by v0.12.0's background dispatch.
 - **Background `double_click` / `right_click` / `hover`** (`ghost_act
   background=true`). Posted mouse messages on windowed controls
   (`WM_LBUTTONDBLCLK`, `WM_RBUTTONDOWN/UP`, `WM_MOUSEMOVE`) at the element's
-  `ScreenToClient` centre — no foreground, no cursor. double_click reuses the
+  `ScreenToClient` centre - no foreground, no cursor. double_click reuses the
   element-ROI PrintWindow verify; right_click/hover report `verified: null` with a
   note (a context menu is a separate popup; posted hover has no OS cursor).
   Windowless controls error instead of stealing focus.
 - **Background keyboard** (`ghost_key background=true`). Posts a single key to the
   target window's focused control (found via `GetGUIThreadInfo`) with no
-  foreground/cursor change — printable chars as `WM_CHAR`, named keys
+  foreground/cursor change - printable chars as `WM_CHAR`, named keys
   (Enter/Tab/F-keys/arrows) as `WM_KEYDOWN`/`UP`. Modifier combos are rejected
   (posting can't set the modifier state apps read via `GetKeyState`).
   Live-verified: a char posted to a background charmap edit read back correct
@@ -551,9 +559,9 @@ won't edit text without a message pump); `ghost_key background` now reports
 `focused_control: false` with a clear note when nothing held focus and the key
 went to the frame; the vision key is trimmed before use.
 
-## [0.12.0] - 2026-07-05 — Background dispatch (agent-harness mode)
+## [0.12.0] - 2026-07-05 - Background dispatch (agent-harness mode)
 
-Drive an app WITHOUT bringing it to the foreground or moving the cursor — so an
+Drive an app WITHOUT bringing it to the foreground or moving the cursor - so an
 LLM agent can operate a Windows app while the human keeps working. This is the
 capability agent harnesses (OpenClaw, Hermes/cua-driver) mount as their
 computer-use layer; Ghost adds per-action verification on top.
@@ -562,23 +570,23 @@ computer-use layer; Ghost adds per-action verification on top.
 
 - **`ghost_act background=true`** (requires `window` + `name`/`role`; `click`/`type`).
   Acts on a control inside a named window with NO foreground change and NO cursor
-  movement, then verifies — all without the window being visible:
+  movement, then verifies - all without the window being visible:
   - **True background via posted window messages.** Real Win32 controls (which
     expose a native window handle) are driven with `BM_CLICK` / `WM_LBUTTONDOWN/UP`
-    (click) and `WM_SETTEXT` (type) — these do not activate the window, unlike UIA
+    (click) and `WM_SETTEXT` (type) - these do not activate the window, unlike UIA
     `Invoke`/`SetValue`, whose providers bring the window to the foreground.
   - **Occlusion-proof verification.** `type` is confirmed by reading
     `ValuePattern.CurrentValue` back; `click` by a `PrintWindow(PW_RENDERFULLCONTENT)`
     before/after delta that renders even an occluded/background window.
   - **Honest reporting.** The response carries `verified`, `focus_preserved`, and
-    `cursor_preserved`. Windowless controls (UWP/WinUI/Chromium — no HWND) fall
+    `cursor_preserved`. Windowless controls (UWP/WinUI/Chromium - no HWND) fall
     back to UIA dispatch, which activates the window; the response flags this and
     `focus_preserved` reports it truthfully. This is a real limitation of every
-    tool, not just Ghost — you cannot post a message to a control that has no
+    tool, not just Ghost - you cannot post a message to a control that has no
     window handle. Classic Win32 line-of-business apps (the no-API automation
     target) drive cleanly in the background.
   - Verified live: charmap (Win32) click AND type while Calculator held the
-    foreground — `verified=true, focus_preserved=true, cursor_preserved=true`,
+    foreground - `verified=true, focus_preserved=true, cursor_preserved=true`,
     foreground never moved. cargo test --workspace 370 passed / 0 failed.
 
 New primitives: `ghost_core::input::BackgroundClicker::{button_click, set_text}`,
@@ -586,7 +594,7 @@ New primitives: `ghost_core::input::BackgroundClicker::{button_click, set_text}`
 `UiaElement::native_window_handle`, and strict UIA-only `invoke_ex`/`set_value_ex`
 (no coordinate fallback).
 
-## [0.11.0] - 2026-07-05 — Capture latency (measured, corrected), canvas vision, soak
+## [0.11.0] - 2026-07-05 - Capture latency (measured, corrected), canvas vision, soak
 
 Four evidence-driven improvements. Notably, end-to-end measurement corrected the
 v0.10.0 assumption about the fast capture path.
@@ -602,10 +610,10 @@ v0.10.0 assumption about the fast capture path.
   foreground window ~5x per action, so large/maximized windows see up to ~5x less
   capture latency. The act-verify, screenshot, and Set-of-Marks paths all route
   region rects through GDI now; full-screen still uses DXGI (cached duplicator
-  wins there). No correctness change — GDI BitBlt already backed the DXGI path as
+  wins there). No correctness change - GDI BitBlt already backed the DXGI path as
   its universal fallback, and it works on any monitor.
   - Consequence: the originally-planned per-output DXGI duplicator for secondary
-    monitors was **dropped** — evidence shows DXGI region is the *slower* path, and
+    monitors was **dropped** - evidence shows DXGI region is the *slower* path, and
     it was unverifiable on a single-monitor box anyway. GDI already handles any
     monitor.
 
@@ -614,7 +622,7 @@ v0.10.0 assumption about the fast capture path.
 - **GPU-free CPU element detector for canvas / no-accessibility-tree apps.** A new
   always-compiled classical-CV detector (`ghost_ground::cv_detect`) proposes
   element-like boxes from pixels alone (edge density -> connected components ->
-  size/aspect filter -> OmniParser-style de-nest) — no GPU, no model, no deps.
+  size/aspect filter -> OmniParser-style de-nest) - no GPU, no model, no deps.
   `build_marks` augments Set-of-Marks candidates with these regions only when the
   UIA tree is sparse (<4 elements), so custom-drawn UIs, remote-desktop surfaces,
   and game canvases become markable while normal apps are untouched. Set-of-Marks
@@ -626,14 +634,14 @@ v0.10.0 assumption about the fast capture path.
 - **Reliability soak harness (`bench/soak.py`).** Drives the real ghost-mcp binary
   through many act-then-verify cycles and gates on verify-null rate, verify-false
   rate, focus-loss rate, error rate, effect-mismatch (display re-observed), and
-  latency percentiles. First run (160 acts): PASS — verify-null 0.0, focus-loss
+  latency percentiles. First run (160 acts): PASS - verify-null 0.0, focus-loss
   0.0, effect-mismatch 0 (100% correct), p50 85ms / p95 117ms. Would have caught
   the v0.10.0 static-screen regression (verify-null spike). `--self-test` proves
   the harness can fail.
 
-## [0.10.0] - 2026-07-04 — Region Capture (the measured latency win)
+## [0.10.0] - 2026-07-04 - Region Capture (the measured latency win)
 
-The one raw-performance optimization deferred across several versions — now
+The one raw-performance optimization deferred across several versions - now
 measured, implemented, and verified rather than claimed.
 
 ### Changed
@@ -644,7 +652,7 @@ measured, implemented, and verified rather than claimed.
   cloned it for the static-screen cache) and then software-cropped to the window.
   Now an on-primary region capture converts only the requested sub-rect.
   - Measured (`cargo bench -p ghost-core --bench convert`, 1080p): full-frame
-    convert **~4.06 ms** → 400x300 region convert **~206 µs** — a **~20x** cut
+    convert **~4.06 ms** → 400x300 region convert **~206 µs** - a **~20x** cut
     in per-capture conversion cost, which runs several times per action.
   - Also skips the full-frame RGBA clone on region captures (a ~33 MB alloc at 4K).
   - Live-verified pixel-correct end-to-end: action verification returns
@@ -660,7 +668,7 @@ measured, implemented, and verified rather than claimed.
   screen** (adversarial-review finding). Region captures don't warm the
   full-frame cache, so a DXGI `AcquireNextFrame` timeout on an unchanging screen
   (the common case for a "before" frame or a no-visible-delta action) had no
-  cached frame to crop and returned an error — which the session layer swallowed
+  cached frame to crop and returned an error - which the session layer swallowed
   into a null `verified`, defeating the double-action guard. The crop path now
   falls back to the GDI region capture on that timeout, always returning a real
   frame. Live-verified: two back-to-back captures of a fully static window both
@@ -670,23 +678,23 @@ measured, implemented, and verified rather than claimed.
   capture and a timeout can't return a partially-black region as `Ok`; a
   degenerate crop now errors and routes to a fresh GDI region capture.
 
-## [0.9.1] - 2026-07-04 — Selection + Scroll-Until Primitives
+## [0.9.1] - 2026-07-04 - Selection + Scroll-Until Primitives
 
 ### Added
 
-- **Read text selection without clobbering the clipboard** — `ghost_see
+- **Read text selection without clobbering the clipboard** - `ghost_see
   mode=selection` (name/role) reads an element's current text selection via UIA
   TextPattern. Lets an agent confirm/read what's selected before copy/delete/
   format, without a Ctrl+C round-trip that would overwrite the clipboard. Native
   edit/RichEdit/document controls; browser controls often don't expose
   TextPattern (documented). Live-verified: read 'select-this-text' from Notepad.
-- **`ghost_scroll` until-mode** — pass `until_name`/`until_role` to scroll the
+- **`ghost_scroll` until-mode** - pass `until_name`/`until_role` to scroll the
   foreground window repeatedly until that element becomes visible (long or
   virtualized lists), up to `max_scrolls` (capped at 100). Returns found=true/
   false. The one thing linear `ghost_run` steps couldn't express. Live-verified:
   returns fast when already visible, bounded-false when absent.
 
-## [0.9.0] - 2026-07-04 — Optimization + Capability Batch
+## [0.9.0] - 2026-07-04 - Optimization + Capability Batch
 
 Found via a three-pass codebase audit (performance, capability, robustness).
 
@@ -703,37 +711,37 @@ Found via a three-pass codebase audit (performance, capability, robustness).
 
 ### Added
 
-- **`ghost_stats`** — grounding + cache telemetry (which tier wins, VLM
+- **`ghost_stats`** - grounding + cache telemetry (which tier wins, VLM
   escalation rate, cache hit/miss) is now a discoverable lean tool, not just a
   hidden alias. Call it to debug why a flow is slow or a find is flaky.
-- **`ghost_wait for=value`** — wait until an element's value equals/contains/
-  changes (forms, async fields, "wait until the total updates") — a common
+- **`ghost_wait for=value`** - wait until an element's value equals/contains/
+  changes (forms, async fields, "wait until the total updates") - a common
   flow-blocker with no primitive before.
-- **`ghost_drag` by element** — endpoints can be `from_name`/`to_name` (etc.),
+- **`ghost_drag` by element** - endpoints can be `from_name`/`to_name` (etc.),
   resolved to element centers like click, not just raw coords.
-- **`ghost_see mode=marks`** — returns the Set-of-Marks annotated screenshot the
+- **`ghost_see mode=marks`** - returns the Set-of-Marks annotated screenshot the
   VLM sees when grounding by description, plus the numbered label list. The
   fastest way to diagnose "why did vision grounding pick the wrong element".
 
 ### Removed / cleaned
 
 - Deleted the unused SQLite `LocatorStore` (279 LOC, zero call sites across 3
-  versions) and dropped its `rusqlite` + `tempfile` dependencies — smaller,
+  versions) and dropped its `rusqlite` + `tempfile` dependencies - smaller,
   faster builds. Applied `cargo clippy --fix` (mechanical warnings).
 
-## [0.8.0] - 2026-07-03 — Set-of-Marks Vision Grounding
+## [0.8.0] - 2026-07-03 - Set-of-Marks Vision Grounding
 
 ### Added
 
 - **Set-of-Marks visual grounding** for description-based `ghost_find` and VLM
   escalation. Instead of asking the model to regress raw pixel coordinates
-  (unreliable — a plain "coordinates of the equals button" landed ~250px off in
+  (unreliable - a plain "coordinates of the equals button" landed ~250px off in
   testing), Ghost overlays numbered badges on the window's detected elements,
   sends the marked screenshot plus each badge's accessible-name label, and asks
   the model which *number* matches. The number maps back to that element's exact
   rect. Live-verified on Calculator: four natural-language descriptions each
   landed exactly on the correct button (vs ~250px off before).
-  - New `ghost-core` mark renderer (`capture/marks.rs`) — numbered badges drawn
+  - New `ghost-core` mark renderer (`capture/marks.rs`) - numbered badges drawn
     with a hardcoded bitmap font, zero new dependencies.
   - Falls back to the previous coordinate-regression path when a window has no
     detectable elements to mark, so nothing regresses.
@@ -742,26 +750,26 @@ Honest scope: labels carry most of the disambiguation on well-named apps; the
 visual badges carry unlabeled icons. Truly a11y-invisible elements (pure canvas)
 still need a local visual detector, which is GPU-dependent and not shipped here.
 
-## [bench] - 2026-07-03 — Benchmark self-test + broader coverage
+## [bench] - 2026-07-03 - Benchmark self-test + broader coverage
 
-(No binary change — `ghost-mcp` stays 0.7.7; this expands the `bench/` suite.)
+(No binary change - `ghost-mcp` stays 0.7.7; this expands the `bench/` suite.)
 
 - **Negative-control self-test** (`python bench/run_bench.py --self-test`): runs
   deliberately-wrong scenarios (assert the display reads 99 when it reads 42, a
   missing element scored as found, junk bytes scored as an image) and passes only
   if the harness scores every one as FAIL. Proves the benchmark actually detects
-  failure — the 14/14 green run is a real signal, not a rubber stamp.
+  failure - the 14/14 green run is a real signal, not a rubber stamp.
 - **+2 tasks (12 → 14)**: window minimize/restore (verify the state really
   changes), and a clipboard set/get round-trip.
 - **Clipboard safety**: the harness now saves the user's clipboard before the run
   and restores it after, so running the benchmark never clobbers what you'd
   copied.
 
-## [0.7.7] - 2026-07-02 — Reproducible Benchmark + Symbol Keys
+## [0.7.7] - 2026-07-02 - Reproducible Benchmark + Symbol Keys
 
 ### Added
 
-- **`bench/` — a reproducible, honest benchmark.** Drives the real `ghost-mcp`
+- **`bench/` - a reproducible, honest benchmark.** Drives the real `ghost-mcp`
   binary through 12 Windows desktop tasks and scores each by re-observing the
   actual result (e.g. the Calculator display really reads 42), not by trusting a
   tool call returned ok. Self-contained, runs on any Windows 10/11 box, exit 0
@@ -773,25 +781,25 @@ still need a local visual detector, which is GPU-dependent and not shipped here.
 
 - **`ghost_key` / `ghost_press` can now send symbol keys** (`*`, `/`, `-`, `.`,
   `=`, etc.). Previously only named keys and a few OEM symbols had a VK mapping,
-  so `keys="*"` (multiply) was a silent no-op — an agent typing any operator hit
+  so `keys="*"` (multiply) was a silent no-op - an agent typing any operator hit
   it immediately. A single character with no VK mapping is now sent as a Unicode
   character (layout-independent, exact glyph); multi-char unknown names still error.
 
-## [0.7.6] - 2026-07-02 — Stuck-Modifier Safety
+## [0.7.6] - 2026-07-02 - Stuck-Modifier Safety
 
 ### Fixed (found by convergence audit)
 
 - **`hotkey` can no longer leave a modifier stuck down**: if a modifier key-down
   succeeded (e.g. Ctrl) but a later one failed (e.g. Shift in Ctrl+Shift+T), the
-  early return skipped the release loop, leaving Ctrl physically held — which
+  early return skipped the release loop, leaving Ctrl physically held - which
   corrupts all subsequent keyboard input system-wide. Every exit path now
   releases the modifiers already pressed.
 - **`ghost_stop` now releases held modifiers immediately** on arrival (in the
   stdin reader fast-path), instead of only when the queued stop later dispatches
-  — so a stuck Ctrl/Shift/Alt from an in-flight or held `key_down` is cleared at
+ - so a stuck Ctrl/Shift/Alt from an in-flight or held `key_down` is cleared at
   once.
 
-## [0.7.5] - 2026-07-02 — Paste Fallback for Rich-Text Editors
+## [0.7.5] - 2026-07-02 - Paste Fallback for Rich-Text Editors
 
 ### Added
 
@@ -804,7 +812,7 @@ still need a local visual detector, which is GPU-dependent and not shipped here.
   double the text, gated to editable roles, and the original clipboard is always
   restored. Results carry `used_paste_fallback` when it fires.
 
-## [0.7.4] - 2026-07-02 — Hardening + Flow Chaining
+## [0.7.4] - 2026-07-02 - Hardening + Flow Chaining
 
 ### Fixed (found by convergence audit)
 
@@ -812,7 +820,7 @@ still need a local visual detector, which is GPU-dependent and not shipped here.
   gained a 6000-node budget (the other UIA walkers already had one). A wide,
   shallow accessibility tree (big list, Chromium DOM) previously walked in full,
   blocking the single-threaded server uninterruptibly.
-- **`ghost_key "Ctrl++"`** (Ctrl+Plus / zoom) now parses correctly — the old
+- **`ghost_key "Ctrl++"`** (Ctrl+Plus / zoom) now parses correctly - the old
   parser rejected the exact syntax its own error message recommended. A single
   trailing `+` (e.g. `"Ctrl+"`, a truncated combo) correctly errors instead of
   silently firing Ctrl+Plus.
@@ -827,7 +835,7 @@ still need a local visual detector, which is GPU-dependent and not shipped here.
   0, then `ghost_click_at` at `"${steps.0.center.x}"`). Whole-string refs keep
   their type; embedded refs are stringified; unresolved refs are left verbatim.
 - **`ghost_assert value-equals` / `value-contains`**: compares an element's actual
-  value (ValuePattern) to expected text — the fill-then-verify check.
+  value (ValuePattern) to expected text - the fill-then-verify check.
 - **`ghost_screenshot` element/region crop**: pass name/role to capture one
   element, or rect=[l,t,r,b] for a region (VLM-in-the-loop debugging).
 
@@ -836,12 +844,12 @@ still need a local visual detector, which is GPU-dependent and not shipped here.
 - 346 passing (was 341). New coverage for key parsing, step-ref substitution,
   and inverted-rect rejection.
 
-## [0.7.3] - 2026-07-02 — Actionability, Waits, Structured Errors
+## [0.7.3] - 2026-07-02 - Actionability, Waits, Structured Errors
 
 ### Added
 
 - **`ghost_wait for=element`**: wait for an element (by name/role) to appear or
-  disappear WITHOUT clicking anything first — the "wait until Save exists"
+  disappear WITHOUT clicking anything first - the "wait until Save exists"
   primitive agents constantly need. Event-bus-driven backoff.
 - **Structured errors**: every failing tool call now carries an `error_code`
   and a `suggested_action` (e.g. element-not-found → "call ghost_see to confirm
@@ -856,7 +864,7 @@ still need a local visual detector, which is GPU-dependent and not shipped here.
   ValuePattern already replaced). Gated behind an editable-role check so a
   mis-grounded type can never fire Ctrl+A+Delete on a file list / non-text focus.
 - **Retry-until-verified for `type`**: an unverified `type` re-dispatches once
-  (safe — SetValue/clear-then-type are idempotent). Click/double/right-click are
+  (safe - SetValue/clear-then-type are idempotent). Click/double/right-click are
   deliberately NOT auto-retried: a slow-but-successful click must never be
   double-fired (double-submit/charge/delete). Results carry an `attempts` count.
 - **Occlusion diagnostic**: coordinate-dispatch actions report `hit_element`
@@ -866,7 +874,7 @@ still need a local visual detector, which is GPU-dependent and not shipped here.
 
 - 338 passing (was 337). New coverage for error classification.
 
-## [0.7.2] - 2026-07-01 — Multi-Monitor & Interaction Robustness
+## [0.7.2] - 2026-07-01 - Multi-Monitor & Interaction Robustness
 
 ### Added / Fixed
 
@@ -889,13 +897,13 @@ still need a local visual detector, which is GPU-dependent and not shipped here.
 - 337 passing (was 334). New coverage for virtual-screen / on-primary rect
   routing helpers.
 
-## [0.7.1] - 2026-07-01 — Targeting, Reading, Preemption
+## [0.7.1] - 2026-07-01 - Targeting, Reading, Preemption
 
 ### Added
 
 - **`window` param on `ghost_find`/`ghost_act`**: focuses + confirms the target
   window (title substring) before resolution, so UIA fast paths, OCR crops, and
-  cache keys all anchor to the INTENDED window in multi-window flows — closes
+  cache keys all anchor to the INTENDED window in multi-window flows - closes
   the remaining wrong-window-first-match hole.
 - **`index` param on `ghost_find`/`ghost_act`**: act on / return the nth match
   (0-based) when several elements share a name/role (e.g. multiple "Close Tab"
@@ -903,7 +911,7 @@ still need a local visual detector, which is GPU-dependent and not shipped here.
   count. Out-of-range gives an actionable error with the match count.
 - **`ghost_see mode=text`**: extract the readable text of a window/page
   directly from the accessibility tree (names of text-carrying roles +
-  ValuePattern content of edit/document). The cheapest way to READ a page —
+  ValuePattern content of edit/document). The cheapest way to READ a page - 
   no screenshot, no element dump. `limit` = char cap (default 20000).
 - **Preemptible emergency stop**: stdin now runs on a dedicated reader thread;
   a `ghost_stop` request sets the stop flag the moment it ARRIVES instead of
@@ -920,16 +928,16 @@ still need a local visual detector, which is GPU-dependent and not shipped here.
 - 333 passing (was 330). Live e2e: stop preemption 1ms, mode=text reads typed
   content, index disambiguation with matches count.
 
-## [0.7.0] - 2026-07-01 — Reliability & Latency Overhaul
+## [0.7.0] - 2026-07-01 - Reliability & Latency Overhaul
 
 Root-caused and fixed the three classes of field failures: actions that need
 multiple calls to fire, silent wrong-window input, and perceived lag.
 
-### Fixed — actions that "don't fire"
+### Fixed - actions that "don't fire"
 
 - **OS-foreground anchoring on every action path.** `ghost_act` now brings the
   target element's own window to the foreground (AttachThreadInput + confirm)
-  before dispatching input. Previously only UIA `SetFocus()` was attempted —
+  before dispatching input. Previously only UIA `SetFocus()` was attempted - 
   it fails silently for a background console process, so SendInput fallbacks
   (double_click, right_click, pattern-miss typing) landed in whichever window
   had focus, usually the MCP client's own terminal.
@@ -941,34 +949,34 @@ multiple calls to fire, silent wrong-window input, and perceived lag.
   (screen-delta detected), `focus_confirmed`, and a `warning` when an action
   dispatched but nothing visibly changed. Previously `ok:true` was hardcoded,
   so silent no-ops looked like success and clients re-issued the action.
-- **Coordinate-tier actions (OCR/VLM) get the same verification** — that path
+- **Coordinate-tier actions (OCR/VLM) get the same verification** - that path
   previously had none at all.
 - **Adaptive post-action verify window** (40→240ms early-exit polling) instead
   of a single fixed 50ms capture that false-negatived async renders
   (web/Electron).
 
-### Fixed — windows agents lose track of
+### Fixed - windows agents lose track of
 
 - `ghost_window op=list` now includes minimized windows (with a `state` field:
-  normal|minimized) — Win11 cloaks some minimized windows (e.g. Notepad) and
+  normal|minimized) - Win11 cloaks some minimized windows (e.g. Notepad) and
   they vanished from the list entirely while still alive.
 - `ghost_window op=focus` auto-restores minimized windows before focusing.
 - `ghost_see mode=full window=X` with an unknown window is now an ERROR that
-  lists the open windows — previously it silently walked the ENTIRE desktop and
+  lists the open windows - previously it silently walked the ENTIRE desktop and
   returned a huge dump including -32000 garbage coords from minimized windows.
 - Minimized-window scope requests return an actionable error ("restore it
   first") instead of garbage coordinates.
 
-### Fixed — latency
+### Fixed - latency
 
 - **VLM timeout 30s → 8s** (configurable via `GHOST_VLM_TIMEOUT_MS`), with one
   bounded retry on connect errors/5xx (never on timeout). A silent VLM
-  escalation could previously block the serial stdio loop — and every queued
-  request behind it — for 30 seconds.
+  escalation could previously block the serial stdio loop - and every queued
+  request behind it - for 30 seconds.
 - `ghost_find`/`ghost_act` responses expose `escalated: true` when local tiers
   missed and a network VLM call was paid, so hidden latency is visible.
 - **On-device OCR bounded at 3s** (WinRT spin-wait previously had no timeout).
-- **UIA desktop walks capped at 3000 visited nodes** — a DOM-heavy Chromium
+- **UIA desktop walks capped at 3000 visited nodes** - a DOM-heavy Chromium
   window could previously turn one find into an unbounded COM-call storm.
 - **DXGI black-frame flag is no longer permanent**: re-probes every 100 GDI
   captures so a transient event (sleep/resume, driver reset) doesn't downgrade
@@ -977,10 +985,10 @@ multiple calls to fire, silent wrong-window input, and perceived lag.
   native-resolution lossless PNG (multi-MB base64 over stdio); pass `max_dim=0`
   for the old behavior.
 - `ghost_see`/describe responses filter zero-area and off-screen elements and
-  cap at 150 elements by default (`limit` param, 0 = unlimited) — element dumps
+  cap at 150 elements by default (`limit` param, 0 = unlimited) - element dumps
   were the top source of client-side context bloat.
 - Every `tools/call` response envelope now includes `ms` (server-side latency).
-- Locator cache entries expire after 30s (TTL) — bounds the window where a
+- Locator cache entries expire after 30s (TTL) - bounds the window where a
   re-rendered UI could pass point-validation on a coincidentally-matching
   element and cause a wrong-target click.
 - Tokio runtime pinned to `current_thread` flavor, making the COM-STA
@@ -992,7 +1000,7 @@ multiple calls to fire, silent wrong-window input, and perceived lag.
   act-result honesty (verified/warning), verification sensitivity (typed-text
   detection, noise tolerance), and cache behavior.
 
-## [0.5.0] - 2026-05-07 — Local OCR + Multi-Provider Vision
+## [0.5.0] - 2026-05-07 - Local OCR + Multi-Provider Vision
 
 ### Added
 
@@ -1042,7 +1050,7 @@ multiple calls to fire, silent wrong-window input, and perceived lag.
   to verify a cached rect before skipping the walk. Without that,
   populating the store gains nothing.
 
-## [0.4.0] - 2026-05-07 — Hot Path Overhaul
+## [0.4.0] - 2026-05-07 - Hot Path Overhaul
 
 Targets browser-automation-grade latency for the desktop. Six-phase upgrade to
 the action loop, screenshot pipeline, and locator system. 92 tests passing.
@@ -1067,12 +1075,12 @@ the action loop, screenshot pipeline, and locator system. 92 tests passing.
   back-translation. New session methods: `locate_by_description`,
   `click_by_description`, `type_by_description`. Requires `ANTHROPIC_API_KEY`.
 - **8 new MCP tools** (45 total):
-  - `ghost_describe_screen_fast` — foreground-scoped describe.
-  - `ghost_screenshot_region` — ROI + downscale + JPEG/PNG selection.
-  - `ghost_event_seq` / `ghost_wait_for_event` — direct event-bus access.
+  - `ghost_describe_screen_fast` - foreground-scoped describe.
+  - `ghost_screenshot_region` - ROI + downscale + JPEG/PNG selection.
+  - `ghost_event_seq` / `ghost_wait_for_event` - direct event-bus access.
   - `ghost_locate_by_description` / `ghost_click_by_description` /
-    `ghost_type_by_description` — vision fallback ergonomic surface.
-  - `ghost_batch_actions` — single MCP round-trip for N ops, replaces
+    `ghost_type_by_description` - vision fallback ergonomic surface.
+  - `ghost_batch_actions` - single MCP round-trip for N ops, replaces
     multiple sequential tool calls in agent flows.
 - **Tracing instrumentation** on `find`, `click_and_wait_for_text`,
   `screenshot_region`, `wait_for_event`, `describe_screen_fast` with
@@ -1096,7 +1104,7 @@ the action loop, screenshot pipeline, and locator system. 92 tests passing.
   each `Notify` wake; only returns Ok when seq has actually advanced past
   `since_seq`.
 
-## [0.3.0] - 2026-04-18 — Speed Overhaul
+## [0.3.0] - 2026-04-18 - Speed Overhaul
 
 ### Added
 
@@ -1114,7 +1122,7 @@ the action loop, screenshot pipeline, and locator system. 92 tests passing.
 - 10 new MCP tools: `ghost_wait_until`, `ghost_wait_for_idle`, `ghost_navigate_and_wait`,
   `ghost_click_and_wait_for_text`, `ghost_fill_form`, `ghost_execute_intent`,
   `ghost_describe_screen_delta`, `ghost_click_background`, `ghost_cache_stats`,
-  `ghost_cache_invalidate` — total 37.
+  `ghost_cache_invalidate` - total 37.
 - sonic-rs response encoder (3-5x faster on large payloads) with serde_json fallback.
 - Criterion benches (`cargo bench -p ghost-intent`) and `docs/benches/v030-baseline.md`.
 - `chaos` feature flag for failure-injection tests.

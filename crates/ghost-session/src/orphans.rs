@@ -2,7 +2,9 @@
 //! gone. Detection lives in `ghost_core::process::orphans`; the marker is the
 //! profile root every Ghost-launched browser carries on its command line.
 
-use serde_json::{json, Value};
+#[cfg(windows)]
+use serde_json::json;
+use serde_json::Value;
 
 /// Browser image names Ghost launches (see ghost-browser's KNOWN_BROWSERS).
 const BROWSER_IMAGES: &[&str] = &["chrome.exe", "msedge.exe", "comet.exe", "brave.exe"];

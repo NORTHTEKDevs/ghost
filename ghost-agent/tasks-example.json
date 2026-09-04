@@ -7,7 +7,7 @@
   {
     "id": "2",
     "title": "Navigate to projects directory",
-    "detail": "Click on the terminal window, set clipboard to 'cd C:\\Users\\Krist\\projects\\active', paste with Ctrl+V, then press Enter."
+    "detail": "Click on the terminal window, set clipboard to 'cd C:\\projects', paste with Ctrl+V, then press Enter."
   },
   {
     "id": "3",

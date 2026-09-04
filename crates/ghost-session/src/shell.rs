@@ -827,8 +827,8 @@ mod warm_tests {
     #[test]
     fn cwd_prefix_escapes_single_quotes_for_a_literal_path() {
         assert_eq!(
-            cwd_prefix(r"C:\Users\Krist\o'neil"),
-            r"Set-Location -LiteralPath 'C:\Users\Krist\o''neil'; "
+            cwd_prefix(r"C:\Users\someone\o'neil"),
+            r"Set-Location -LiteralPath 'C:\Users\someone\o''neil'; "
         );
     }
 

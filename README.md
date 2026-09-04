@@ -1,5 +1,10 @@
 # Ghost
 
+[![CI](https://github.com/NORTHTEKDevs/ghost/actions/workflows/ci.yml/badge.svg)](https://github.com/NORTHTEKDevs/ghost/actions/workflows/ci.yml)
+[![Linux](https://github.com/NORTHTEKDevs/ghost/actions/workflows/linux.yml/badge.svg)](https://github.com/NORTHTEKDevs/ghost/actions/workflows/linux.yml)
+[![Release](https://img.shields.io/github/v/release/NORTHTEKDevs/ghost)](https://github.com/NORTHTEKDevs/ghost/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **The computer-use layer for AI agents, on Windows and Linux.** Ghost lets an
 agent operate any desktop app - including the ones with no API - **in the
 background without taking your screen or cursor**, and it **proves every action
@@ -608,7 +613,7 @@ vision agents need an API + VM).
 | JSONLogic eq/var                   | 32.2 ns   |
 | Intent compile (3op)               | 1.49 µs   |
 
-End-to-end capture measurement (release, `tests/capture_latency_probe.rs`)
+End-to-end capture measurement (release, `crates/ghost-core/tests/capture_latency_probe.rs`)
 corrected the v0.10.0 assumption: the DXGI *acquire* dominates and hits a cliff on
 large windows, so region captures (act-verify, screenshots, Set-of-Marks) route
 through flat ~16.5ms GDI BitBlt in v0.11.0; full-screen still uses DXGI. Run the

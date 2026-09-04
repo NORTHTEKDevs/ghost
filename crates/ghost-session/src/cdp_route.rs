@@ -19,10 +19,13 @@ use crate::target::WindowTarget;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+#[cfg(windows)]
+use std::time::Duration;
+use std::time::Instant;
 
 /// How long a "no port" answer for a pid is trusted before re-reading its
 /// command line (a browser is rarely relaunched with new flags mid-session).
+#[cfg(windows)]
 const PORT_CACHE_TTL: Duration = Duration::from_secs(60);
 
 /// Per-process memo of the DevTools port lookup, plus the window -> tab

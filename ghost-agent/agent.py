@@ -14,7 +14,7 @@ import mss
 import mss.tools
 from PIL import Image
 
-GHOST_EXE = r"C:\Users\Krist\projects\active\ghost\target\release\ghost-mcp.exe"
+GHOST_EXE = r"<repo-root>\target\release\ghost-mcp.exe"
 MODEL = "claude-sonnet-4-6"
 MAX_LOOPS_PER_TASK = 30
 LOOP_DELAY_S = 2

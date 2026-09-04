@@ -583,20 +583,20 @@
       "crate": "ghost-core",
       "purpose": "Low-level Win32/UIA/SendInput/DXGI/OCR primitive layer for the Ghost desktop automation framework. Provides: keyboard and mouse input via SendInput, screen capture via DXGI desktop duplication, UIA tree walking (live walker + cached walker), an STA thread pool for COM/UIA work, a WinEvent-based event bus, on-device OCR via Windows.Media.Ocr, and idle detection via frame hashing.",
       "key_files": [
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/input/keyboard.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/input/mouse.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/input/postmessage.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/input/hotkey.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/capture/screen.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/capture/idle.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/uia/tree.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/uia/cached_walker.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/uia/sta_pool.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/uia/event_bus.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/uia/patterns.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/ocr.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-session/src/vision.rs",
-        "C:/Users/Krist/.claude/mcp.json"
+        "./crates/ghost-core/src/input/keyboard.rs",
+        "./crates/ghost-core/src/input/mouse.rs",
+        "./crates/ghost-core/src/input/postmessage.rs",
+        "./crates/ghost-core/src/input/hotkey.rs",
+        "./crates/ghost-core/src/capture/screen.rs",
+        "./crates/ghost-core/src/capture/idle.rs",
+        "./crates/ghost-core/src/uia/tree.rs",
+        "./crates/ghost-core/src/uia/cached_walker.rs",
+        "./crates/ghost-core/src/uia/sta_pool.rs",
+        "./crates/ghost-core/src/uia/event_bus.rs",
+        "./crates/ghost-core/src/uia/patterns.rs",
+        "./crates/ghost-core/src/ocr.rs",
+        "./crates/ghost-session/src/vision.rs",
+        "~/.claude/mcp.json"
       ],
       "loc_estimate": 1450,
       "strengths": [
@@ -614,92 +614,92 @@
         {
           "issue": "Vision provider env vars (NVIDIA_API_KEY, ANTHROPIC_API_KEY) are missing from the ghost MCP server registration",
           "severity": "critical",
-          "why": "C:/Users/Krist/.claude/mcp.json registers the ghost server with no 'env' block. ghost-mcp.exe inherits the Claude Code process environment which does not carry these variables. pick_provider() in vision.rs:96 immediately returns Err(GhostError::Config(...)) on every ghost_locate_by_description / ghost_click_by_description call, making vision-based grounding completely non-functional even though the code is correct.",
-          "file": "C:/Users/Krist/.claude/mcp.json"
+          "why": "~/.claude/mcp.json registers the ghost server with no 'env' block. ghost-mcp.exe inherits the Claude Code process environment which does not carry these variables. pick_provider() in vision.rs:96 immediately returns Err(GhostError::Config(...)) on every ghost_locate_by_description / ghost_click_by_description call, making vision-based grounding completely non-functional even though the code is correct.",
+          "file": "~/.claude/mcp.json"
         },
         {
           "issue": "SendInput keyboard input races with Claude Code terminal stealing focus between tool calls",
           "severity": "critical",
           "why": "type_text (keyboard.rs:50) and press_key (keyboard.rs:67) call SendInput which delivers input to whichever window has keyboard focus at injection time. In a Claude Code tool loop, the MCP server process runs inside a terminal (or a VSCode/Windows Terminal pane) that can regain focus between tool responses. There is no focus assertion before SendInput - no SetForegroundWindow, no AttachThreadInput, no check that the intended HWND is still foreground. Ghost has focus_window (tree.rs:279) and BackgroundClicker but nothing wires them into the keyboard path. A ghost_type call preceded by ghost_click_at has a ~5-200ms window where terminal focus steal causes keystrokes to land in the wrong window.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/input/keyboard.rs"
+          "file": "./crates/ghost-core/src/input/keyboard.rs"
         },
         {
           "issue": "Live tree walker (tree.rs) calls ControlViewWalker() inside every recursive step, creating a fresh COM proxy per node-visit",
           "severity": "high",
           "why": "get_walker() at tree.rs:97 calls self.automation.ControlViewWalker() on every invocation. It is called inside search_subtree_by_name (line 111), search_subtree_by_role (line 131), and collect_interactive (line 213) - once per tree node. ControlViewWalker is a cross-process COM call returning a new proxy object. On a typical desktop with 200-1000 UIA nodes this inflates the IPC count massively. The IUIAutomationTreeWalker should be created once per search, not per node.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/uia/tree.rs"
+          "file": "./crates/ghost-core/src/uia/tree.rs"
         },
         {
           "issue": "CachedTreeWalker.find_by_name and find_by_role walk the entire desktop even when a foreground scope is sufficient",
           "severity": "high",
           "why": "cached_walker.rs:86 and 99 both call self.walk(&root) where root is always GetRootElement() - the full desktop. Unlike UiaTree which has find_by_name_fast (tree.rs:72) that scopes to the foreground window first, CachedTreeWalker has no fast path. A single FindAllBuildCache(TreeScope_Subtree, TrueCondition) on the desktop root in a complex UI session can block for 500ms-2s.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/uia/cached_walker.rs"
+          "file": "./crates/ghost-core/src/uia/cached_walker.rs"
         },
         {
           "issue": "DXGI capture creates a new staging texture and calls DuplicateOutput on every single screenshot",
           "severity": "high",
           "why": "capture_rgba (screen.rs:158) calls DuplicateOutput (line 164) every invocation, then CreateTexture2D for a staging surface (line 189). IDXGIOutputDuplication is a session-scoped object with internal frame queuing - recreating it every call throws away the duplication state, requiring a fresh keyframe from the driver on next AcquireNextFrame. The staging texture is also allocated and released every call (no pool). For agent loops calling ghost_wait_for_idle with stable_frames=3, this means 3+ full DXGI sessions per wait. Correct pattern: hold the IDXGIOutputDuplication across calls; only re-create if DXGI_ERROR_ACCESS_LOST.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/capture/screen.rs"
+          "file": "./crates/ghost-core/src/capture/screen.rs"
         },
         {
           "issue": "IdleDetector.wait_stable hashes full PNG-encoded bytes, not raw pixels, adding encoder overhead to every poll iteration",
           "severity": "high",
           "why": "idle.rs:72 calls capture_screen() which returns a PNG-encoded Vec<u8>, then hashes the PNG bytes. PNG encoding a 1920x1080 frame takes 50-300ms. wait_stable polls every 16ms (line 82) but spends most of that time PNG-encoding. The correct implementation is to hash the raw RGBA frame (or the 4x4 downsample output from downsample_to_4x4 which exists in the same file at line 15) using the already-available capture_screen_full_rgba() path. The IdleDetector struct comment says 'Stub DXGI-backed idle detector' - it is not actually using the DXGI idle strategy described in the module doc.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/capture/idle.rs"
+          "file": "./crates/ghost-core/src/capture/idle.rs"
         },
         {
           "issue": "ocr.rs blocks the async runtime by calling IAsyncOperation::get() (a blocking WinRT spin-wait) inside a tokio task",
           "severity": "high",
           "why": "block_on_async at ocr.rs:159 calls op.get() which is the synchronous WinRT blocking get - it spins the current thread until the operation completes. This is called from capture_and_ocr (ocr.rs:32) which is in turn called from the MCP dispatch path on the tokio thread pool. Blocking a tokio worker thread for 50-200ms (OCR latency) stalls other async tasks sharing that thread. The OCR call should be offloaded to tokio::task::spawn_blocking or the STA pool.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/ocr.rs"
+          "file": "./crates/ghost-core/src/ocr.rs"
         },
         {
           "issue": "EventBus only subscribes to EVENT_SYSTEM_FOREGROUND; focus changes and UIA structure changes are not observed",
           "severity": "high",
           "why": "pump_thread (event_bus.rs:97) hooks only EVENT_SYSTEM_FOREGROUND..EVENT_SYSTEM_FOREGROUND. A click inside an already-foreground app, a text field appearing after a button press, or a dialog opening without changing the foreground window will not bump the seq counter. wait_for_event will time out or return stale data in these very common agent-loop patterns. The module doc at line 10 explicitly flags this: 'Future work: subscribe to UIA structure-changed and focus-changed events'. UIA AddFocusChangedEventHandler and AddStructureChangedEventHandler would cover the gap.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/uia/event_bus.rs"
+          "file": "./crates/ghost-core/src/uia/event_bus.rs"
         },
         {
           "issue": "UiaElement.role_id_to_name uses wrong numeric constants for most control types",
           "severity": "high",
           "why": "element.rs:73: 'button' is mapped to id 50, 'edit' to 42. The actual UIA_ButtonControlTypeId is 50000, UIA_EditControlTypeId is 50004. The values 50 and 42 do not correspond to any real UIA control type. As a result, role-based find, describe_screen filtering on INTERACTIVE_ROLES, and collect_interactive (tree.rs:198) will never match any element by role in production - they will all fall through to 'unknown'. Only element descriptors from CachedTreeWalker.descriptor_from_cached (which reads CachedControlType and passes through to role_id_to_name) will exhibit this bug; all role-based ghost_find calls are broken.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/uia/element.rs"
+          "file": "./crates/ghost-core/src/uia/element.rs"
         },
         {
           "issue": "COM apartment mismatch: UiaTree is created in a COINIT_MULTITHREADED (MTA) apartment but IUIAutomation is a STA COM server",
           "severity": "high",
           "why": "uia/mod.rs:19 calls CoInitializeEx(None, COINIT_MULTITHREADED) for the main/tokio threads. UiaTree::new() (tree.rs:19) calls CoCreateInstance on those MTA threads. IUIAutomation (CUIAutomation8) is an in-proc STA server. Creating an STA server from an MTA thread forces COM to marshal all method calls through a hidden proxy/stub, adding a round-trip per UIA call and producing RPC_E_WRONG_THREAD or silent failures under contention. The STA pool correctly uses COINIT_APARTMENTTHREADED but UiaTree - used directly by GhostSession without the pool - does not.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/uia/mod.rs"
+          "file": "./crates/ghost-core/src/uia/mod.rs"
         },
         {
           "issue": "ghost_screenshot always returns full-screen PNG base64 with no size cap - will overflow context windows",
           "severity": "medium",
           "why": "The ghost_screenshot tool (mcp/main.rs:169) always calls session.screenshot(Region::full()) which calls capture_screen() which encodes a full-resolution PNG (typically 3-8 MB for a 1080p desktop) then base64-encodes it (4/3 overhead = 4-11 MB string). Claude's context window has a hard limit; a 1080p PNG base64 string alone exceeds Claude Haiku's context. The tool schema description says 'full screen, lossless' with no mention of alternatives. Callers in agent loops will habitually reach for ghost_screenshot; ghost_screenshot_region exists but is not the default.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-mcp/src/main.rs"
+          "file": "./crates/ghost-mcp/src/main.rs"
         },
         {
           "issue": "postmessage.rs lparam encoding uses signed bit-masking that is wrong for coordinates > 32767",
           "severity": "medium",
           "why": "BackgroundClicker::click at postmessage.rs:20: `((y & 0xFFFF) << 16 | (x & 0xFFFF))` operates on i32. For a 4K monitor with y > 32767 the upper bit of the 16-bit field is set, making y appear negative when the receiving window decodes HIWORD(lparam) as a signed short. The standard Win32 idiom is MAKELPARAM which uses u16 packing. This causes clicks to land at wrong y positions on high-DPI or 4K displays.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/input/postmessage.rs"
+          "file": "./crates/ghost-core/src/input/postmessage.rs"
         },
         {
           "issue": "patterns.rs set_value fallback clicks to focus then types without verifying focus was acquired",
           "severity": "medium",
           "why": "set_value (patterns.rs:39) when ValuePattern is unavailable: clicks the bounding rect center, then immediately calls type_text. There is no sleep, no UIA focus check, and no verification that the click succeeded. On slow applications or during animations, type_text fires while the field is still gaining focus, dropping the first character(s). Combined with the SendInput focus-race issue, this is a compound failure mode.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/uia/patterns.rs"
+          "file": "./crates/ghost-core/src/uia/patterns.rs"
         },
         {
           "issue": "mouse.rs to_absolute() calls GetSystemMetrics on every mouse event and has no DPI-per-monitor awareness",
           "severity": "medium",
           "why": "to_absolute (mouse.rs:7) calls GetSystemMetrics(SM_CXSCREEN/SM_CYSCREEN) on each invocation. This is a live syscall per click/hover/scroll event. More critically, SM_CXSCREEN returns the primary monitor's virtual screen size in logical pixels, which on a multi-monitor or per-monitor DPI setup does not match the MOUSEEVENTF_ABSOLUTE coordinate space (which spans the full virtual desktop). Clicks on secondary monitors will land at wrong positions.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/input/mouse.rs"
+          "file": "./crates/ghost-core/src/input/mouse.rs"
         },
         {
           "issue": "bgra_to_rgba pixel conversion loop is scalar; a 1920x1080 frame does ~8M byte operations without SIMD",
           "severity": "low",
           "why": "bgra_to_rgba (screen.rs:217) iterates pixel-by-pixel with a nested loop. At 1080p (2,073,600 pixels) this is ~8M byte reads/writes in a tight loop. The BGRA->RGBA swap is a 4-lane byte shuffle, trivially vectorizable. The `image` crate dependency is already present and could handle this, or a simple bytemuck/unsafe cast + u32 rotate would be 4-8x faster.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/capture/screen.rs"
+          "file": "./crates/ghost-core/src/capture/screen.rs"
         }
       ],
       "improvement_opportunities": [
@@ -784,18 +784,18 @@
       "crate": "ghost-session",
       "purpose": "Safe async session API that wraps ghost-core primitives (UIA tree walking, SendInput, DXGI screen capture, Windows OCR) and exposes them as a high-level automation session used by the ghost-mcp stdio server (Claude Code tool loop driver). It owns the GhostSession struct, the By locator enum, GhostElement, vision.rs (multi-provider VLM fallback via NVIDIA/Anthropic), and macro-style compound primitives: navigate_and_wait, fill_form, click_and_wait_for_text.",
       "key_files": [
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-session/src/session.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-session/src/vision.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-session/src/locator.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-session/src/element.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-session/src/error.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/input/keyboard.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/input/mouse.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/uia/tree.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/uia/event_bus.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/capture/screen.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/capture/idle.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-mcp/src/main.rs"
+        "./crates/ghost-session/src/session.rs",
+        "./crates/ghost-session/src/vision.rs",
+        "./crates/ghost-session/src/locator.rs",
+        "./crates/ghost-session/src/element.rs",
+        "./crates/ghost-session/src/error.rs",
+        "./crates/ghost-core/src/input/keyboard.rs",
+        "./crates/ghost-core/src/input/mouse.rs",
+        "./crates/ghost-core/src/uia/tree.rs",
+        "./crates/ghost-core/src/uia/event_bus.rs",
+        "./crates/ghost-core/src/capture/screen.rs",
+        "./crates/ghost-core/src/capture/idle.rs",
+        "./crates/ghost-mcp/src/main.rs"
       ],
       "loc_estimate": 4935,
       "strengths": [
@@ -812,73 +812,73 @@
           "issue": "No focus verification before SendInput: keyboard input fires into whatever window Win32 says is foreground at the instant SendInput is called",
           "severity": "critical",
           "why": "In a Claude Code tool loop each MCP call crosses a stdio round-trip. Between tool returns the Claude Code terminal can silently reclaim focus (typing into the terminal, VSCode focus, notifications). type_text() (keyboard.rs:50-64) calls SendInput per character with no foreground-HWND check. fill_form() (session.rs:573-585) calls el.click() then immediately type_text() with no delay and no post-click focus confirmation. A 50-200ms inter-character gap plus any async yield is enough for the terminal to steal the focus back. The only guard is is_stopped(), which is an emergency flag, not a focus check.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/input/keyboard.rs"
+          "file": "./crates/ghost-core/src/input/keyboard.rs"
         },
         {
           "issue": "focus_window() calls SetForegroundWindow with no confirmation wait and no retry",
           "severity": "critical",
           "why": "tree.rs:279-288 calls SetForegroundWindow and returns immediately. SetForegroundWindow is advisory on Windows 10/11: it is silently ignored if the calling process has not been the foreground process recently (UIPI foreground lock). No sleep, no AttachThreadInput, no verification that GetForegroundWindow() == target HWND after the call. navigate_and_wait (session.rs:517) chains focus_window -> Ctrl+L -> type_text -> Enter: if focus never transferred, Ctrl+L goes to the terminal and the URL is typed there.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/uia/tree.rs"
+          "file": "./crates/ghost-core/src/uia/tree.rs"
         },
         {
           "issue": "NVIDIA_API_KEY not propagated into ghost-mcp env block: vision is silently dead in the Claude Code direct registration path",
           "severity": "critical",
           "why": "vision.rs:96-115 (pick_provider) reads NVIDIA_API_KEY and ANTHROPIC_API_KEY from the process environment at call time. The user note states the key is set only in the comet-mcp wrapper env, not in the direct ghost MCP registration env block. The ghost-mcp process therefore sees neither key, pick_provider() returns Err(Config(...)), and every ghost_locate_by_description / ghost_click_by_description / ghost_type_by_description call returns a Config error. There is no warning at startup: GhostSession::new() does not probe for vision keys, so the failure is invisible until the first vision tool call.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-session/src/vision.rs"
+          "file": "./crates/ghost-session/src/vision.rs"
         },
         {
           "issue": "ghost_screenshot returns full-screen PNG (main.rs:170-171) with no downscale: a typical 1920x1080 PNG is 2-5 MB which base64-encodes to 3-7 MB of JSON",
           "severity": "high",
           "why": "capture_screen() (screen.rs:30-37) encodes the entire desktop as PNG. The MCP response embeds this as a base64 string. At 3-7 MB per call this saturates the MCP stdout buffer, balloons context window consumption, and causes multi-second serialization delays. ghost_screenshot_region with foreground=true + jpeg_quality=75 + max_dim=768 is the correct tool, but it is a separate tool: the agent must know to use it. The description of ghost_screenshot says 'full screen, lossless' without discouraging use or pointing to the alternative.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-mcp/src/main.rs"
+          "file": "./crates/ghost-mcp/src/main.rs"
         },
         {
           "issue": "IdleDetector::wait_stable (idle.rs:61-85) hashes raw PNG bytes rather than the decoded pixel buffer, so re-encoding variance between otherwise identical frames can prevent stable detection",
           "severity": "high",
           "why": "wait_stable() calls capture_screen() (which returns PNG bytes), then calls hash_frame() on the raw PNG-encoded bytes. PNG encoding is deterministic for identical pixel data with the same encoder state, but the crate comment and code structure suggest the intent was to compare pixel content. The bigger issue is that capture_screen() re-acquires DuplicateOutput on every call (screen.rs:164), meaning each frame is a new desktop duplication session. Under display compositor activity (cursor blink, clock tick, notification badge) the captured frame pixel data changes every 16ms, so stable_frames=3 may require more wall time than the timeout allows, causing spurious wait_for_idle timeouts in navigate_and_wait.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/capture/idle.rs"
+          "file": "./crates/ghost-core/src/capture/idle.rs"
         },
         {
           "issue": "collect_interactive (tree.rs:187-220) re-acquires the UIA TreeWalker on every node traversal, creating N+1 COM calls per describe_screen call",
           "severity": "high",
           "why": "get_walker() (tree.rs:97-100) calls self.automation.ControlViewWalker() each time collect_interactive recurses. A typical application window has 100-500 nodes, meaning 100-500 extra COM cross-apartment calls per describe_screen. Each ControlViewWalker() round-trips to the COM server. This is a 2-5x slowdown vs acquiring the walker once at the root. describe_screen_fast() has the same issue.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/uia/tree.rs"
+          "file": "./crates/ghost-core/src/uia/tree.rs"
         },
         {
           "issue": "By::Description is accepted at the API level but immediately rejected by find() with an error directing callers to use a different method",
           "severity": "medium",
           "why": "locator.rs defines By::Description and session.rs:141-146 immediately matches it out and returns Err(Vision(...)). The By::role() / By::name() fallback-then-vision pattern that the doc comment implies does not exist: there is no automatic escalation to vision if UIA misses. Callers using By::Description with find() get an opaque error rather than the intended vision fallback. fill_form (session.rs:573-585) and click_and_wait_for_text (session.rs:527-565) only call self.find(by), so they also silently fail if passed By::Description.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-session/src/session.rs"
+          "file": "./crates/ghost-session/src/session.rs"
         },
         {
           "issue": "wait_until condition state exposes only cache_seq and last_error=null; last_error is always Null regardless of previous action outcome",
           "severity": "medium",
           "why": "session.rs:95-98 builds the condition state as {cache_seq: u64, last_error: Null} unconditionally. The field is never populated with actual error context because GhostSession holds no per-action error state. An agent trying to abort on error via wait_until with a last_error condition will always see null and will never trigger, making the feature non-functional as documented.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-session/src/session.rs"
+          "file": "./crates/ghost-session/src/session.rs"
         },
         {
           "issue": "EventBus only hooks EVENT_SYSTEM_FOREGROUND; UIA structure-changed and focus-changed events are not subscribed",
           "severity": "medium",
           "why": "event_bus.rs:99-107 hooks a single win event. UIA changes (new elements, value changes, selection changes) do not bump the bus seq. find() and click_and_wait_for_text() poll with backoff waiting for seq to advance; if the target element appears due to UIA structure change (e.g. a dialog box opens programmatically without a foreground change) the bus does not fire and callers spin at their current backoff interval until the timer wakes them. The comment at line 9 acknowledges this as future work but the gap causes missed wakeups in practice.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/uia/event_bus.rs"
+          "file": "./crates/ghost-core/src/uia/event_bus.rs"
         },
         {
           "issue": "capture_rgba acquires a new DuplicateOutput per call (screen.rs:164) and allocates a full staging texture per frame",
           "severity": "medium",
           "why": "DuplicateOutput is an expensive COM call that creates a new desktop duplication session. It is called on every screenshot (and on every wait_stable iteration). A 1920x1080 capture also allocates a full staging ID3D11Texture2D each frame and discards it after memcpy, causing GC pressure. The D3D device/context/output1 are cached in CAPTURE_STATE but DuplicateOutput is explicitly not cached (line 14-15 comment says so but the consequence is per-call overhead of ~5-20ms).",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/capture/screen.rs"
+          "file": "./crates/ghost-core/src/capture/screen.rs"
         },
         {
           "issue": "set_value fallback in patterns.rs (line 40-44) clicks element center then calls type_text without clearing existing content first",
           "severity": "medium",
           "why": "When ValuePattern is unavailable, set_value() clicks the element to focus it and then types text. If the field already has content this appends or inserts at cursor rather than replacing. The agent has no indication whether ValuePattern was used (clean replace) or the fallback was taken (potentially corrupting the field value). fill_form() has no Ctrl+A before type_text in this path.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/uia/patterns.rs"
+          "file": "./crates/ghost-core/src/uia/patterns.rs"
         },
         {
           "issue": "GhostSession is not Send; tokio::main runs on a multi-threaded runtime but all session methods are called from one logical async task with COM objects that have STA affinity",
           "severity": "low",
           "why": "GhostSession holds a UiaTree which holds IUIAutomation (a COM pointer). COM STA objects must be used on the thread that created them. The session is created on the main thread and used from async handlers within the single-threaded logical path in main.rs, which works as long as no spawn() crosses the COM pointer. The element.rs comment (line 26-27) documents this. However, if anyone wraps GhostSession in Arc and spawns, UB results. Adding a negative Send bound or a thread-id guard would make this a compile-time guarantee instead of a convention.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-session/src/element.rs"
+          "file": "./crates/ghost-session/src/element.rs"
         }
       ],
       "improvement_opportunities": [
@@ -948,21 +948,21 @@
       "crate": "ghost-mcp",
       "purpose": "MCP server binary exposing 47 Ghost desktop-automation tools over stdio JSON-RPC. Bridges Claude Code tool calls to Windows UIA tree walking, SendInput keyboard/mouse, DXGI screen capture, WinRT OCR, and vision-model fallback (NVIDIA/Anthropic). Single source file (src/main.rs, ~995 LOC) with all tool dispatch, schema declaration, and base64 encoding. Depends on ghost-session (safe async API) which delegates to ghost-core (raw Win32/UIA), ghost-cache (UIA snapshot mirror), and ghost-intent (FSM intent compiler).",
       "key_files": [
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-mcp/src/main.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-mcp/Cargo.toml",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-session/src/session.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-session/src/vision.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-session/src/element.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/input/keyboard.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/input/mouse.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/input/hotkey.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/uia/event_bus.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/uia/tree.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/uia/sta_pool.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/capture/screen.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/capture/idle.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/ocr.rs",
-        "C:/Users/Krist/.claude/settings.json"
+        "./crates/ghost-mcp/src/main.rs",
+        "./crates/ghost-mcp/Cargo.toml",
+        "./crates/ghost-session/src/session.rs",
+        "./crates/ghost-session/src/vision.rs",
+        "./crates/ghost-session/src/element.rs",
+        "./crates/ghost-core/src/input/keyboard.rs",
+        "./crates/ghost-core/src/input/mouse.rs",
+        "./crates/ghost-core/src/input/hotkey.rs",
+        "./crates/ghost-core/src/uia/event_bus.rs",
+        "./crates/ghost-core/src/uia/tree.rs",
+        "./crates/ghost-core/src/uia/sta_pool.rs",
+        "./crates/ghost-core/src/capture/screen.rs",
+        "./crates/ghost-core/src/capture/idle.rs",
+        "./crates/ghost-core/src/ocr.rs",
+        "~/.claude/settings.json"
       ],
       "loc_estimate": 995,
       "strengths": [
@@ -982,79 +982,79 @@
           "issue": "NVIDIA_API_KEY (and ANTHROPIC_API_KEY) not in MCP registration env block",
           "severity": "critical",
           "why": "settings.json mcpServers.ghost has no 'env' key at all (line 302-305). The pick_provider() function in vision.rs reads std::env::var(\"NVIDIA_API_KEY\") and std::env::var(\"ANTHROPIC_API_KEY\") at runtime. When ghost-mcp.exe is spawned by Claude Code as an MCP child process, it inherits only the Claude Code terminal environment - which does not include NVIDIA_API_KEY unless the system-level env or the MCP 'env' block provides it. The comet-mcp wrapper (mentioned in the audit brief) passes NVIDIA_API_KEY via its own env block, but the direct ghost registration does not. Result: every call to ghost_locate_by_description, ghost_click_by_description, or ghost_type_by_description will fail with GhostError::Config('no vision provider configured') at pick_provider() (vision.rs:112-114), making the entire vision subsystem silently dead when driven through Claude Code's tool loop.",
-          "file": "C:/Users/Krist/.claude/settings.json"
+          "file": "~/.claude/settings.json"
         },
         {
           "issue": "JSON-RPC error objects are missing the required 'code' integer field",
           "severity": "high",
           "why": "The JSON-RPC 2.0 spec requires error objects to be {code: integer, message: string, data?: any}. Ghost emits {message: string} only (main.rs:98-102 and parse-error path at line 73-83). MCP clients that strictly validate error envelopes will fail to parse errors; more importantly, the agent has no way to distinguish parse errors (-32700), method-not-found (-32601), invalid params (-32602), or application errors (-32000...-32099) because all errors look identical. This collapses the entire error taxonomy into one bucket, making it impossible for a Claude Code tool-use loop to retry intelligently vs abort.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-mcp/src/main.rs"
+          "file": "./crates/ghost-mcp/src/main.rs"
         },
         {
           "issue": "SendInput focus races - keyboard and mouse ops go to whatever window has focus at delivery time",
           "severity": "high",
           "why": "All keyboard calls (type_text, press_key, hotkey, key_down) and mouse click calls use SendInput, which delivers to the thread-input-focused window determined at kernel dispatch time. Between MCP tool calls, the Claude Code terminal process can steal focus back (Windows restores focus to the shell window that launched it, or window activation from prior actions settles asynchronously). The session has no SetForegroundWindow+verify-focus step before any keyboard delivery. ghost_focus_window (tree.rs:279-289) calls SetForegroundWindow but does not wait for the WM_SETFOCUS message to arrive or for GetForegroundWindow to confirm the HWND matches before returning. navigate_and_wait (session.rs:517-523) calls focus_window then immediately hotkey Ctrl+L - zero inter-call delay. This is the primary cause of 'failing across the board' in Claude Code tool loops where the terminal steals focus between tool calls.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-session/src/session.rs"
+          "file": "./crates/ghost-session/src/session.rs"
         },
         {
           "issue": "ghost_screenshot always returns full-screen PNG - a ~1-5MB base64 blob every call",
           "severity": "high",
           "why": "The ghost_screenshot handler (main.rs:169-172) calls capture_screen() which DXGI-captures the full primary monitor and PNG-encodes it without any downscaling or JPEG option. A 2560x1440 screen produces a ~3-5MB PNG, which base64-encodes to ~4-7MB. This is delivered inline in the JSON-RPC result body, transferred on stdout, and consumed as tool content in the Claude Code context window. At 200K token contexts with ~0.75 byte/token this exhausts roughly 2-4% of context per screenshot. The schema description warns to prefer ghost_screenshot_region, but agents in a tool loop will often reach for the simplest tool. The tool should at minimum default to foreground-window JPEG rather than full-screen PNG.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-mcp/src/main.rs"
+          "file": "./crates/ghost-mcp/src/main.rs"
         },
         {
           "issue": "wait_for_idle hashes the full-screen PNG (lossless, then Blake3) instead of the downsampled perceptual hash it claims to use",
           "severity": "high",
           "why": "idle.rs:wait_stable (line 71-83) calls capture_screen() which returns a full PNG blob, then passes the ENTIRE PNG bytes to hash_frame() (which is just blake3::hash). The downsample_to_4x4() function exists and is correct but is NEVER called - wait_stable hashes raw PNG bytes instead. This has two consequences: (1) any PNG encoder non-determinism (e.g. timestamp metadata fields in certain builds of the image crate) will cause every frame to appear 'changed', making wait_for_idle never settle. (2) Even when working, capturing + PNG-encoding a full screen 60 times per second (16ms sleep) to hash it is ~10x more CPU/IO work than needed. The correct fix is to call capture_screen_full_rgba(), downsample_to_4x4(), and hash that.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/capture/idle.rs"
+          "file": "./crates/ghost-core/src/capture/idle.rs"
         },
         {
           "issue": "UIA tree.rs is initialized with COINIT_MULTITHREADED but IUIAutomation is STA-only",
           "severity": "high",
           "why": "uia/mod.rs:init_com() (line 18-21) calls CoInitializeEx with COINIT_MULTITHREADED. IUIAutomation (CUIAutomation8) is an in-process COM object that requires STA apartment threading - calling it from an MTA apartment is formally undefined behavior and causes intermittent access violation panics and stale/wrong element data in practice. The sta_pool.rs correctly initializes its workers with COINIT_APARTMENTTHREADED, but UiaTree::new() in session.rs:51 creates the IUIAutomation on the tokio thread pool (MTA), and all the find_by_name_fast / describe_screen / etc calls execute COM calls on whatever tokio worker thread handles the async task - none of which have STA affinity. This is a latent race that manifests as random element-not-found failures, UIA cache corruption, and access violations under load.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/uia/mod.rs"
+          "file": "./crates/ghost-core/src/uia/mod.rs"
         },
         {
           "issue": "parse_by() accepts only name or role, not both simultaneously - no compound locator",
           "severity": "medium",
           "why": "parse_by() (main.rs:819-827) returns the first of name or role it finds. An agent cannot say 'find the button named Save' - it must pick one. In UIs with multiple 'Save' elements of different roles (e.g. Save button vs Save menuitem) or with common role matches (multiple 'button' elements), the agent is forced to either retry with progressively more specific queries or fall back to coordinate-based clicks. The locator system is also missing: CSS-selector style, automation-id, class-name, or XPath-equivalent. For complex apps this means constant fallback to ghost_locate_by_description (expensive API call) for elements that are perfectly accessible via UIA but not matchable by single name/role.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-mcp/src/main.rs"
+          "file": "./crates/ghost-mcp/src/main.rs"
         },
         {
           "issue": "ghost_screenshot returns base64 as a JSON string key, not an MCP image content block",
           "severity": "medium",
           "why": "MCP 2024-11-05 defines a dedicated 'image' content type: {type:'image', data:base64, mimeType:'image/png'}. Ghost returns {png_base64: '...'} (main.rs:171) or {jpeg_base64: '...'} (main.rs:191) - plain JSON string values. Claude Code's tool result handling can render image content blocks as actual images in the conversation, enabling the model to visually inspect the screenshot. With the current plain-string encoding the model receives the raw base64 text, consuming enormous context but getting no actual vision capability from it. This is both a DX issue (the agent cannot 'see' the screenshot without also calling locate_by_description) and a context-bloat issue (base64 string in context vs image block that Claude can process without token cost).",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-mcp/src/main.rs"
+          "file": "./crates/ghost-mcp/src/main.rs"
         },
         {
           "issue": "ghost_wait is an explicit sleep tool with no upper-bound guard, and agents over-use it",
           "severity": "medium",
           "why": "ghost_wait (main.rs:296-299) accepts any ms value. The schema has minimum:0 but no maximum. Agents in a Claude Code loop routinely insert ghost_wait(2000) or ghost_wait(5000) as a defensive wait after any action, turning a potentially event-driven sequence into a fixed-delay polling loop. The real fix is ghost_wait_for_event / ghost_wait_for_idle, but agents choose the simpler tool. There is no per-call cap (e.g. 10 seconds max) to protect against agents issuing ghost_wait(60000) and hanging the tool loop. More importantly, the schema description for ghost_wait does not steer agents toward the event-driven alternatives.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-mcp/src/main.rs"
+          "file": "./crates/ghost-mcp/src/main.rs"
         },
         {
           "issue": "Tool count sprawl - 47 tools visible to Claude Code on every tool-list call",
           "severity": "medium",
           "why": "tools/list returns all 47 tools unconditionally. Claude Code's tool-selection pass ingests every tool description into the model's context for each turn. At ~50-100 tokens per tool schema, this is 2350-4700 tokens of tool overhead per turn. Several tools overlap in intent: ghost_find + ghost_click + ghost_click_at + ghost_click_by_description + ghost_click_text_local + ghost_click_background represent 5 different click verbs - an agent must reason about which to choose every time. ghost_describe_screen and ghost_describe_screen_fast serve the same purpose. ghost_wait and ghost_wait_for_event + ghost_wait_for_idle + ghost_wait_until are four wait mechanisms. This choice paralysis directly contributes to agent reliability failures as the model picks the suboptimal tool.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-mcp/src/main.rs"
+          "file": "./crates/ghost-mcp/src/main.rs"
         },
         {
           "issue": "Notification messages (no id) are silently executed but their result is discarded",
           "severity": "low",
           "why": "main.rs:87-89 - when req.id is None (notification), handle() is called and awaited but the result is completely discarded. If the notification is 'initialized' (the post-handshake notification) this is fine. But any future notification that modifies session state and returns an error will fail silently with no tracing log. A single tracing::debug or tracing::error for the Err case should be added.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-mcp/src/main.rs"
+          "file": "./crates/ghost-mcp/src/main.rs"
         },
         {
           "issue": "base64_encode is a custom implementation duplicated in main.rs and vision.rs",
           "severity": "low",
           "why": "The same 20-line base64 encoding function (using a const TABLE) appears identically in ghost-mcp/src/main.rs:829-842 and ghost-session/src/vision.rs:373-386. This violates DRY, adds maintenance surface (a bug fix in one copy won't propagate), and wastes compile time. The workspace already has a base64 dependency path available through image crate internals; alternatively a one-liner via the base64 workspace crate would eliminate both copies.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-mcp/src/main.rs"
+          "file": "./crates/ghost-mcp/src/main.rs"
         },
         {
           "issue": "DXGI DuplicateOutput is called fresh on every screenshot - adds ~5-20ms overhead per capture",
           "severity": "low",
           "why": "capture_rgba() in screen.rs:158-212 calls s.output1.DuplicateOutput() at line 164 on every invocation. DuplicateOutput creates a new IDXGIOutputDuplication session, allocates a frame buffer, and returns the latest frame. The D3D11 device and context are correctly cached in CAPTURE_STATE, but the duplication session is not. Re-creating it per call adds 5-20ms of COM/GPU setup overhead and can cause DXGI_ERROR_ACCESS_LOST races on rapid sequential captures (wait_for_idle polls at 16ms intervals). The duplication session should be cached in CachedCapture and re-opened only on DXGI_ERROR_ACCESS_LOST.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/capture/screen.rs"
+          "file": "./crates/ghost-core/src/capture/screen.rs"
         }
       ],
       "improvement_opportunities": [
@@ -1124,16 +1124,16 @@
       "crate": "ghost-cache",
       "purpose": "ghost-cache provides two subsystems: (1) UiaCache - an in-memory, event-driven mirror of the UI Automation element tree with 8-slot snapshot history and structural delta API, and (2) LocatorStore - a SQLite-backed cross-run persistent cache mapping (app_id, window_class, role, name) tuples to screen rects with blake3 checksums for invalidation. The design intent is to let ghost-session skip live UIA walks on repeated element lookups and serve incremental describe_screen_delta payloads to Claude-Code tool loops without full desktop rescans.",
       "key_files": [
-        "/Users/Krist/projects/active/ghost/crates/ghost-cache/src/lib.rs",
-        "/Users/Krist/projects/active/ghost/crates/ghost-cache/src/uia_mirror.rs",
-        "/Users/Krist/projects/active/ghost/crates/ghost-cache/src/locator_store.rs",
-        "/Users/Krist/projects/active/ghost/crates/ghost-cache/src/error.rs",
-        "/Users/Krist/projects/active/ghost/crates/ghost-session/src/session.rs",
-        "/Users/Krist/projects/active/ghost/crates/ghost-mcp/src/main.rs",
-        "/Users/Krist/projects/active/ghost/crates/ghost-core/src/uia/event_bus.rs",
-        "/Users/Krist/projects/active/ghost/crates/ghost-session/src/vision.rs",
-        "/Users/Krist/AppData/Roaming/Claude/claude_desktop_config.json",
-        "/Users/Krist/.claude/mcp.json"
+        "./crates/ghost-cache/src/lib.rs",
+        "./crates/ghost-cache/src/uia_mirror.rs",
+        "./crates/ghost-cache/src/locator_store.rs",
+        "./crates/ghost-cache/src/error.rs",
+        "./crates/ghost-session/src/session.rs",
+        "./crates/ghost-mcp/src/main.rs",
+        "./crates/ghost-core/src/uia/event_bus.rs",
+        "./crates/ghost-session/src/vision.rs",
+        "%APPDATA%/Claude/claude_desktop_config.json",
+        "~/.claude/mcp.json"
       ],
       "loc_estimate": 475,
       "strengths": [
@@ -1150,49 +1150,49 @@
           "issue": "UiaCache is never populated from real UIA walks - apply_snapshot has no caller",
           "severity": "critical",
           "why": "GhostSession constructs UiaCache (session.rs:55) and exposes apply_snapshot (session.rs:125-127), but no code path in ghost-mcp or ghost-session ever calls apply_snapshot with real data. ghost_describe_screen_delta always reads from an empty cache: seq stays at 0, every call returns either an empty delta (since_seq==0) or a full snapshot of zero nodes. The tool is effectively a no-op that returns garbage.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-session/src/session.rs"
+          "file": "./crates/ghost-session/src/session.rs"
         },
         {
           "issue": "LocatorStore is constructed nowhere and never used in production",
           "severity": "critical",
           "why": "LocatorStore::open() is never called anywhere outside tests. GhostSession has no LocatorStore field. No find() or fill_form() path consults the store before doing a live UIA walk. The entire SQLite-backed cross-run cache is dead code. The CHANGELOG explicitly defers the read path (v0.5 'Deferred from v0.5' note).",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-cache/src/locator_store.rs"
+          "file": "./crates/ghost-cache/src/locator_store.rs"
         },
         {
           "issue": "NVIDIA_API_KEY (and ANTHROPIC_API_KEY) absent from MCP registration env block",
           "severity": "critical",
           "why": "Both claude_desktop_config.json and ~/.claude/mcp.json register ghost-mcp with no env:{} block. vision.rs:pick_provider() calls std::env::var('NVIDIA_API_KEY') which returns Err at runtime, causing every ghost_locate_by_description / ghost_click_by_description / ghost_type_by_description call to fail immediately with GhostError::Config. The vision subsystem is fully built but permanently broken in the deployed config.",
-          "file": "C:/Users/Krist/.claude/mcp.json"
+          "file": "~/.claude/mcp.json"
         },
         {
           "issue": "wait_until condition operates on cache_seq which never advances",
           "severity": "high",
           "why": "session.rs:95-98 exposes only {'cache_seq': self.cache.seq()} to JSONLogic conditions in wait_until. Because UiaCache is never populated, seq stays at 0 permanently. Any condition that checks for a seq change (the primary use case for wait_until) will either never fire or fire immediately on seq==0 checks, depending on logic. The tool is semantically broken as a screen-state gate.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-session/src/session.rs"
+          "file": "./crates/ghost-session/src/session.rs"
         },
         {
           "issue": "EventBus only fires on EVENT_SYSTEM_FOREGROUND - within-window changes are invisible",
           "severity": "high",
           "why": "event_bus.rs:99-101 hooks exactly one Windows event code. When a button appears, text changes, or a dialog opens within the same window, the seq does not advance. Backoff loops in find(), click_and_wait_for_text(), and click_text_local() wait the full backoff interval (up to 150ms) before re-polling, even when the target just appeared. This is the dominant latency source in fast agent loops.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/uia/event_bus.rs"
+          "file": "./crates/ghost-core/src/uia/event_bus.rs"
         },
         {
           "issue": "upsert() uses two round-trips under one lock to obtain the row ID instead of last_insert_rowid()",
           "severity": "medium",
           "why": "locator_store.rs:120-128 runs a second SELECT query after INSERT...ON CONFLICT to retrieve the id. rusqlite::Connection::last_insert_rowid() returns the correct rowid after both INSERT and the conflict-resolution UPDATE branch in SQLite, making the second round-trip redundant. Under lock contention this doubles the critical section.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-cache/src/locator_store.rs"
+          "file": "./crates/ghost-cache/src/locator_store.rs"
         },
         {
           "issue": "Mutex<Connection> blocks all readers during writes - no read parallelism despite WAL mode",
           "severity": "medium",
           "why": "WAL mode allows concurrent readers and one writer at the OS level, but LocatorStore wraps the single connection in Mutex, serializing every lookup and upsert. In a busy agent loop doing parallel fill_form(), all concurrent find() calls that hit the store will queue behind each other.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-cache/src/locator_store.rs"
+          "file": "./crates/ghost-cache/src/locator_store.rs"
         },
         {
           "issue": "snapshot() ignores the window and since_seq parameters entirely",
           "severity": "low",
           "why": "uia_mirror.rs:138-141: snapshot(_window, _since_seq) discards both parameters with underscore prefixes and always returns the full current snapshot. The since_seq semantics (which callers would expect to mean 'only give me data newer than this') are silently ignored, leading to potential over-delivery when the cache is eventually populated.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-cache/src/uia_mirror.rs"
+          "file": "./crates/ghost-cache/src/uia_mirror.rs"
         }
       ],
       "improvement_opportunities": [
@@ -1242,15 +1242,15 @@
       "crate": "ghost-intent",
       "purpose": "Intent compiler, JSONLogic condition evaluator, and FSM executor for the Ghost desktop-automation framework. Provides a JSON-driven step-list abstraction (Op enum) compiled at the MCP boundary, then executed by FsmExecutor via an OpsDispatcher trait that bridges to GhostSession primitives. Used exclusively through the ghost_execute_intent MCP tool, which compiles and runs the intent against a live session.",
       "key_files": [
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-intent/src/compiler.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-intent/src/executor.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-intent/src/jsonlogic.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-intent/src/error.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-session/src/session.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-mcp/src/main.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-session/src/vision.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/uia/event_bus.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/input/keyboard.rs"
+        "./crates/ghost-intent/src/compiler.rs",
+        "./crates/ghost-intent/src/executor.rs",
+        "./crates/ghost-intent/src/jsonlogic.rs",
+        "./crates/ghost-intent/src/error.rs",
+        "./crates/ghost-session/src/session.rs",
+        "./crates/ghost-mcp/src/main.rs",
+        "./crates/ghost-session/src/vision.rs",
+        "./crates/ghost-core/src/uia/event_bus.rs",
+        "./crates/ghost-core/src/input/keyboard.rs"
       ],
       "loc_estimate": 618,
       "strengths": [
@@ -1266,67 +1266,67 @@
           "issue": "ghost_execute_intent is a dead-end abstraction with no feedback loop",
           "severity": "high",
           "why": "session.rs:602-607 shows execute_intent compiles the intent then runs FsmExecutor. The Op::Screenshot variant at session.rs:686-688 captures a full PNG and discards the bytes entirely \u2014 the result is never returned to the caller or the MCP client. Claude cannot see what happened, cannot course-correct, and gets no screenshot for the next decision. This makes ghost_execute_intent effectively blind for any visual-verification step. The IntentResult struct (executor.rs:45-50) also carries no screenshot or UIA snapshot of the final state.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-session/src/session.rs"
+          "file": "./crates/ghost-session/src/session.rs"
         },
         {
           "issue": "Op::Navigate hard-codes Edge/Chrome/Firefox heuristic with no configurability",
           "severity": "high",
           "why": "session.rs:670-679: Navigate scans list_windows() for a window whose title contains 'Edge', 'Chrome', or 'Firefox'. Any other browser (Brave, Arc, Opera, Vivaldi, custom Electron shell) returns 'no browser window'. There is no way to pass a window hint via the Op enum. This is a silent hard failure with no user guidance in the error message about how to fix it.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-session/src/session.rs"
+          "file": "./crates/ghost-session/src/session.rs"
         },
         {
           "issue": "Vision not wired in the direct ghost-mcp registration env block",
           "severity": "high",
           "why": "vision.rs:96-114 picks a provider by checking NVIDIA_API_KEY then ANTHROPIC_API_KEY at runtime. The ghost-mcp binary receives its environment from the MCP host's env block. The comet-mcp wrapper is the only path where NVIDIA_API_KEY is injected; in a direct ghost registration (typical Claude Code setup) neither key is forwarded unless the user explicitly sets them in the MCP env config. The tools ghost_locate_by_description, ghost_click_by_description, ghost_type_by_description all silently fail with a GhostError::Config at call time rather than at startup or tools/list time, giving no diagnostic until the agent tries to use vision.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-session/src/vision.rs"
+          "file": "./crates/ghost-session/src/vision.rs"
         },
         {
           "issue": "retry_if evaluates a fixed expression that cannot observe what actually failed",
           "severity": "high",
           "why": "executor.rs:117-128: retry_if is a JSONLogic expression evaluated against IntentState, which only exposes last_error (a string) and last_op_index. The test at executor.rs:213 uses {\"==\":[1,1]} \u2014 a literal always-true expression \u2014 as the retry condition, meaning the intent will always retry on any failure regardless of cause. In production use there is no structured error code to match against; last_error is a free-form string from whatever the dispatcher returns. This makes retry_if impossible to use reliably for targeted retry (e.g., retry only on element-not-found, abort on focus-stolen).",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-intent/src/executor.rs"
+          "file": "./crates/ghost-intent/src/executor.rs"
         },
         {
           "issue": "SendInput focus races: keyboard ops go to whatever window has focus, with no pre-op focus assertion",
           "severity": "high",
           "why": "keyboard.rs:50-64 calls SendInput per character with no focus check between the click that should have set focus and the subsequent type_text. In a Claude Code tool loop, the terminal hosting the MCP stdin/stdout loop steals focus back between tool calls (each tool call is a round-trip; Windows delivers WM_ACTIVATE to the terminal when MCP completes). type_text then delivers keystrokes to the terminal. The Op::Type dispatcher (session.rs:624-627) does el.click() then el.type_text() in the same dispatch call, which is somewhat safer, but Op::Press and Op::Hotkey (session.rs:629-637) issue SendInput with no prior focus assertion at all \u2014 they blindly send to the foreground window.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/input/keyboard.rs"
+          "file": "./crates/ghost-core/src/input/keyboard.rs"
         },
         {
           "issue": "EventBus only fires on EVENT_SYSTEM_FOREGROUND; misses element changes within a focused window",
           "severity": "medium",
           "why": "event_bus.rs:99-107: the WinEventHook covers only EVENT_SYSTEM_FOREGROUND. Structural UIA changes (buttons appearing/disappearing, edit fields enabling, loading spinners) do not bump the bus seq. wait_for_change therefore falls through to its backoff timer rather than waking on the relevant state change. The WaitForText op in executor.rs uses bus.wait_for_change at lines 655-658 but the bus will not fire until the user alt-tabs or another window pops. This means WaitForText degrades to timed-poll in practice.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/uia/event_bus.rs"
+          "file": "./crates/ghost-core/src/uia/event_bus.rs"
         },
         {
           "issue": "abort_if and retry_if share a single IntentState scope \u2014 abort evaluation swallows JSONLogic eval errors",
           "severity": "medium",
           "why": "executor.rs:104-116: abort_if is evaluated with jsonlogic::eval; if eval itself errors (e.g., var references a path not present in state), the error is silently ignored (if let Ok(v) = ...) and the intent continues executing rather than surfacing the misconfiguration. This can mask intent author bugs.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-intent/src/executor.rs"
+          "file": "./crates/ghost-intent/src/executor.rs"
         },
         {
           "issue": "ghost_screenshot tool returns full-screen lossless PNG with no size guard",
           "severity": "medium",
           "why": "main.rs:169-172: ghost_screenshot calls session.screenshot(Region::full()) which calls capture_screen() (full primary monitor, PNG). A 2560x1440 screen produces roughly 2-6MB of PNG, encoded as ~2.7-8MB of base64, sent inline in the MCP JSON response. Claude Code context windows are finite; large screenshots consume tokens rapidly. The tool description does not warn about this. ghost_screenshot_region exists with max_dim and jpeg_quality but ghost_screenshot has no guardrails.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-mcp/src/main.rs"
+          "file": "./crates/ghost-mcp/src/main.rs"
         },
         {
           "issue": "Op::Click and Op::Type use By::Name only; no By::Role or combined locators in the intent schema",
           "severity": "medium",
           "why": "compiler.rs:11-12: Op::Click { target: String } and Op::Type { target, text } map target directly to By::Name. session.rs:619-627 confirms this. There is no way in the intent JSON schema to click by role, by coordinate, or by description. The intent abstraction therefore cannot express many operations that ghost_click_at, ghost_click_by_description, or role-based finds can do via direct MCP tools, making it less capable than the lower-level API.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-intent/src/compiler.rs"
+          "file": "./crates/ghost-intent/src/compiler.rs"
         },
         {
           "issue": "OCR run_ocr calls IAsyncOperation::get() on the tokio thread, blocking the async runtime",
           "severity": "medium",
           "why": "ocr.rs:159-165: block_on_async calls op.get() which is a synchronous blocking wait on a WinRT async operation. This is called from find_text_local, which is called from GhostSession::find_text_local as an async fn, which is awaited on the tokio single-thread runtime. A full-screen OCR pass can take 100-500ms; blocking the runtime thread for this duration prevents all other tokio tasks (including MCP stdin processing) from making progress.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/ocr.rs"
+          "file": "./crates/ghost-core/src/ocr.rs"
         },
         {
           "issue": "retry cap is hard-coded to 3 with no per-intent configurability",
           "severity": "low",
           "why": "executor.rs:123: `attempt < 3` is a literal. There is no max_retries field in CompiledIntent or RawIntent. An agent that submits an intent with retry_if cannot control how many retries are attempted, so the same transient error either exhausts retries too fast (for slow operations) or the cap is never surfaced as a configurable knob.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-intent/src/executor.rs"
+          "file": "./crates/ghost-intent/src/executor.rs"
         }
       ],
       "improvement_opportunities": [
@@ -1386,15 +1386,15 @@
       "crate": "ghost-http",
       "purpose": "ghost-http is a localhost-only REST/HTTP facade (Axum on 127.0.0.1:7878) that re-exposes the same GhostSession automation primitives (click, type, screenshot, describe, etc.) that ghost-mcp already provides over stdio JSON-RPC. Its existence is justified for two narrow cases: (1) languages or tools that cannot spawn a stdio MCP child process but can do HTTP (e.g., the Python ghost-agent/agent.py loop); (2) quick curl-based debugging. For the Claude Code MCP tool loop the actual server in use is ghost-mcp, not ghost-http. ghost-http is therefore an auxiliary binary sharing the same ghost-session and ghost-core underpinnings.",
       "key_files": [
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-http/src/main.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-mcp/src/main.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-session/src/session.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-session/src/vision.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-session/src/element.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-session/src/error.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/input/keyboard.rs",
-        "C:/Users/Krist/AppData/Roaming/Claude/claude_desktop_config.json",
-        "C:/Users/Krist/projects/active/ghost/ghost-agent/agent.py"
+        "./crates/ghost-http/src/main.rs",
+        "./crates/ghost-mcp/src/main.rs",
+        "./crates/ghost-session/src/session.rs",
+        "./crates/ghost-session/src/vision.rs",
+        "./crates/ghost-session/src/element.rs",
+        "./crates/ghost-session/src/error.rs",
+        "./crates/ghost-core/src/input/keyboard.rs",
+        "%APPDATA%/Claude/claude_desktop_config.json",
+        "./ghost-agent/agent.py"
       ],
       "loc_estimate": 2881,
       "strengths": [
@@ -1410,50 +1410,50 @@
         {
           "issue": "NVIDIA_API_KEY (and ANTHROPIC_API_KEY) are missing from claude_desktop_config.json MCP registration",
           "severity": "critical",
-          "why": "claude_desktop_config.json has no 'env' key for ghost-mcp (confirmed at C:/Users/Krist/AppData/Roaming/Claude/claude_desktop_config.json). vision.rs:pick_provider() reads NVIDIA_API_KEY and ANTHROPIC_API_KEY from the process environment. When Claude Desktop spawns ghost-mcp.exe as an MCP child process, it inherits the user environment only if Claude Desktop itself was launched from a shell that had those vars set. In practice, GUI-launched Claude Desktop does NOT inherit terminal-set env vars on Windows. Result: every call to ghost_locate_by_description, ghost_click_by_description, ghost_type_by_description returns GhostError::Config('no vision provider configured') silently as an MCP error string, with no indication in the Claude Code tool output that the root cause is a missing key. Vision is effectively dead in the MCP path.",
-          "file": "C:/Users/Krist/AppData/Roaming/Claude/claude_desktop_config.json"
+          "why": "claude_desktop_config.json has no 'env' key for ghost-mcp (confirmed at %APPDATA%/Claude/claude_desktop_config.json). vision.rs:pick_provider() reads NVIDIA_API_KEY and ANTHROPIC_API_KEY from the process environment. When Claude Desktop spawns ghost-mcp.exe as an MCP child process, it inherits the user environment only if Claude Desktop itself was launched from a shell that had those vars set. In practice, GUI-launched Claude Desktop does NOT inherit terminal-set env vars on Windows. Result: every call to ghost_locate_by_description, ghost_click_by_description, ghost_type_by_description returns GhostError::Config('no vision provider configured') silently as an MCP error string, with no indication in the Claude Code tool output that the root cause is a missing key. Vision is effectively dead in the MCP path.",
+          "file": "%APPDATA%/Claude/claude_desktop_config.json"
         },
         {
           "issue": "SendInput keyboard/mouse races: Claude Code terminal steals focus between MCP tool calls",
           "severity": "critical",
           "why": "keyboard.rs:type_text and press_key call SendInput() which delivers to whatever window holds the thread input queue at call time. Between each MCP tool call, Claude Desktop's own terminal/UI can re-acquire focus (Windows foreground lock is released when the MCP response JSON is sent and the calling thread unblocks). The session thread then wins the next key event lottery against whichever window happened to be foregrounded. There is no pre-type focus assertion in h_type (main.rs:204-207): it calls session.find(by) then element.type_text() with no SetForegroundWindow in between. fill_form in session.rs:570-585 has the same gap \u2014 it clicks an element then immediately types without confirming focus transfer. The backoff in find() waits for UIA events, not for the input queue to settle.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-session/src/session.rs"
+          "file": "./crates/ghost-session/src/session.rs"
         },
         {
           "issue": "ghost-http exposes no authentication and binds to 127.0.0.1 but has no secret/token check",
           "severity": "high",
           "why": "Any process on the local machine can POST /click, /type, /run with arbitrary payloads. On a developer workstation this is tolerable, but /run accepts a raw JSON intent string (h_run at main.rs:243-245) that is passed directly to execute_intent, which compiles and runs an FSM with arbitrary steps including Navigate{url} (which calls navigate_and_wait and can open arbitrary URLs in the browser), Launch{exe} (which calls proc_launch with an arbitrary executable path), and hotkey sequences. There is no rate limiting, no origin check (CorsLayer::permissive), and no audit log.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-http/src/main.rs"
+          "file": "./crates/ghost-http/src/main.rs"
         },
         {
           "issue": "ghost_screenshot in both ghost-http and ghost-mcp returns a full-resolution lossless PNG as base64, which is enormous for a Claude Code tool response",
           "severity": "high",
           "why": "capture_screen() in session.rs:303-305 captures the primary monitor as raw PNG. At 1920x1080 a typical PNG is 1-3 MB; base64-encoded that is ~4 MB per response. The ghost_screenshot_region tool with JPEG compression exists in ghost-mcp but ghost-http has no equivalent (no /screenshot-region route). The MCP screenshot tool schema (ghost_screenshot) gives no guidance to the agent to use the cheaper ghost_screenshot_region instead, and ghost_screenshot is listed first in tools/list, so the agent will reach for it by default. Each full-PNG screenshot burns ~6000-8000 context tokens and adds noticeable round-trip latency.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-http/src/main.rs"
+          "file": "./crates/ghost-http/src/main.rs"
         },
         {
           "issue": "mpsc::UnboundedSender in ghost-http allows unbounded queue growth if the session thread stalls",
           "severity": "medium",
           "why": "spawn_session_thread (main.rs:55-161) uses mpsc::unbounded_channel. If GhostSession::find times out (5 s default) on a slow walk, incoming HTTP requests continue to enqueue Cmd variants with no back-pressure. Under a fast agent loop this can accumulate dozens of pending commands before the timeout fires, then flush them all in sequence, causing phantom actions against whatever UI state exists at flush time. ghost-mcp is not affected (it processes one request at a time over stdio), but ghost-http as an HTTP server is inherently concurrent.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-http/src/main.rs"
+          "file": "./crates/ghost-http/src/main.rs"
         },
         {
           "issue": "DescribeReq dual-dispatch on since_seq is a silent footgun: omitting since_seq calls full describe, which is slow",
           "severity": "medium",
           "why": "h_describe (main.rs:230-236) dispatches to Cmd::Describe (full walk) when since_seq is absent, and to Cmd::DescribeDelta when present. The field is Option<u64> and defaults to None if not sent. An agent that forgets to include since_seq gets the full slow describe walk with no warning. The ghost-mcp equivalent (ghost_describe_screen_delta) has the same silent behaviour. The cheap fast path (describe_screen_fast) is a separate endpoint/tool entirely and is not the default.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-http/src/main.rs"
+          "file": "./crates/ghost-http/src/main.rs"
         },
         {
           "issue": "type_text sends one SendInput syscall per character; for long strings this creates a per-char overhead and a window of focus loss between chars",
           "severity": "medium",
           "why": "keyboard.rs:type_text (line 50-64) iterates over chars and calls SendInput with a 2-element array per character, checking is_stopped() between each. For a 200-character paste this is 200 SendInput calls. Windows allows batching all character inputs into a single SendInput call (the API accepts a slice), which would be both faster and atomic from the focus-lock perspective. The per-char loop also creates 200 opportunities for a concurrent SetForegroundWindow to steal the queue.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/input/keyboard.rs"
+          "file": "./crates/ghost-core/src/input/keyboard.rs"
         },
         {
           "issue": "vision.rs builds base64 inline in the request body string for NVIDIA path, allocating a full copy of the JPEG in memory as a String before serialising to JSON",
           "severity": "low",
           "why": "locate_via_openai_compat (vision.rs:205-258) calls base64_encode(image_jpeg) to produce a String, then embeds it in serde_json::json!([{...image_url...}]) which allocates another JSON Value tree, then .json(&req) serialises that to bytes a third time. For a 1024-max-dim JPEG at quality 80 (~50-150 KB), the JPEG is held in three copies simultaneously. The Anthropic path has the same pattern. Using reqwest's streaming body or serde's serialize_with to write base64 directly to the JSON encoder would avoid the intermediate allocations.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-session/src/vision.rs"
+          "file": "./crates/ghost-session/src/vision.rs"
         }
       ],
       "improvement_opportunities": [
@@ -1513,17 +1513,17 @@
       "crate": "ghost-cli",
       "purpose": "Single-binary CLI front-end for Ghost Windows desktop automation. Parses subcommands via Clap, constructs a GhostSession, and dispatches to ghost-session primitives (UIA tree walks, SendInput, DXGI screenshot, OCR, vision). Serves as the scripting/testing interface when MCP is not in use. The MCP server (ghost-mcp) is a separate binary in the workspace that speaks stdio JSON-RPC over the same ghost-session library.",
       "key_files": [
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-cli/src/main.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-mcp/src/main.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-session/src/session.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-session/src/vision.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/input/keyboard.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/input/mouse.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/uia/event_bus.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/capture/idle.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/uia/tree.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/capture/screen.rs",
-        "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/ocr.rs"
+        "./crates/ghost-cli/src/main.rs",
+        "./crates/ghost-mcp/src/main.rs",
+        "./crates/ghost-session/src/session.rs",
+        "./crates/ghost-session/src/vision.rs",
+        "./crates/ghost-core/src/input/keyboard.rs",
+        "./crates/ghost-core/src/input/mouse.rs",
+        "./crates/ghost-core/src/uia/event_bus.rs",
+        "./crates/ghost-core/src/capture/idle.rs",
+        "./crates/ghost-core/src/uia/tree.rs",
+        "./crates/ghost-core/src/capture/screen.rs",
+        "./crates/ghost-core/src/ocr.rs"
       ],
       "loc_estimate": 1900,
       "strengths": [
@@ -1543,73 +1543,73 @@
           "issue": "CLI completely missing vision, OCR, and composite commands",
           "severity": "high",
           "why": "ghost-cli/src/main.rs has no subcommands for locate-by-description, click-by-description, find-text-local, click-text-local, or screenshot-region. All those session methods exist and MCP exposes them, but a scripter or test runner using the CLI binary cannot access them. This is a parity gap that makes the CLI useless for the intelligence/fallback tier.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-cli/src/main.rs"
+          "file": "./crates/ghost-cli/src/main.rs"
         },
         {
           "issue": "CLI Serve subcommand is a hard error stub",
           "severity": "high",
           "why": "Command::Serve at main.rs:203 immediately returns Err('use ghost-http binary') with no server started. A user who reads --help and runs ghost serve gets a confusing failure rather than a running server or a clear build-time option. This breaks any scripting workflow that tries to use the CLI for HTTP-based access.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-cli/src/main.rs"
+          "file": "./crates/ghost-cli/src/main.rs"
         },
         {
           "issue": "SendInput goes to whatever window has focus at call time -- focus races between tool calls are the primary source of automation failures in the Claude Code loop",
           "severity": "critical",
           "why": "keyboard.rs:type_text (line 50) and press_key (line 67) use raw SendInput with no preceding SetForegroundWindow or AttachThreadInput. Between two MCP tool calls the terminal (Claude Code) can steal focus back, so the next type or press goes to the terminal. ghost_click_at also relies on MOUSEEVENTF_ABSOLUTE which is correct, but the click target must be in the foreground for focus-dependent edits. There is no built-in settle delay or focus-assurance step before any keyboard op. The CLI has the same problem: ghost type ... immediately fires SendInput without confirming focus.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/input/keyboard.rs"
+          "file": "./crates/ghost-core/src/input/keyboard.rs"
         },
         {
           "issue": "ghost_screenshot returns an uncompressed full-screen PNG with no size guard, blowing up context windows",
           "severity": "critical",
           "why": "session.rs:screenshot (line 303) calls capture_screen() which always encodes the full-resolution primary monitor as PNG. At 1920x1080 lossless PNG this is typically 500KB-2MB of raw JSON base64 (~670KB-2.7MB encoded), consuming a massive fraction of a 200K context. ghost-mcp:ghost_screenshot handler at mcp/main.rs:169 encodes the PNG in base64 and returns it directly with no max_dim or quality limit. The better tool (ghost_screenshot_region with foreground=true + max_dim=768 + jpeg_quality=75) exists but is not the default. The MCP description for ghost_screenshot does not warn about size.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-session/src/session.rs"
+          "file": "./crates/ghost-session/src/session.rs"
         },
         {
           "issue": "Vision is silently broken when NVIDIA_API_KEY is absent from the ghost-mcp process environment",
           "severity": "critical",
           "why": "vision.rs:pick_provider (line 96) checks env vars GHOST_VISION_PROVIDER, NVIDIA_API_KEY, ANTHROPIC_API_KEY in the ghost-mcp process. The Claude Code MCP config's 'env' block for the ghost server must include these keys. If they are absent (as noted in the known pain), every call to ghost_locate_by_description / ghost_click_by_description returns GhostError::Config, but this surfaces to the LLM as a generic error string with no actionable hint about which env var to set in the MCP server config specifically. The comet-mcp wrapper sets NVIDIA_API_KEY in its env, but direct ghost MCP registration may not, making vision silently dead.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-session/src/vision.rs"
+          "file": "./crates/ghost-session/src/vision.rs"
         },
         {
           "issue": "IdleDetector.wait_stable hashes the full-resolution PNG (not the 4x4 downsample) making it slow and CPU-heavy",
           "severity": "high",
           "why": "idle.rs:wait_stable (line 62) calls capture_screen() which returns a full PNG, then hash_frame hashes all bytes of that PNG. The file has downsample_to_4x4 defined but never calls it in wait_stable. At 16ms poll intervals on a 4K screen, this encodes and hashes several MB of PNG per frame for up to timeout_ms. The design comment says 'downsample to 4x4' but the implementation does not do so.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/capture/idle.rs"
+          "file": "./crates/ghost-core/src/capture/idle.rs"
         },
         {
           "issue": "EventBus only fires on EVENT_SYSTEM_FOREGROUND; no UIA structure-changed or value-changed events",
           "severity": "high",
           "why": "event_bus.rs:pump_thread (line 97) hooks EVENT_SYSTEM_FOREGROUND only. So find() and click_and_wait_for_text() will only wake early on a window-focus change, not when a button appears/disappears, a spinner resolves, or a field becomes enabled within the same window. In practice this means the backoff timers degrade to polling (25ms-150ms) for most in-app state changes, making agent loops slower than they should be.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/uia/event_bus.rs"
+          "file": "./crates/ghost-core/src/uia/event_bus.rs"
         },
         {
           "issue": "CLI ghost screenshot writes a file, outputs ok+path JSON, but does not print base64 -- unusable in piped scripting without a separate cat step",
           "severity": "medium",
           "why": "main.rs:143-148: screenshot saves to a path and prints JSON {ok, bytes, path}. For scripting or testing, there is no --stdout flag to emit base64. Every CLI screenshot requires the caller to then read the file, which is a two-step process. MCP returns base64 inline; CLI should offer the same.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-cli/src/main.rs"
+          "file": "./crates/ghost-cli/src/main.rs"
         },
         {
           "issue": "collect_interactive hard-caps at 500 elements and depth 50 with no warning emitted",
           "severity": "medium",
           "why": "tree.rs:193: when either limit is hit the function silently returns Ok(()), so a complex app (VS Code, Office) silently truncates the element list. The caller gets a partial list with no indication that it was cut. The LLM will then attempt to click elements that appear absent.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/uia/tree.rs"
+          "file": "./crates/ghost-core/src/uia/tree.rs"
         },
         {
           "issue": "DXGI capture acquires and releases DuplicateOutput on every capture_rgba call instead of holding the duplication object",
           "severity": "medium",
           "why": "screen.rs:164: DuplicateOutput is called inside capture_rgba every time. The D3D11 device and output1 are cached (CAPTURE_STATE) but not the IDXGIOutputDuplication. Each call to wait_stable (which polls at 16ms) re-acquires the duplication, adding 5-20ms overhead per frame and risking DXGI_ERROR_ACCESS_LOST under sustained load.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/capture/screen.rs"
+          "file": "./crates/ghost-core/src/capture/screen.rs"
         },
         {
           "issue": "parse_by in CLI requires exactly --name OR --role; no --id, no XPath, no automation-id, no combined selector",
           "severity": "medium",
           "why": "cli/main.rs:212-218: the only two locator axes exposed through the CLI are Name and Role. MCP is identical (parse_by in mcp/main.rs:819). There is no way to scope by window+name simultaneously, use AutomationId (which is stable across locale changes), or combine role+name. This makes Click/Type flaky when two elements share a name.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-cli/src/main.rs"
+          "file": "./crates/ghost-cli/src/main.rs"
         },
         {
           "issue": "type_text sends one SendInput call per character in a loop, causing visible typing lag and wasted syscalls",
           "severity": "low",
           "why": "keyboard.rs:type_text (line 50) iterates char by char, converts each to a 2-element INPUT array, and calls SendInput. For a 50-char string this is 50 syscalls. All inputs could be batched into a single SendInput call since none of the intermediate state matters.",
-          "file": "C:/Users/Krist/projects/active/ghost/crates/ghost-core/src/input/keyboard.rs"
+          "file": "./crates/ghost-core/src/input/keyboard.rs"
         }
       ],
       "improvement_opportunities": [
@@ -1674,14 +1674,14 @@
       "crate": "CROSS-CUTTING",
       "purpose": "Ghost MCP server - Windows desktop automation via UIA + SendInput, exposed as a stdio JSON-RPC 2.0 MCP server (ghost-mcp.exe). Drives native Windows UI for Claude Code agent loops. 7 crates: ghost-core (UIA/input/capture/OCR), ghost-session (high-level session API), ghost-mcp (stdio MCP entry point), ghost-intent (FSM executor), ghost-cache (UIA snapshot delta), ghost-cli, ghost-http.",
       "key_files": [
-        "/c/Users/Krist/projects/active/ghost/crates/ghost-mcp/src/main.rs",
-        "/c/Users/Krist/projects/active/ghost/crates/ghost-session/src/session.rs",
-        "/c/Users/Krist/projects/active/ghost/crates/ghost-core/src/uia/tree.rs",
-        "/c/Users/Krist/projects/active/ghost/crates/ghost-core/src/input/keyboard.rs",
-        "/c/Users/Krist/projects/active/ghost/crates/ghost-core/src/input/mouse.rs",
-        "/c/Users/Krist/projects/active/ghost/crates/ghost-session/src/vision.rs",
-        "/c/Users/Krist/projects/active/ghost/crates/ghost-core/src/ocr.rs",
-        "/c/Users/Krist/projects/active/ghost/crates/ghost-core/src/uia/event_bus.rs"
+        "<repo-root>/crates/ghost-mcp/src/main.rs",
+        "<repo-root>/crates/ghost-session/src/session.rs",
+        "<repo-root>/crates/ghost-core/src/uia/tree.rs",
+        "<repo-root>/crates/ghost-core/src/input/keyboard.rs",
+        "<repo-root>/crates/ghost-core/src/input/mouse.rs",
+        "<repo-root>/crates/ghost-session/src/vision.rs",
+        "<repo-root>/crates/ghost-core/src/ocr.rs",
+        "<repo-root>/crates/ghost-core/src/uia/event_bus.rs"
       ],
       "loc_estimate": 4200,
       "strengths": [
@@ -1698,49 +1698,49 @@
           "issue": "focus_window has no verify-foreground retry - SetForegroundWindow is fire-and-forget",
           "severity": "critical",
           "why": "focus_window() in tree.rs calls SetForegroundWindow(hwnd) and returns immediately with no confirmation loop. The Win32 API returns a BOOL that is ignored (let _ = SetForegroundWindow(...)). The next tool call's find_by_name_fast / type_text / SendInput then calls GetForegroundWindow(), which may still return the previous HWND if the OS has not yet processed the foreground change. This is the root mechanism for keystrokes landing in the wrong window between tool calls. There is no SetForegroundWindow + AttachThreadInput pattern, no SwitchToThisWindow fallback, no sleep/yield, and no post-call verification of GetForegroundWindow() == target_hwnd.",
-          "file": "/c/Users/Krist/projects/active/ghost/crates/ghost-core/src/uia/tree.rs"
+          "file": "<repo-root>/crates/ghost-core/src/uia/tree.rs"
         },
         {
           "issue": "type_text / SendInput is pure focus-dependent - no UIA ValuePattern.SetValue bypass",
           "severity": "high",
           "why": "All text input goes through SendInput with KEYEVENTF_UNICODE, which delivers characters to whatever window has focus at the moment each SendInput call executes. There is no UIA ValuePattern.SetValue or Invoke path that would bypass focus. type_by_description does click_at then immediately calls type_text with no focus-settle wait between them. In an agent loop where the model calls ghost_focus_window then ghost_type as separate tool calls, the OS foreground change may not have propagated by the time type_text runs.",
-          "file": "/c/Users/Krist/projects/active/ghost/crates/ghost-session/src/session.rs"
+          "file": "<repo-root>/crates/ghost-session/src/session.rs"
         },
         {
           "issue": "Live binary is v0.3.0 source; v0.5.0 (OCR, NVIDIA vision, event_bus) is uncommitted working tree never built into release",
           "severity": "high",
           "why": "target/release/ghost-mcp.exe timestamp is 2026-05-10 16:21, matching commit 801be67 (the last commit). vision.rs, ocr.rs, and event_bus.rs are listed as untracked (??) in git status - they were never committed and thus never built into the release binary. The MCP registration points directly to this stale binary. The initialize handshake returns version 0.2.0 (hardcoded in main.rs line 135). The test asserting 47 tools only runs against the current source; the live binary serves the tool list that was compiled at commit time, which is missing ghost_find_text_local, ghost_click_text_local, ghost_locate_by_description, ghost_click_by_description, ghost_type_by_description, and the 5 v0.4 perf tools.",
-          "file": "/c/Users/Krist/projects/active/ghost/crates/ghost-mcp/src/main.rs"
+          "file": "<repo-root>/crates/ghost-mcp/src/main.rs"
         },
         {
           "issue": "Vision tools hard-fail when called via the direct 'ghost' MCP server - NVIDIA_API_KEY absent from env block",
           "severity": "high",
           "why": "The ~/.claude.json MCP registration for the 'ghost' server has \"env\": {} - no NVIDIA_API_KEY and no ANTHROPIC_API_KEY. pick_provider() in vision.rs checks std::env::var at call time. If neither key is present in the inherited process environment, it returns Err(GhostError::Config(...)) - there is no silent fallback or degraded mode. The comet-mcp wrapper injects NVIDIA_API_KEY correctly, but when the 'ghost' server is called directly (as it is from Claude Code's ghost MCP server), all three description-based tools will return a Config error to the model. The model sees a tool error string and has no way to know vision requires the comet wrapper.",
-          "file": "/c/Users/Krist/projects/active/ghost/crates/ghost-session/src/vision.rs"
+          "file": "<repo-root>/crates/ghost-session/src/vision.rs"
         },
         {
           "issue": "ghost_screenshot returns full-screen lossless PNG inline as base64 in the tool response body",
           "severity": "high",
           "why": "ghost_screenshot calls capture_screen() which returns raw PNG bytes for the full primary monitor (typically 400KB-2MB for 1920x1080). These bytes are base64-encoded (+33%) and placed in the json response as png_base64. This entire string enters the model context window on every call. At 1080p PNG, that is 500KB-2.5MB of base64 per screenshot call. The ghost_screenshot_region alternative with foreground=true+max_dim=768+jpeg_quality=75 reduces this to 20-80KB, but the default ghost_screenshot tool has no such budget and agent loops commonly reach for the named screenshot tool first.",
-          "file": "/c/Users/Krist/projects/active/ghost/crates/ghost-mcp/src/main.rs"
+          "file": "<repo-root>/crates/ghost-mcp/src/main.rs"
         },
         {
           "issue": "47 tools in a single MCP server strains agent tool selection - no grouping or recommended-first ordering",
           "severity": "medium",
           "why": "The tools/list response returns all 47 tools in registration order with no grouping (vision, input, inspection, utility). Several pairs have near-identical names: ghost_describe_screen vs ghost_describe_screen_fast vs ghost_describe_screen_delta; ghost_screenshot vs ghost_screenshot_region; ghost_click vs ghost_click_at vs ghost_click_by_description vs ghost_click_background vs ghost_click_text_local vs ghost_click_and_wait_for_text. Models often pick the wrong variant (e.g. ghost_screenshot instead of ghost_screenshot_region, ghost_describe_screen instead of fast variant). The descriptions note preferences (SLOW, Recommended default) but these are easy to miss with 47 tools in context.",
-          "file": "/c/Users/Krist/projects/active/ghost/crates/ghost-mcp/src/main.rs"
+          "file": "<repo-root>/crates/ghost-mcp/src/main.rs"
         },
         {
           "issue": "EventBus only hooks EVENT_SYSTEM_FOREGROUND - UIA structure/focus changes do not bump the bus",
           "severity": "medium",
           "why": "pump_thread registers SetWinEventHook for EVENT_SYSTEM_FOREGROUND only. Within-app navigation (a dialog opening, a new tab loading, a text field becoming enabled) does not fire EVENT_SYSTEM_FOREGROUND and therefore does not advance the bus seq. The find() polling loop uses bus.wait_for_change() as its backoff signal, so it will sleep for the full backoff period (25-150ms) on every retry when the target element appears within the same window. The CHANGELOG explicitly defers IUIAutomation structure-changed event handlers as too complex. This means intra-app waits regress to timed backoff rather than event-driven.",
-          "file": "/c/Users/Krist/projects/active/ghost/crates/ghost-core/src/uia/event_bus.rs"
+          "file": "<repo-root>/crates/ghost-core/src/uia/event_bus.rs"
         },
         {
           "issue": "ghost_type does UIA find then type_text with no element.click() to ensure focus before typing",
           "severity": "medium",
           "why": "The ghost_type handler calls session.find(by).await then el.type_text(text). type_text in element.rs uses keyboard::type_text which is pure SendInput. But finding an element by UIA name does not bring it into keyboard focus - only clicking it or using SetFocus does. The ghost_fill_form handler does el.click() before type_text, but the standalone ghost_type does not. If the agent calls ghost_type on a text field that is not already focused, the keystrokes go to whichever element currently has keyboard focus.",
-          "file": "/c/Users/Krist/projects/active/ghost/crates/ghost-mcp/src/main.rs"
+          "file": "<repo-root>/crates/ghost-mcp/src/main.rs"
         }
       ],
       "improvement_opportunities": [

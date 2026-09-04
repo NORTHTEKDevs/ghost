@@ -149,7 +149,7 @@ Cargo.lock
 **Step 7: Verify it compiles**
 
 ```bash
-cd /c/Users/Krist/projects/active/ghost
+cd <repo-root>
 cargo build 2>&1
 ```
 Expected: compiles with zero errors (warnings OK).

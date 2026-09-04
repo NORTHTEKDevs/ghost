@@ -1348,7 +1348,7 @@ mod tests {
     #[test]
     fn encode_png_rgba_roundtrip_dimensions() {
         // 4x3 solid green image
-        let rgba = vec![0x00u8, 0xFF, 0x00, 0xFF].repeat(4 * 3);
+        let rgba = [0x00u8, 0xFF, 0x00, 0xFF].repeat(4 * 3);
         let png = encode_png_rgba(&rgba, 4, 3).unwrap();
         assert!(!png.is_empty());
         // Verify PNG is well-formed by checking IHDR chunk width/height

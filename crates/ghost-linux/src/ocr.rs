@@ -19,7 +19,9 @@ use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use crate::capture::screen::{capture_region_raw, encode_rgba, CaptureFormat};
+use crate::capture::screen::{
+    capture_region_raw, capture_window_printwindow, encode_rgba, CaptureFormat,
+};
 use crate::error::{CoreError, Result};
 
 /// Screen-space hit for a piece of text.
@@ -61,24 +63,56 @@ pub fn find_text_local(
     Ok(hits.first().map(|h| h.center()))
 }
 
+/// Locate `needle` inside ONE window captured by handle (through the
+/// compositor where possible, so a covered window still reads as itself) and
+/// return its centre in screen coordinates.
+///
+/// Signature matches `ghost_core::ocr::find_text_in_window`. This is what
+/// `ghost_assert text-present` uses once a window is anchored: OCR of the
+/// "foreground" would read the human's window.
+pub fn find_text_in_window(needle: &str, hwnd: isize) -> Result<Option<(i32, i32)>> {
+    ensure_available()?;
+    let (rgba, w, h) = capture_window_printwindow(hwnd)?;
+    let (ox, oy) = crate::system::window::window_rect(hwnd)
+        .map(|(l, t, _, _)| (l, t))
+        .unwrap_or((0, 0));
+    let hits = find_in_rgba(needle, &rgba, w, h, ox, oy)?;
+    Ok(hits.first().map(|h| h.center()))
+}
+
 /// Every match for `needle`, best confidence first.
 pub fn find_all(needle: &str, region: Option<(i32, i32, i32, i32)>) -> Result<Vec<TextHit>> {
-    if !is_available() {
-        return Err(CoreError::Unsupported(
-            "local OCR needs Tesseract, which is not installed. Install it with: \
-             sudo dnf install tesseract  --  or prefer ghost_find/ghost_see, which read real text \
-             with real bounds from the accessibility tree and need no OCR"
-                .into(),
-        ));
-    }
-
+    ensure_available()?;
     let (rgba, w, h) = capture_region_raw(region)?;
-    let png = encode_rgba(&rgba, w, h, CaptureFormat::Png)?;
-
     // Origin of the captured area, so hits come back in screen coordinates
     // rather than crop-relative ones.
     let (ox, oy) = region.map(|(l, t, _, _)| (l, t)).unwrap_or((0, 0));
+    find_in_rgba(needle, &rgba, w, h, ox, oy)
+}
 
+fn ensure_available() -> Result<()> {
+    if is_available() {
+        return Ok(());
+    }
+    Err(CoreError::Unsupported(
+        "local OCR needs Tesseract, which is not installed. Install it with: \
+         sudo dnf install tesseract  --  or prefer ghost_find/ghost_see, which read real text \
+         with real bounds from the accessibility tree and need no OCR"
+            .into(),
+    ))
+}
+
+/// OCR an RGBA buffer whose top-left sits at screen position `(ox, oy)` and
+/// return every word containing `needle`, best confidence first.
+fn find_in_rgba(
+    needle: &str,
+    rgba: &[u8],
+    w: usize,
+    h: usize,
+    ox: i32,
+    oy: i32,
+) -> Result<Vec<TextHit>> {
+    let png = encode_rgba(rgba, w, h, CaptureFormat::Png)?;
     let tsv = run_tesseract(&png)?;
     // Full Unicode folding: OCR routinely returns accented and non-Latin text.
     let needle_lc = needle.to_lowercase();

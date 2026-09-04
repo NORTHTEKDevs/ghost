@@ -114,7 +114,7 @@ async fn winui_document_surface_resolves_via_alias() {
     // USER'S OWN TABS into whatever instance starts, so typing into "the first
     // document" can type into the user's unsaved file. Opt in explicitly, on a
     // machine where that is acceptable.
-    if std::env::var("GHOST_LIVE_NOTEPAD").map(|v| v == "1").unwrap_or(false) == false {
+    if !std::env::var("GHOST_LIVE_NOTEPAD").map(|v| v == "1").unwrap_or(false) {
         eprintln!("SKIP winui_document_surface: set GHOST_LIVE_NOTEPAD=1 to drive Notepad (it restores the user's tabs)");
         return;
     }

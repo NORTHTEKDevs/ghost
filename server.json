@@ -1,20 +1,20 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
   "name": "io.github.NORTHTEKDevs/ghost",
-  "description": "Computer-use MCP server for Windows. Drives any native app (Win32/WPF/UWP/Electron), including apps with no API, in the background without stealing focus or the cursor, and verifies every action. Model-agnostic vision grounding.",
+  "description": "Computer-use MCP server for Windows and Linux. Drives any desktop app (Win32/WPF/UWP/Electron/GTK/Qt), including apps with no API, in the background without stealing focus or the cursor, and verifies every action. Drives the user's own browser through CDP. Model-agnostic vision grounding.",
   "repository": {
     "url": "https://github.com/NORTHTEKDevs/ghost",
     "source": "github"
   },
-  "version": "0.15.1",
+  "version": "0.21.0",
   "websiteUrl": "https://github.com/NORTHTEKDevs/ghost",
   "packages": [
     {
       "registryType": "github",
       "identifier": "NORTHTEKDevs/ghost",
-      "version": "0.15.1",
+      "version": "0.21.0",
       "transport": { "type": "stdio" },
-      "runtimeHint": "Prebuilt ghost-mcp.exe (Windows 10/11), or `cargo build --release -p ghost-mcp`.",
+      "runtimeHint": "Prebuilt ghost-mcp from the GitHub release (Windows 10/11 or Linux x86_64), or `cargo build --release -p ghost-mcp`.",
       "environmentVariables": [
         {
           "name": "GHOST_VISION_API_KEY",

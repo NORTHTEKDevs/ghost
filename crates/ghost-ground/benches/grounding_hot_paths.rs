@@ -15,13 +15,13 @@
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, black_box};
 use ghost_ground::{
     CoordNorm, Grounded, Target, Tier,
-    engine::{GroundingEngine, GroundingStats, LocateMode, TierResult, GroundingTier},
+    engine::{GroundingEngine, LocateMode, TierResult, GroundingTier},
     parser::parse_vlm_response,
     types::{norm_to_px, px_to_norm},
 };
 
 // ---------------------------------------------------------------------------
-// 1. Coordinate math — budget: <2 ms per 1000 calls (<2 µs per call)
+// 1. Coordinate math - budget: <2 ms per 1000 calls (<2 µs per call)
 // ---------------------------------------------------------------------------
 
 fn bench_coord_math(c: &mut Criterion) {
@@ -75,7 +75,7 @@ fn bench_coord_math(c: &mut Criterion) {
 }
 
 // ---------------------------------------------------------------------------
-// 2. VLM response parser — budget: <1 ms per parse call
+// 2. VLM response parser - budget: <1 ms per parse call
 // ---------------------------------------------------------------------------
 
 fn bench_parser(c: &mut Criterion) {
@@ -103,7 +103,7 @@ fn bench_parser(c: &mut Criterion) {
 }
 
 // ---------------------------------------------------------------------------
-// 3. GroundingEngine tier-ordering with stub tiers — budget: <2 ms
+// 3. GroundingEngine tier-ordering with stub tiers - budget: <2 ms
 // ---------------------------------------------------------------------------
 
 /// Stub tier that always returns Miss. Zero I/O, COM-free, pure logic.
@@ -189,7 +189,7 @@ fn bench_engine(c: &mut Criterion) {
         });
     });
 
-    // Scenario C: tier ordering — NotApplicable skipped, then Miss, then Hit
+    // Scenario C: tier ordering - NotApplicable skipped, then Miss, then Hit
     g.bench_function("tier_ordering_skip_na_then_hit", |b| {
         let tiers: Vec<Box<dyn GroundingTier + Send + Sync>> = vec![
             Box::new(NotApplicableTier(Tier::Cache)),
@@ -205,7 +205,7 @@ fn bench_engine(c: &mut Criterion) {
         });
     });
 
-    // Scenario D: coords bypass — no tier traversal at all
+    // Scenario D: coords bypass - no tier traversal at all
     g.bench_function("coords_bypass", |b| {
         let tiers: Vec<Box<dyn GroundingTier + Send + Sync>> = vec![
             Box::new(AlwaysMissTier(Tier::Cache)),
