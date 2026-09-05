@@ -50,11 +50,28 @@ manifest had never been valid, so Ghost had never been listed at all.
    NORTHTEKDevs).
 3. `mcp-publisher publish`, after the matching GitHub release exists.
 
-## Also worth listing on
+## Directories beyond the official registry
 
-- Client-side directories that index MCP servers (Claude Desktop / Cursor
-  community lists, Smithery, mcp.so, etc.). Most read from the official registry
-  or a simple PR to a markdown list.
+Status as of 2026-09-05. "Automatic" means the directory reads the official
+registry or GitHub and needs nothing from us; "done" means we submitted;
+"needs the account owner" means the directory requires a login that grants a
+third party access to an account, which an automated session must not do.
+
+| Directory | Mechanism | Status |
+| --- | --- | --- |
+| Official MCP registry | `.github/workflows/registry.yml`, OIDC, every tag | listed, installable (mcpb) |
+| PulseMCP | imports the official registry; own submissions paused | automatic |
+| awesome-mcp-servers (punkpeye) | pull request, OS Automation section | PR #13724 open, mergeable |
+| mcpservers.org | web form, no login | submitted; review within 12 hours, confirmation to info@northtek.io |
+| Glama | indexes GitHub; `glama.json` (in repo) names the maintainer | not yet indexed; claim at glama.ai/mcp/servers/add needs GitHub login |
+| Smithery | `smithery mcp publish ./ghost-windows-x64.mcpb -n NORTHTEKDevs/ghost` after `smithery login` | needs the account owner |
+| LobeHub marketplace | `npx -y @lobehub/market-cli login`, `github connect`, then `plugin publish https://github.com/NORTHTEKDevs/ghost`; `lhm.plugin.json` is in the repo | needs the account owner |
+| mcp.so | website submission behind Sign In | needs the account owner |
+| cursor.directory | cursor.directory/plugins/new, GitHub or Google sign-in, detects a committed `.mcp.json` | needs the account owner; note the repo root has a private, uncommitted `.mcp.json` that a public one would collide with |
+
+The four "needs the account owner" rows are each a few minutes once signed in;
+the metadata files they read (`glama.json`, `lhm.plugin.json`, the `.mcpb`
+bundles) are already in place.
 
 ## Client config (copy-paste)
 
