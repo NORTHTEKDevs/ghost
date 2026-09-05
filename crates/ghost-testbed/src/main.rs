@@ -27,6 +27,10 @@ mod bed {
     const ID_EDIT: i32 = 101;
     const ID_INCREMENT: i32 = 102;
     const ID_QUIT: i32 = 103;
+    /// A second button with the SAME accessible name as ID_INCREMENT, so an
+    /// `index` disambiguation can be proven: it records `[alt=N]`, not
+    /// `[clicks=N]`, so the title says which of the two was pressed.
+    const ID_INCREMENT_ALT: i32 = 104;
 
     static CLICKS: AtomicU32 = AtomicU32::new(0);
     static BASE_TITLE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
@@ -48,6 +52,12 @@ mod bed {
                         let n = CLICKS.fetch_add(1, Ordering::SeqCst) + 1;
                         let base = BASE_TITLE.get().cloned().unwrap_or_default();
                         let title = wide(&format!("{base} [clicks={n}]"));
+                        let _ = SetWindowTextW(hwnd, PCWSTR(title.as_ptr()));
+                    }
+                    ID_INCREMENT_ALT => {
+                        let n = CLICKS.fetch_add(1, Ordering::SeqCst) + 1;
+                        let base = BASE_TITLE.get().cloned().unwrap_or_default();
+                        let title = wide(&format!("{base} [alt={n}]"));
                         let _ = SetWindowTextW(hwnd, PCWSTR(title.as_ptr()));
                     }
                     ID_QUIT => {
@@ -161,6 +171,17 @@ mod bed {
                 100,
                 34,
                 ID_QUIT,
+            );
+            // Same name as the first Increment, deliberately (see ID_INCREMENT_ALT).
+            let _inc_alt = child(
+                w!("BUTTON"),
+                w!("Increment"),
+                BS_PUSHBUTTON as u32,
+                90,
+                114,
+                140,
+                34,
+                ID_INCREMENT_ALT,
             );
             let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
             let mut msg = MSG::default();

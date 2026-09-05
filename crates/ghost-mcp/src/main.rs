@@ -855,7 +855,7 @@ async fn dispatch_cdp(
         }
         "ghost_find" => {
             let by = parse_by(p)?;
-            let idx = p["index"].as_u64().map(|i| i as usize);
+            let idx = parse_index(p)?;
             let (e, matches) = session.cdp_find(r, &by, idx).await.map_err(|e| format!("ghost_find: {e}"))?;
             let (cx, cy) = e.center();
             Ok(json!({
@@ -873,10 +873,12 @@ async fn dispatch_cdp(
                 .ok_or("missing param: action (click|type|double_click|right_click|hover)")?;
             let text = p["text_input"].as_str().or_else(|| p["text"].as_str());
             let by = parse_by(p)?;
+            let idx = parse_index(p)?;
             // For type by name, a <label> carries the field's name too: prefer an
             // editable match (input/textarea/contenteditable) over the label.
-            let (e, _) = match (&by, action) {
-                (ghost_session::By::Name(n), "type") => {
+            // An explicit index is the caller's disambiguation and wins.
+            let (e, _) = match (&by, action, idx) {
+                (ghost_session::By::Name(n), "type", None) => {
                     let matches = session.cdp_describe(r, 16, Some(n), None).await.map_err(err)?;
                     let total = matches.len();
                     let pos = matches.iter().position(|m| m.role == "edit" || m.role == "combobox" || m.value.is_some()).unwrap_or(0);
@@ -885,7 +887,7 @@ async fn dispatch_cdp(
                         None => session.cdp_find(r, &by, None).await.map_err(err)?,
                     }
                 }
-                _ => session.cdp_find(r, &by, None).await.map_err(err)?,
+                _ => session.cdp_find(r, &by, idx).await.map_err(err)?,
             };
             if !e.enabled {
                 return Err(format!("Element not interactable: {} - element is disabled", e.name));
@@ -1120,7 +1122,7 @@ async fn dispatch_hidden(
         }
         "ghost_find" => {
             let by = parse_by(p)?;
-            let idx = p["index"].as_u64().map(|i| i as usize);
+            let idx = parse_index(p)?;
             session.hidden_find(t, by, idx).await.map_err(|e| format!("ghost_find: {e}"))
         }
         "ghost_act" => {
@@ -1129,7 +1131,8 @@ async fn dispatch_hidden(
                 .ok_or("missing param: action (click|type|double_click|right_click|hover)")?;
             let text = p["text_input"].as_str().or_else(|| p["text"].as_str());
             let by = parse_by(p)?;
-            session.hidden_act(t, by, action, text).await.map_err(err)
+            let idx = parse_index(p)?;
+            session.hidden_act(t, by, action, text, idx, p["role"].as_str()).await.map_err(err)
         }
         "ghost_key" => {
             let keys = p["keys"].as_str().ok_or("ghost_key: missing 'keys' param")?;
@@ -1341,6 +1344,12 @@ async fn prepare_window_target(
             if !target.title.is_empty() && explicit.as_deref() != Some(target.title.as_str()) {
                 set("window", Value::String(target.title.clone()));
             }
+            // The resolved handle rides along so the background verbs drive
+            // THIS window even if its title changes between resolution and
+            // action (a page that rewrites document.title on every click).
+            if target.hwnd != 0 && !target.is_hidden() {
+                set("_target_hwnd", json!(target.hwnd));
+            }
             if name == "ghost_see" && args["mode"].as_str().unwrap_or("fast") == "fast" {
                 set("mode", Value::String("full".into()));
             }
@@ -1477,7 +1486,7 @@ async fn handle_tool(
                     } else {
                         return Err("ghost_find with 'window' requires 'name' or 'role' to locate the element".into());
                     };
-                    let idx = p["index"].as_u64().map(|i| i as usize);
+                    let idx = parse_index(p)?;
                     let mut out = session.find_background(window, by, idx).await
                         .map_err(|e| format!("ghost_find: {e}"))?;
                     if let Some(obj) = out.as_object_mut() {
@@ -1489,8 +1498,8 @@ async fn handle_tool(
                     .map_err(|e| format!("ghost_find: could not focus window '{window}': {e}"))?;
             }
             // index → nth-match disambiguation (UIA-only path; name+role AND-combined).
-            if let Some(idx) = p["index"].as_u64() {
-                return find_nth(session, p, idx as usize).await;
+            if let Some(idx) = parse_index(p)? {
+                return find_nth(session, p, idx).await;
             }
             // Route through the grounding cascade so source/confidence are returned.
             let target = parse_target(p)?;
@@ -1798,6 +1807,21 @@ async fn handle_tool(
                 "state": w.state,
                 "surface": "user",
             })).collect();
+            // Vanished windows (not visible, not minimised) on request, so a
+            // window that automation or an app hid can be found and restored
+            // with op=state state=restore instead of being lost.
+            if p["include_hidden"].as_bool() == Some(true) {
+                for w in session.list_hidden_windows().await.map_err(|e| e.to_string())? {
+                    list.push(json!({
+                        "name": w.name,
+                        "pid": w.pid,
+                        "hwnd": w.hwnd,
+                        "focused": false,
+                        "state": "hidden",
+                        "surface": "user",
+                    }));
+                }
+            }
             // Windows on Ghost's hidden desktops are listed too, so an app that
             // was launched invisibly is discoverable by title like any other.
             for c in session.hidden_candidates().await {
@@ -2110,6 +2134,7 @@ async fn handle_tool(
             // HIGH-1: schema advertises text_input to avoid collision with text-target param.
             // Read text_input first (documented name), fall back to text (legacy).
             let text = p["text_input"].as_str().or_else(|| p["text"].as_str());
+            let idx = parse_index(p)?;
 
             // Background mode (agent-harness): act inside a named window WITHOUT
             // bringing it to the foreground or moving the cursor. UIA-pattern-only
@@ -2125,7 +2150,7 @@ async fn handle_tool(
                 } else {
                     return Err("ghost_act background=true requires 'name' or 'role' to locate the element".into());
                 };
-                return session.act_background(window, by, action, text).await.map_err(|e| e.to_string());
+                return session.act_background(window, by, action, text, idx, p["_target_hwnd"].as_i64().map(|h| h as isize), p["role"].as_str()).await.map_err(|e| e.to_string());
             }
 
             let (mode_label, mode) = parse_locate_mode(p);
@@ -2142,15 +2167,15 @@ async fn handle_tool(
                     } else {
                         return Err("ghost_act with 'window' requires 'name' or 'role' to locate the element".into());
                     };
-                    return session.act_background(window, by, action, text).await.map_err(|e| e.to_string());
+                    return session.act_background(window, by, action, text, idx, p["_target_hwnd"].as_i64().map(|h| h as isize), p["role"].as_str()).await.map_err(|e| e.to_string());
                 }
                 session.ensure_window_foreground(window).await
                     .map_err(|e| format!("ghost_act: could not focus window '{window}': {e}"))?;
             }
             // index → act on the nth match (disambiguation when several elements
             // share a name/role, e.g. multiple "Close Tab" buttons).
-            if let Some(idx) = p["index"].as_u64() {
-                let (el, total) = resolve_nth_element(session, p, idx as usize).await?;
+            if let Some(idx) = idx {
+                let (el, total) = resolve_nth_element(session, p, idx).await?;
                 let mut result = session.act_on_element(el, action, text).await.map_err(|e| e.to_string())?;
                 if let Some(obj) = result.as_object_mut() {
                     obj.insert("source".into(), Value::String("uia".into()));
@@ -3083,7 +3108,7 @@ fn lean_tools_schema() -> Value {
               "text_input": { "type": "string", "description": "Text to type when action=type (use this to avoid param collision with text-target)" },
               "window": { "type": "string", "description": "Title substring of the window to act in (anchors it). Omit to use the anchor." },
               "background": { "type": "boolean", "description": "Compatibility flag: background dispatch is already the default. Real Win32 controls get posted messages; windowless (WinUI/Chromium/Electron) controls get UIA Invoke/ValuePattern; double_click/right_click/hover need a windowed control. focus_preserved in the response reports the truth." },
-              "index": { "type": "integer", "description": "Act on the nth match (0-based) when several elements share the name/role" },
+              "index": { "type": "integer", "description": "Act on the nth match (0-based) when several elements share the name/role. Honoured on every route (background, hidden desktop, CDP, foreground); use ghost_find with the same name/index first to see the matches count" },
               "mode": { "type": "string", "enum": ["instant", "deliberate", "instant_only"] }
           }}},
         { "name": "ghost_key",
@@ -3188,6 +3213,7 @@ fn lean_tools_schema() -> Value {
               "op": { "type": "string", "enum": ["list","focus","anchor","state","launch"], "description": "Operation (default list)" },
               "name": { "type": "string", "description": "Window title substring (op=focus|anchor|state). Also accepted as alias for 'exe' on op=launch." },
               "clear": { "type": "boolean", "description": "op=anchor: forget the current anchor" },
+              "include_hidden": { "type": "boolean", "description": "op=list: also list windows that have vanished (not visible, not minimised - state=hidden); op=state state=restore on one of them shows it again without activating it" },
               "state": { "type": "string", "enum": ["maximize","minimize","restore","close"], "description": window_state_description() },
               "exe": { "type": "string", "description": "Executable path or command line (op=launch)" }
           }}},
@@ -3579,6 +3605,20 @@ async fn run_batch_op(
         other => return Err(format!("unknown batch op: {other}")),
     };
     Box::pin(handle_tool(session, method, params)).await
+}
+
+/// `index` is an optional non-negative integer. Anything else present (a
+/// negative number, a string, a float, an array) is an error: silently reading
+/// it as "no index" would act on match 0, which is the bug this parameter
+/// exists to prevent.
+fn parse_index(p: &Value) -> std::result::Result<Option<usize>, String> {
+    match p.get("index") {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => v
+            .as_u64()
+            .map(|i| Some(i as usize))
+            .ok_or_else(|| format!("index must be a non-negative integer (got {v})")),
+    }
 }
 
 fn parse_by(p: &Value) -> std::result::Result<ghost_session::By, String> {

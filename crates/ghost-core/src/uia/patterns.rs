@@ -3,6 +3,58 @@ use windows::core::Interface;
 use super::element::UiaElement;
 use crate::error::CoreError;
 
+/// `UIA_E_ELEMENTNOTAVAILABLE`: the provider no longer has this element.
+pub const UIA_E_ELEMENTNOTAVAILABLE: u32 = 0x8004_0201;
+
+/// True for control types an action can be dispatched to (button, edit, link,
+/// checkbox, ...). Mirrored on the Linux engine.
+pub fn is_interactive_control(control_type: u32) -> bool {
+    super::element::INTERACTIVE_ROLES.contains(&super::element::role_id_to_name(control_type))
+}
+
+/// The role name for a control type ("button", "text", "pane", ...). Mirrored
+/// on the Linux engine.
+pub fn role_name(control_type: u32) -> &'static str {
+    super::element::role_id_to_name(control_type)
+}
+
+/// Invoke `el` through InvokePattern. `Ok(false)` = the element exposes no
+/// InvokePattern (the provider answered with a null pattern); `Err` for a
+/// stale element or a failed Invoke.
+///
+/// # Safety
+/// COM call on a live element; the caller holds the reference.
+unsafe fn try_invoke(el: &IUIAutomationElement) -> Result<bool, CoreError> {
+    match el.GetCurrentPattern(UIA_InvokePatternId) {
+        Ok(pattern) => {
+            let invoke: IUIAutomationInvokePattern = pattern.cast()
+                .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "InvokePattern cast" })?;
+            invoke.Invoke()
+                .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "InvokePattern.Invoke" })?;
+            Ok(true)
+        }
+        // The element itself is gone (the tree was rebuilt under us - Chromium
+        // does this after every DOM change). That is not "no InvokePattern";
+        // the caller can resolve the element again.
+        Err(e) if e.code().0 as u32 == UIA_E_ELEMENTNOTAVAILABLE => Err(CoreError::Win32 {
+            code: UIA_E_ELEMENTNOTAVAILABLE,
+            context: "InvokePattern (element no longer available)",
+        }),
+        // A null pattern comes back as an error with code 0: unsupported.
+        Err(_) => Ok(false),
+    }
+}
+
+/// The control-view parent of `el`, if any.
+///
+/// # Safety
+/// COM calls on a live element.
+unsafe fn parent_of(el: &IUIAutomationElement) -> Option<IUIAutomationElement> {
+    let automation = super::create_automation().ok()?;
+    let walker = automation.ControlViewWalker().ok()?;
+    walker.GetParentElement(el).ok()
+}
+
 /// Invoke an element via InvokePattern (buttons, links).
 /// Falls back to clicking center of bounding rect if InvokePattern unavailable.
 pub fn invoke(element: &UiaElement) -> Result<(), CoreError> {
@@ -10,17 +62,27 @@ pub fn invoke(element: &UiaElement) -> Result<(), CoreError> {
 }
 
 /// Invoke via InvokePattern. When `allow_fallback` is false (background mode),
-/// this NEVER falls back to a coordinate click — a coordinate click needs the
+/// this NEVER falls back to a coordinate click - a coordinate click needs the
 /// window foreground and moves the real cursor, defeating background dispatch.
 /// If the element has no InvokePattern, returns `NotActionableInBackground`.
 pub fn invoke_ex(element: &UiaElement, allow_fallback: bool) -> Result<(), CoreError> {
     unsafe {
-        if let Ok(pattern) = element.0.GetCurrentPattern(UIA_InvokePatternId) {
-            let invoke: IUIAutomationInvokePattern = pattern.cast()
-                .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "InvokePattern cast" })?;
-            invoke.Invoke()
-                .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "InvokePattern.Invoke" })?;
-            return Ok(());
+        match try_invoke(&element.0)? {
+            true => return Ok(()),
+            false => {
+                // A name match on a web page is often the button's own TEXT
+                // node (Chromium exposes "Same" twice: the <button> and the
+                // text inside it, and after the first interaction the text
+                // node walks first). Text has no InvokePattern; its parent is
+                // the control the caller meant. One step up, never further.
+                if element.control_type() == UIA_TextControlTypeId.0 as u32 {
+                    if let Some(parent) = parent_of(&element.0) {
+                        if try_invoke(&parent)? {
+                            return Ok(());
+                        }
+                    }
+                }
+            }
         }
     }
     if !allow_fallback {
@@ -95,7 +157,7 @@ pub fn set_value_ex(element: &UiaElement, value: &str, allow_fallback: bool) -> 
         });
     }
     // Fallback: click to focus, clear existing content, then type. Clearing
-    // matches ValuePattern.SetValue's replace semantics — without it the
+    // matches ValuePattern.SetValue's replace semantics - without it the
     // keyboard path appends at the cursor instead of replacing the field.
     if let Some(rect) = element.bounding_rect() {
         let (cx, cy) = rect.center();
@@ -103,7 +165,7 @@ pub fn set_value_ex(element: &UiaElement, value: &str, allow_fallback: bool) -> 
     }
     // Only clear (Ctrl+A + Delete) when we're confident focus is a text field.
     // On a non-editable control (button, list, or the desktop/Explorer) those
-    // keystrokes could select-all + delete files — a destructive mis-fire.
+    // keystrokes could select-all + delete files - a destructive mis-fire.
     if is_editable_role(element.control_type()) {
         let _ = crate::input::keyboard::clear_focused_field();
     }

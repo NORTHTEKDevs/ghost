@@ -9,7 +9,8 @@ use windows::Win32::UI::WindowsAndMessaging::WindowFromPoint;
 use windows::Win32::UI::WindowsAndMessaging::{
     BringWindowToTop, EnumWindows, GetAncestor, GetForegroundWindow, GetWindowTextW,
     GetWindowThreadProcessId, IsIconic, IsWindowVisible, PostMessageW, SetForegroundWindow,
-    ShowWindow, GA_ROOT, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, WM_CLOSE,
+    GetWindow, ShowWindow, GA_ROOT, GW_OWNER, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW,
+    SW_SHOWNA, WM_CLOSE,
 };
 
 /// Roles that are acceptable *substitutes* when no exact match exists.
@@ -820,6 +821,54 @@ pub fn list_windows() -> Result<Vec<WindowInfo>, CoreError> {
     Ok(list)
 }
 
+/// Top-level application windows that are NOT visible and NOT minimised -
+/// the state a window is in when it has "vanished" (see `restore_if_hidden`).
+/// Only unowned, titled windows with a caption bar qualify, which keeps the
+/// countless invisible helper windows (IME, DDE, tray hosts) out.
+unsafe extern "system" fn enum_hidden_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    use windows::Win32::UI::WindowsAndMessaging::{GetWindowLongPtrW, GWL_STYLE, WS_CAPTION};
+    if IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() {
+        return TRUE;
+    }
+    if GetWindow(hwnd, GW_OWNER).map(|o| !o.is_invalid()).unwrap_or(false) {
+        return TRUE;
+    }
+    let style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
+    if style & WS_CAPTION.0 != WS_CAPTION.0 {
+        return TRUE;
+    }
+    let mut title = [0u16; 512];
+    let len = GetWindowTextW(hwnd, &mut title);
+    if len == 0 {
+        return TRUE;
+    }
+    let mut pid = 0u32;
+    GetWindowThreadProcessId(hwnd, Some(&mut pid));
+    let list = &mut *(lparam.0 as *mut Vec<WindowInfo>);
+    list.push(WindowInfo {
+        name: String::from_utf16_lossy(&title[..len as usize]),
+        pid,
+        focused: false,
+        hwnd: hwnd.0 as isize,
+        state: "hidden",
+    });
+    TRUE
+}
+
+/// Windows that have vanished: not visible, not minimised, but real, titled,
+/// unowned application windows. `set_window_state(.., Restore)` on one of
+/// these shows it again.
+pub fn list_hidden_windows() -> Result<Vec<WindowInfo>, CoreError> {
+    let mut list: Vec<WindowInfo> = Vec::new();
+    unsafe {
+        let _ = EnumWindows(
+            Some(enum_hidden_proc),
+            LPARAM(&mut list as *mut Vec<WindowInfo> as isize),
+        );
+    }
+    Ok(list)
+}
+
 /// Attempt to bring `hwnd` to the foreground using the AttachThreadInput workaround.
 /// Returns Ok(true) if foreground confirmed within `timeout_ms`, Ok(false) if timed out.
 ///
@@ -904,6 +953,42 @@ pub fn focus_window_under_point(x: i32, y: i32) -> Result<bool, CoreError> {
     }
 }
 
+/// Show a top-level window again if it is neither visible nor minimised - the
+/// state a window is in when it has "vanished" from the taskbar and from
+/// `list_windows`. Returns `true` only when it had to act and the window is
+/// visible afterwards. `SW_SHOWNA` shows without activating, so this never
+/// takes the user's foreground.
+///
+/// Why: on 2026-09-04 two browser windows an agent had driven through the
+/// foreground fallback ended up in exactly this state (IsWindowVisible false,
+/// not minimised, not cloaked) and the user's window was simply gone. No Ghost
+/// code path hides a window, and the cause was not reproduced, so this is a
+/// mitigation, not a root-cause fix: the action paths that raise a window check
+/// for the state afterwards and undo it, reporting `window_restored` rather
+/// than leaving the window lost.
+///
+/// An OWNED window is left alone. Dialogs and popups are created with an owner
+/// and routinely dismiss themselves with `ShowWindow(SW_HIDE)`; showing one
+/// again would resurrect a dialog the app deliberately closed. The windows this
+/// is for - browser and application frames - have no owner.
+pub fn restore_if_hidden(hwnd_raw: isize) -> bool {
+    if hwnd_raw == 0 {
+        return false;
+    }
+    let hwnd = HWND(hwnd_raw as *mut core::ffi::c_void);
+    unsafe {
+        if IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() {
+            return false;
+        }
+        // Owned window: hiding is how dialogs dismiss. Not ours to undo.
+        if GetWindow(hwnd, GW_OWNER).map(|o| !o.is_invalid()).unwrap_or(false) {
+            return false;
+        }
+        let _ = ShowWindow(hwnd, SW_SHOWNA);
+        IsWindowVisible(hwnd).as_bool()
+    }
+}
+
 pub fn focus_window(name: &str) -> Result<(), CoreError> {
     // Bringing a window to the foreground is by definition a screen-stealing action.
     focus::require_foreground_allowed("focus_window")?;
@@ -927,12 +1012,19 @@ pub fn focus_window(name: &str) -> Result<(), CoreError> {
 pub fn set_window_state(name: &str, state: WindowState) -> Result<(), CoreError> {
     let name_lower = name.to_lowercase();
     let windows = list_windows()?;
-    let win = windows
-        .iter()
-        .find(|w| w.name.to_lowercase().contains(&name_lower))
-        .ok_or_else(|| CoreError::ProcessNotFound {
-            name: name.to_string(),
-        })?;
+    let matches_name = |w: &&WindowInfo| w.name.to_lowercase().contains(&name_lower);
+    // A vanished window (hidden, not minimised) is still reachable here, so
+    // `restore` is the recovery path for a window nothing else can see.
+    let hidden;
+    let win = match windows.iter().find(matches_name) {
+        Some(w) => w,
+        None => {
+            hidden = list_hidden_windows()?;
+            hidden.iter().find(matches_name).ok_or_else(|| CoreError::ProcessNotFound {
+                name: name.to_string(),
+            })?
+        }
+    };
     let hwnd = HWND(win.hwnd as *mut _);
     unsafe {
         match state {
@@ -941,6 +1033,11 @@ pub fn set_window_state(name: &str, state: WindowState) -> Result<(), CoreError>
             }
             WindowState::Minimize => {
                 let _ = ShowWindow(hwnd, SW_MINIMIZE);
+            }
+            WindowState::Restore if win.state == "hidden" => {
+                // Show without activating: restoring a lost window must not
+                // take the user's foreground.
+                let _ = ShowWindow(hwnd, SW_SHOWNA);
             }
             WindowState::Restore => {
                 let _ = ShowWindow(hwnd, SW_RESTORE);

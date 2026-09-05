@@ -582,6 +582,12 @@ async fn collect_text_async(
     Ok(())
 }
 
+/// Mirrors `ghost_core::uia::tree::restore_if_hidden`. AT-SPI has no
+/// "visible but not mapped" state to undo from here, so this never acts.
+pub fn restore_if_hidden(_hwnd: isize) -> bool {
+    false
+}
+
 /// Mirrors `ghost_core::uia::tree::focus_window_under_point`.
 pub fn focus_window_under_point(x: i32, y: i32) -> Result<bool> {
     let tree = A11yTree::new()?;
@@ -621,6 +627,12 @@ impl WindowState {
 /// Free-function form, mirroring `ghost_core::uia::tree::list_windows`.
 pub fn list_windows() -> Result<Vec<WindowInfo>> {
     A11yTree::new()?.list_windows()
+}
+
+/// Mirrors `ghost_core::uia::tree::list_hidden_windows`. AT-SPI exposes no
+/// "unmapped but alive" window state, so there is nothing to report here.
+pub fn list_hidden_windows() -> Result<Vec<WindowInfo>> {
+    Ok(Vec::new())
 }
 
 /// Raise and focus a window by (partial, case-insensitive) name.

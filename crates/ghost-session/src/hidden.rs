@@ -95,11 +95,12 @@ fn find_in(
     hwnd: isize,
     by: &By,
     index: Option<usize>,
+    role_filter: Option<&str>,
 ) -> Result<(UiaElement, usize)> {
-    match find_in_once(tree, hwnd, by, index) {
+    match find_in_once(tree, hwnd, by, index, role_filter) {
         Err(GhostError::ElementNotFound { .. }) if is_chromium_window(hwnd) => {
             std::thread::sleep(Duration::from_millis(450));
-            find_in_once(tree, hwnd, by, index)
+            find_in_once(tree, hwnd, by, index, role_filter)
         }
         other => other,
     }
@@ -109,11 +110,29 @@ fn find_in(
 /// as the field (the Win32 proxy names an EDIT after its STATIC), and the label
 /// comes first in the tree. Typing must land in the editable one, so among the
 /// name matches the first editable role wins; otherwise the first match.
-fn find_for_typing(tree: &UiaTree, hwnd: isize, by: &By) -> Result<(UiaElement, usize)> {
-    let By::Name(n) = by else { return find_in(tree, hwnd, by, None) };
+/// For any other action by NAME: rank the matches the way the user-desktop
+/// route does (exact name, then interactive role, then walk order), so a title
+/// or text node that merely contains the name does not win over the control.
+fn find_for_action(tree: &UiaTree, hwnd: isize, by: &By) -> Result<(UiaElement, usize)> {
+    let By::Name(n) = by else { return find_in(tree, hwnd, by, None, None) };
     let all = core(tree.find_all_in_hwnd(hwnd, Some(n), None, 16))?;
     if all.is_empty() {
-        return find_in(tree, hwnd, by, None);
+        return find_in(tree, hwnd, by, None, None);
+    }
+    let total = all.len();
+    GhostSession::rank_for_action(all, n)
+        .map(|el| (el, total))
+        .ok_or_else(|| GhostError::ElementNotFound {
+            query: format!("{by:?} in the hidden-desktop window"),
+            screenshot: None,
+        })
+}
+
+fn find_for_typing(tree: &UiaTree, hwnd: isize, by: &By) -> Result<(UiaElement, usize)> {
+    let By::Name(n) = by else { return find_in(tree, hwnd, by, None, None) };
+    let all = core(tree.find_all_in_hwnd(hwnd, Some(n), None, 16))?;
+    if all.is_empty() {
+        return find_in(tree, hwnd, by, None, None);
     }
     let total = all.len();
     let pos = all
@@ -134,9 +153,11 @@ fn find_in_once(
     hwnd: isize,
     by: &By,
     index: Option<usize>,
+    role_filter: Option<&str>,
 ) -> Result<(UiaElement, usize)> {
+    // name+role AND-combine on the indexed path, like ghost_find's.
     let (name, role) = match by {
-        By::Name(n) => (Some(n.as_str()), None),
+        By::Name(n) => (Some(n.as_str()), role_filter),
         By::Role(r) => (None, Some(r.as_str())),
         By::Description(d) => {
             return Err(GhostError::Vision(format!(
@@ -376,7 +397,7 @@ impl GhostSession {
         let d = self.desktop_for(t).await?;
         let hwnd = t.hwnd;
         let found: Result<(Located, usize)> = core(d.with_uia(move |tree| {
-            find_in(tree, hwnd, &by, index).map(|(el, n)| (Located::of(&el), n))
+            find_in(tree, hwnd, &by, index, None).map(|(el, n)| (Located::of(&el), n))
         }))?;
         let (info, matches) = found?;
         let (cx, cy) = info.center();
@@ -408,7 +429,10 @@ impl GhostSession {
         by: By,
         action: &str,
         text: Option<&str>,
+        index: Option<usize>,
+        role_filter: Option<&str>,
     ) -> Result<Value> {
+        let role_filter = role_filter.map(str::to_string);
         let d = self.desktop_for(t).await?;
         let hwnd = t.hwnd;
         let title = t.title.clone();
@@ -416,10 +440,14 @@ impl GhostSession {
         let text = text.map(str::to_string);
         let out: Result<Value> = core(d.with_uia(move |tree| -> Result<Value> {
             let t_start = Instant::now();
-            let (el, _) = if action == "type" {
+            // An explicit index is the caller's disambiguation and wins over the
+            // editable-field preference for `type`.
+            let (el, _) = if action == "type" && index.is_none() {
                 find_for_typing(tree, hwnd, &by)?
+            } else if index.is_none() {
+                find_for_action(tree, hwnd, &by)?
             } else {
-                find_in(tree, hwnd, &by, None)?
+                find_in(tree, hwnd, &by, index, role_filter.as_deref())?
             };
             let info = Located::of(&el);
             let t_find = t_start.elapsed().as_millis() as u64;
@@ -696,7 +724,7 @@ impl GhostSession {
         let d = self.desktop_for(t).await?;
         let hwnd = t.hwnd;
         let v: Result<String> = core(d.with_uia(move |tree| {
-            find_in(tree, hwnd, &by, None).map(|(el, _)| element_value(&el))
+            find_in(tree, hwnd, &by, None, None).map(|(el, _)| element_value(&el))
         }))?;
         v
     }

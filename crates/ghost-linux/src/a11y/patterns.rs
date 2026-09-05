@@ -18,6 +18,22 @@ use crate::error::Result;
 #[cfg(target_os = "linux")]
 use super::element::A11yElement;
 
+/// Mirrors `ghost_core::uia::patterns::UIA_E_ELEMENTNOTAVAILABLE`. The Windows
+/// engine reports a stale element with this HRESULT; the shared session layer
+/// matches on it. AT-SPI reports staleness as a D-Bus error instead, so this
+/// value is never produced here - it only has to exist.
+pub const UIA_E_ELEMENTNOTAVAILABLE: u32 = 0x8004_0201;
+
+/// Identical to `ghost_core::uia::patterns::is_interactive_control`.
+pub fn is_interactive_control(control_type: u32) -> bool {
+    super::roles::is_interactive_role(role_id_to_name(control_type))
+}
+
+/// Identical to `ghost_core::uia::patterns::role_name`.
+pub fn role_name(control_type: u32) -> &'static str {
+    role_id_to_name(control_type)
+}
+
 /// Identical to `ghost_core::uia::patterns::is_editable_role`.
 pub fn is_editable_role(control_type: u32) -> bool {
     matches!(role_id_to_name(control_type), "edit" | "document" | "combobox")

@@ -1408,6 +1408,13 @@ impl GhostSession {
         core_list_windows().map_err(GhostError::Core)
     }
 
+    /// Windows that have vanished: not visible, not minimised, but real titled
+    /// application windows. `ghost_window op=state state=restore` shows one
+    /// again without activating it.
+    pub async fn list_hidden_windows(&self) -> Result<Vec<WindowInfo>> {
+        crate::engine::uia::tree::list_hidden_windows().map_err(GhostError::Core)
+    }
+
     /// Bring a window to the foreground by partial name match.
     pub async fn focus_window(&self, name: &str) -> Result<()> {
         core_focus_window(name).map_err(GhostError::Core)
@@ -1775,6 +1782,14 @@ impl GhostSession {
             }
             None => false,
         };
+        // The window this call raised, when it did: checked again after the
+        // action so a window that ends up hidden (not visible, not minimised)
+        // is shown again instead of vanishing on the user.
+        let raised: Option<isize> = if focus_confirmed {
+            Some(crate::engine::system::foreground_window())
+        } else {
+            None
+        };
         // Best-effort UIA focus on top (non-fatal: InvokePattern/ValuePattern work without it)
         let _ = el.set_focus();
 
@@ -1875,6 +1890,12 @@ impl GhostSession {
             }
         }
 
+        // A raised window must still be there when we are done. If the action
+        // left it hidden, show it again (without activating) and say so.
+        let window_restored = raised
+            .map(crate::engine::uia::tree::restore_if_hidden)
+            .unwrap_or(false);
+
         let rect_json = rect.map(|(l, t, r, b)| serde_json::json!({"left": l, "top": t, "right": r, "bottom": b}))
             .unwrap_or(serde_json::Value::Null);
         let mut out = Self::act_result_json(name.into(), rect_json, verification, focus_confirmed);
@@ -1883,8 +1904,40 @@ impl GhostSession {
             if used_paste {
                 obj.insert("used_paste_fallback".into(), serde_json::json!(true));
             }
+            if window_restored {
+                obj.insert("window_restored".into(), serde_json::json!(true));
+                obj.insert(
+                    "warning".into(),
+                    serde_json::json!("the target window was hidden after the action and has been shown again"),
+                );
+            }
         }
         Ok(out)
+    }
+
+    /// Pick the element an ACTION by name most plausibly means: an exact
+    /// (case-insensitive) name beats a substring hit, an interactive role beats
+    /// a pane or text node, and walk order breaks ties. `None` when `all` is
+    /// empty. Shared by the user-desktop and hidden-desktop background routes.
+    pub(crate) fn rank_for_action(
+        all: Vec<crate::engine::uia::element::UiaElement>,
+        name: &str,
+    ) -> Option<crate::engine::uia::element::UiaElement> {
+        let wanted = name.to_lowercase();
+        let mut best: Option<(u8, crate::engine::uia::element::UiaElement)> = None;
+        for el in all {
+            let mut score = 0u8;
+            if el.name().to_lowercase() == wanted {
+                score += 2;
+            }
+            if crate::engine::uia::patterns::is_interactive_control(el.control_type()) {
+                score += 1;
+            }
+            if best.as_ref().map(|(s, _)| score > *s).unwrap_or(true) {
+                best = Some((score, el));
+            }
+        }
+        best.map(|(_, el)| el)
     }
 
     /// Background action: act on an element inside a NAMED window without
@@ -1904,7 +1957,21 @@ impl GhostSession {
     ///
     /// The result reports `focus_preserved` and `cursor_preserved` so a caller
     /// can confirm the desktop was not disturbed.
-    pub async fn act_background(&self, window: &str, by: By, action: &str, text: Option<&str>) -> Result<serde_json::Value> {
+    ///
+    /// The parameters mirror the `ghost_act` tool's own: window, locator,
+    /// action, text, index, the resolved handle, and the role filter that
+    /// narrows an indexed name lookup. Bundling them would only move the count.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn act_background(
+        &self,
+        window: &str,
+        by: By,
+        action: &str,
+        text: Option<&str>,
+        index: Option<usize>,
+        hwnd_hint: Option<isize>,
+        role_filter: Option<&str>,
+    ) -> Result<serde_json::Value> {
 
         if is_stopped() { return Err(GhostError::Stopped); }
         if !matches!(action, "click" | "type" | "double_click" | "right_click" | "hover") {
@@ -1913,11 +1980,18 @@ impl GhostSession {
             )));
         }
 
-        // Resolve the target window HWND by partial name (skip minimized).
+        // Resolve the target window: by the handle the caller already resolved
+        // when it is still open (a title can change between resolution and
+        // action - a page rewriting document.title on every click did exactly
+        // that), otherwise by partial name. Minimised windows are skipped.
         let windows_list = core_list_windows().map_err(GhostError::Core)?;
         let ql = window.to_lowercase();
-        let win = windows_list.iter()
-            .find(|w| w.name.to_lowercase().contains(&ql) && w.state != "minimized")
+        let win = hwnd_hint
+            .and_then(|h| windows_list.iter().find(|w| w.hwnd == h && w.state != "minimized"))
+            .or_else(|| {
+                windows_list.iter()
+                    .find(|w| w.name.to_lowercase().contains(&ql) && w.state != "minimized")
+            })
             .ok_or_else(|| GhostError::Vision(format!(
                 "ghost_act background: no visible window matching '{window}' (minimized windows can't be driven in background)"
             )))?;
@@ -1935,8 +2009,37 @@ impl GhostSession {
         // For action=type by NAME the label next to a field carries the field's
         // name and comes first in the tree (the Win32 proxy names an EDIT after
         // its STATIC), so among the name matches the first editable role wins.
-        let lookup = || match &by {
-            By::Name(n) if action == "type" => {
+        // An explicit `index` is the caller disambiguating duplicates (several
+        // "Close" buttons): it selects the nth match outright, on every route.
+        // Before 0.21.1 this path took the first name match and ignored `index`,
+        // which once clicked a window's title-bar Close instead of a dialog's.
+        let lookup = || match (&by, index) {
+            (By::Description(d), _) => Err(GhostError::Vision(format!(
+                "ghost_act background: description targets need vision grounding (foreground); desc={d}"
+            ))),
+            (_, Some(i)) => {
+                // name+role AND-combine on the indexed path, like ghost_find's.
+                let (n, r) = match &by {
+                    By::Name(n) => (Some(n.as_str()), role_filter),
+                    By::Role(r) => (None, Some(r.as_str())),
+                    By::Description(_) => (None, None),
+                };
+                let all = self.tree.find_all_in_hwnd(hwnd, n, r, (i + 1).max(50)).map_err(GhostError::Core)?;
+                let total = all.len();
+                if total == 0 {
+                    // Nothing at all: let the Chromium lazy-tree retry below and
+                    // the ordinary not-found path handle it.
+                    return Ok(None);
+                }
+                match all.into_iter().nth(i) {
+                    Some(e) => Ok(Some(e)),
+                    None => Err(GhostError::ElementNotFound {
+                        query: format!("{by:?} index {i} in window '{window}' (found {total} matches)"),
+                        screenshot: None,
+                    }),
+                }
+            }
+            (By::Name(n), None) if action == "type" => {
                 let all = self.tree.find_all_in_hwnd(hwnd, Some(n), None, 16).map_err(GhostError::Core)?;
                 let pos = all
                     .iter()
@@ -1944,11 +2047,16 @@ impl GhostSession {
                     .unwrap_or(0);
                 Ok(all.into_iter().nth(pos))
             }
-            By::Name(n) => self.tree.find_by_name_in_hwnd(hwnd, n).map_err(GhostError::Core),
-            By::Role(r) => self.tree.find_by_role_in_hwnd(hwnd, r).map_err(GhostError::Core),
-            By::Description(d) => Err(GhostError::Vision(format!(
-                "ghost_act background: description targets need vision grounding (foreground); desc={d}"
-            ))),
+            (By::Name(n), None) => {
+                // A substring match can land on a title, a pane or a text node
+                // that merely CONTAINS the name (a page whose title says
+                // "clicked:same" while the caller wants the "Same" button, and
+                // the title walks first). For an action, an exact name and an
+                // interactive role outrank a bare substring hit.
+                let all = self.tree.find_all_in_hwnd(hwnd, Some(n), None, 16).map_err(GhostError::Core)?;
+                Ok(Self::rank_for_action(all, n))
+            }
+            (By::Role(r), None) => self.tree.find_by_role_in_hwnd(hwnd, r).map_err(GhostError::Core),
         };
         // The raw COM element must not be alive across the await (it is not
         // Send), so the retry arm holds nothing while it sleeps.
@@ -2084,7 +2192,40 @@ impl GhostSession {
                     }
                 } else {
                     fallback_uia = true;
-                    el.click_background()?;
+                    match el.click_background() {
+                        // The element went away between the walk and the invoke -
+                        // Chromium rebuilds its tree after every DOM change. Nothing
+                        // was clicked, so resolving once more and invoking the fresh
+                        // element cannot double-click.
+                        Err(GhostError::Core(crate::engine::error::CoreError::Win32 { code, .. }))
+                            if code == crate::engine::uia::patterns::UIA_E_ELEMENTNOTAVAILABLE =>
+                        {
+                            let fresh = lookup()?
+                                .map(crate::GhostElement::new)
+                                .ok_or_else(|| GhostError::ElementNotFound {
+                                    query: format!("{by:?} in window '{window}' (element went away before the click)"),
+                                    screenshot: None,
+                                })?;
+                            fresh.click_background()?;
+                        }
+                        // A name is a substring match over EVERY element, titles
+                        // and text included, so a match can be something that
+                        // cannot be clicked. Say what it was and how to narrow it.
+                        Err(GhostError::Core(crate::engine::error::CoreError::NotActionableInBackground { .. }))
+                            if !crate::engine::uia::patterns::is_interactive_control(el.control_type()) =>
+                        {
+                            return Err(GhostError::Vision(format!(
+                                "ghost_act background: the match for {by:?}{} is a {} named {:?}, which cannot be \
+                                 clicked. Name matching is a substring match over every element (titles and text \
+                                 included); add role=button (or the control's role) so only controls count, or \
+                                 check ghost_find with the same name and index first",
+                                index.map(|i| format!(" at index {i}")).unwrap_or_default(),
+                                crate::engine::uia::patterns::role_name(el.control_type()),
+                                el.name(),
+                            )));
+                        }
+                        other => other?,
+                    }
                 }
                 tokio::time::sleep(Duration::from_millis(80)).await;
                 let changed = verify_pixels(before);
@@ -2148,6 +2289,9 @@ impl GhostSession {
         });
         if let (Some(obj), Some(n)) = (out.as_object_mut(), note) {
             obj.insert("note".into(), serde_json::Value::String(n.into()));
+        }
+        if let (Some(obj), Some(i)) = (out.as_object_mut(), index) {
+            obj.insert("index".into(), serde_json::json!(i));
         }
         Ok(out)
     }

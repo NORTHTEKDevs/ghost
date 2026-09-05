@@ -1,5 +1,60 @@
 # Changelog
 
+## [0.21.1] - index is honoured everywhere; a raised window is never left hidden
+
+- **`ghost_act index=N` now selects the nth match on every route.** Under the
+  default `background` policy an anchored act went to the background path
+  before the index was read, so it acted on match 0. Driving a browser on
+  2026-09-04, `name=Close index=2` invoked the window's own title-bar Close
+  instead of a dialog's and closed an eight-tab window. The background,
+  hidden-desktop and CDP routes now take `index`, an out-of-range index is an
+  error that reports how many matches there are, and the response echoes
+  `index`. Live test: the testbed has two buttons named "Increment"; the
+  second records `[alt=N]` in the title, and
+  `crates/ghost-session/tests/index_disambiguation.rs` proves index 1 presses
+  it, index 0 presses the first, and index 5 of 2 presses nothing - on the
+  hidden-desktop route and on the user-desktop background route.
+- **`index` is strict, and `name` + `role` combine on it.** A negative, string,
+  float or array `index` used to read as "no index" and act on match 0; it is
+  now an error. With both `name` and `role` given, the indexed lookup counts
+  only elements matching both (as `ghost_find` already did), which is the
+  reliable way to say "the second Same button" on a page whose title also
+  contains the word.
+- **An action by name prefers the control.** Name matching is a substring
+  match over every element, titles and text included. A page whose title
+  became "clicked:same" made the title text walk first for `name=Same`, and
+  the click landed on nothing clickable. For an action, an exact name and an
+  interactive role now outrank a bare substring hit on both background routes;
+  when the chosen match still cannot be clicked, the error names its role and
+  says to add `role=`.
+- **The background act drives the window it resolved, not a title.** The title
+  can change between resolution and action (a page rewriting `document.title`
+  on every click did); the resolved handle now rides along, so a burst of
+  parallel acts no longer fails with "no visible window matching" the old
+  title.
+- **A stale element is resolved again, not reported as unclickable.** Chromium
+  rebuilds its tree after a DOM change; an element that went away between the
+  walk and the invoke (`UIA_E_ELEMENTNOTAVAILABLE`) is looked up once more.
+  Nothing was clicked the first time, so this cannot double-click.
+- **A window the foreground fallback raised is checked afterwards.** Two
+  browser windows driven through `prefer_background` on 2026-09-04 ended up
+  not visible, not minimised, not cloaked - gone from the taskbar and from
+  `ghost_window op=list`. No Ghost code path hides a window and the cause was
+  not reproduced (Edge and a throwaway Comet stayed visible under the same
+  calls; a scheduled script that raises Comet under the `foreground` policy
+  twice a day is the leading suspect), so this is a guard, not a root-cause
+  fix: after an action that raised a window, a window left in that state is
+  shown again without activation (`SW_SHOWNA`) and the response carries
+  `window_restored: true` plus a warning. Owned windows (dialogs) are left
+  alone - hiding is how they dismiss.
+- **Vanished windows are findable and restorable.** `ghost_window op=list
+  include_hidden=true` lists titled, unowned application windows that are
+  neither visible nor minimised (`state: "hidden"`), and `op=state
+  state=restore` on one of them shows it again without activating it. Before
+  this, such a window was invisible to every Ghost verb.
+- `ghost-testbed` gained the second "Increment" button; nothing else about it
+  changed.
+
 ## [0.21.0] - The user's own browser, honest misses, and tests that stay off your screen
 
 - **Linux engine keeps parity with the anchored capture path.** `ghost-linux`

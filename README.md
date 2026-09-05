@@ -376,7 +376,9 @@ calls, the client's own terminal usually retakes OS focus. Ghost is built for th
 - **Latency is visible**: every response carries `ms`, and `escalated: true` flags when a
   find had to pay a network VLM round trip (local tiers: cache → UIA → OCR are all on-device).
 - **Windows never disappear**: minimized windows stay in `ghost_window list` (with `state`)
-  and `op=focus` auto-restores them.
+  and `op=focus` auto-restores them. A window that something hid outright (not visible,
+  not minimized) shows up with `op=list include_hidden=true` as `state: "hidden"`, and
+  `op=state state=restore` brings it back without activating it.
 - **Stop always works**: `ghost_stop` preempts the in-flight call the moment it arrives
   (dedicated stdin reader), and Ctrl+Alt+G remains the OS-level kill switch.
 
