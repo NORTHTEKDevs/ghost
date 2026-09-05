@@ -1,7 +1,7 @@
 # Publishing Ghost to the MCP registry
 
 Getting Ghost into the [Model Context Protocol registry](https://registry.modelcontextprotocol.io)
-(and the client directories that mirror it) is the discovery lever — it's how an
+(and the client directories that mirror it) is the discovery lever - it's how an
 agent or user finds Ghost without already knowing it exists.
 
 ## What's in the repo
@@ -63,15 +63,18 @@ third party access to an account, which an automated session must not do.
 | PulseMCP | imports the official registry; own submissions paused | automatic |
 | awesome-mcp-servers (punkpeye) | pull request, OS Automation section | PR #13724 open, mergeable |
 | mcpservers.org | web form, no login | submitted; review within 12 hours, confirmation to info@northtek.io |
-| Glama | indexes GitHub; `glama.json` (in repo) names the maintainer | not yet indexed; claim at glama.ai/mcp/servers/add needs GitHub login |
-| Smithery | `smithery mcp publish ./ghost-windows-x64.mcpb -n NORTHTEKDevs/ghost` after `smithery login` | needs the account owner |
-| LobeHub marketplace | `npx -y @lobehub/market-cli login`, `github connect`, then `plugin publish https://github.com/NORTHTEKDevs/ghost`; `lhm.plugin.json` is in the repo | needs the account owner |
-| mcp.so | website submission behind Sign In | needs the account owner |
-| cursor.directory | cursor.directory/plugins/new, GitHub or Google sign-in, detects a committed `.mcp.json` | needs the account owner; note the repo root has a private, uncommitted `.mcp.json` that a public one would collide with |
+| Glama | indexes GitHub; `glama.json` (in repo) names the maintainer; claimed with the maintainer account | listed: https://glama.ai/mcp/servers/hcu78gk1x6 (categories: OS Automation, Browser Automation, Shell Access) |
+| Smithery | `smithery mcp publish ghost-windows-x64.mcpb -n info-j5od/ghost` from the bundle directory after `smithery login` (the account namespace is `info-j5od`, not NORTHTEKDevs) | listed: https://smithery.ai/servers/info-j5od/ghost |
+| LobeHub marketplace | `npx -y @lobehub/market-cli login`, `github connect`, then `plugin publish https://github.com/NORTHTEKDevs/ghost` from the repo root (`lhm.plugin.json` must be in the working directory) | listed: https://lobehub.com/mcp/northtekdevs-ghost (northtekdevs-ghost@0.21.7) |
+| mcp.so | website submission behind Sign In; the only submit path is a paid $39 "Pay and submit automatically" | not submitted: paid listing, owner's call |
+| cursor.directory | cursor.directory/plugins/new scans the repo for Agent Plugins files (agent-plugins.org): root `plugin.json` + `mcp.json` (both in repo, both validate against the 1.0.0 schemas); no sign-in was required to submit | submitted: https://cursor.directory/plugins/ghost, hidden until their security scan finishes |
 
-The four "needs the account owner" rows are each a few minutes once signed in;
-the metadata files they read (`glama.json`, `lhm.plugin.json`, the `.mcpb`
-bundles) are already in place.
+Every directory that accepts submissions now has one. The metadata files they
+read (`glama.json`, `lhm.plugin.json`, `plugin.json`, `mcp.json`, the `.mcpb`
+bundles) live in the repo; `plugin.json` and `lhm.plugin.json` carry their own
+`version` field and are bumped by hand with the workspace version. `mcp.json`
+names the bare `ghost-mcp` command (PATH lookup), so a plugin install from the
+repo still needs the binary from the Releases page.
 
 ## Client config (copy-paste)
 
@@ -91,9 +94,9 @@ New Claude sessions launch `~/.local/bin/ghost-mcp.exe` (a stable path outside t
 build folder, so it survives `cargo clean` and repo moves). Two things keep it on
 the latest build:
 
-- **`scripts/install.ps1`** — `cargo build --release -p ghost-mcp` then install to
+- **`scripts/install.ps1`** - `cargo build --release -p ghost-mcp` then install to
   the stable path. Run it to publish a new version immediately.
-- **`GhostMcpAutoSync`** scheduled task (hourly) — copies the newest release build
+- **`GhostMcpAutoSync`** scheduled task (hourly) - copies the newest release build
   to the stable path automatically. Because Windows locks a running `.exe`, the
   sync renames the in-use binary aside and drops the fresh one in, so it updates
   even while sessions are live; new sessions pick it up, running sessions keep

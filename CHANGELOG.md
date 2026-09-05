@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+- **Agent Plugins manifests.** Root `plugin.json` and `mcp.json` follow the
+  Agent Plugins 1.0.0 standard (agent-plugins.org) so plugin scanners such as
+  cursor.directory detect the MCP server; both validate against the canonical
+  schemas. `mcp.json` names the bare `ghost-mcp` command, resolved from PATH.
+- **Directory listings.** Ghost is now listed on Glama, Smithery, LobeHub and
+  cursor.directory in addition to the official MCP registry; the status table
+  in `docs/publishing-mcp.md` records the mechanism for each.
+
 ## [0.21.7] - the whole desktop, not just eyes
 
 - **The README says what Ghost is actually used for.** 0.21.6 led with "eyes and
