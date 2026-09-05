@@ -1,0 +1,102 @@
+# Publish server.json to the MCP registry (https://registry.modelcontextprotocol.io).
+#
+# Authentication is GitHub OIDC: the registry trusts a token minted by this
+# workflow for the io.github.NORTHTEKDevs/* namespace, so no human login and no
+# stored secret is involved. Before this workflow existed the manifest had
+# never been published - the local device-code login kept expiring unused.
+#
+# Runs on every release tag, after the GitHub Release for that tag exists, so
+# the registry never lists a version nobody can download. `workflow_dispatch`
+# re-publishes the version currently in server.json (for a fix to the manifest
+# itself, or to catch up a tag that was cut before this workflow was added).
+name: Registry
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish to the MCP registry
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # OIDC token for `mcp-publisher login github-oidc`
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Work out which version this is
+        id: version
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            version="${GITHUB_REF#refs/tags/v}"
+          else
+            version="$(jq -r .version server.json)"
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+          echo "publishing ${version}"
+
+      - name: Keep server.json in lockstep with the tag
+        run: |
+          set -euo pipefail
+          jq --arg v "${{ steps.version.outputs.version }}" '.version = $v' server.json > server.tmp
+          mv server.tmp server.json
+          jq . server.json
+
+      - name: Wait for the GitHub Release to exist
+        # The release job builds both platforms, which takes a few minutes; the
+        # listing points people at that release, so it must be there first.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 40); do
+            if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null | grep -q false; then
+              echo "release $TAG is published"
+              exit 0
+            fi
+            echo "waiting for release $TAG ($i/40)"
+            sleep 30
+          done
+          echo "::error::release $TAG did not appear within 20 minutes; not publishing a version nobody can download"
+          exit 1
+
+      - name: Install mcp-publisher (pinned)
+        # Pinned by version AND checksum. `releases/latest/download` would pull
+        # whatever was published last, which is exactly what a supply-chain
+        # attack looks like from here.
+        env:
+          VERSION: 1.8.1
+          SHA256: a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc
+        run: |
+          set -euo pipefail
+          curl -sSL -o mcp-publisher.tar.gz \
+            "https://github.com/modelcontextprotocol/registry/releases/download/v${VERSION}/mcp-publisher_linux_amd64.tar.gz"
+          echo "${SHA256}  mcp-publisher.tar.gz" | sha256sum -c -
+          tar xzf mcp-publisher.tar.gz mcp-publisher
+          ./mcp-publisher --version
+
+      - name: Validate the manifest against the live schema
+        run: ./mcp-publisher validate
+
+      - name: Authenticate with GitHub OIDC
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish
+        run: ./mcp-publisher publish
+
+      - name: Confirm the registry lists it
+        run: |
+          set -euo pipefail
+          sleep 5
+          curl -sS "https://registry.modelcontextprotocol.io/v0/servers?search=io.github.NORTHTEKDevs/ghost" \
+            | jq -e --arg v "${{ steps.version.outputs.version }}" \
+              '[.servers[]? | select(.server.name == "io.github.NORTHTEKDevs/ghost" and .server.version == $v)] | length > 0' \
+            && echo "listed: io.github.NORTHTEKDevs/ghost ${{ steps.version.outputs.version }}"

@@ -21,18 +21,33 @@ To become installable from the registry itself, ship an `.mcpb` bundle
 (manifest + binary, `fileSha256` pinned) as a release asset and add an `mcpb`
 package entry. That is a release-pipeline change, tracked separately.
 
-## Steps
+## How it publishes
 
-1. **Validate against the live schema.** The schema is versioned and the
-   registry rejects deprecated ones (`2025-07-09` was refused; `2025-12-11` is
-   current as of 2026-09-04). Run `mcp-publisher validate` and fix anything it
-   names. Do not publish a manifest you haven't validated. `description` is
-   capped at 100 characters.
-2. **Authenticate** as the `io.github.NORTHTEKDevs/*` namespace owner (GitHub
-   OAuth via `mcp-publisher login github`).
-3. **Publish**: `mcp-publisher publish`, after the matching GitHub release exists.
-4. **Bump on release**: keep `version` in `server.json` in lockstep with
-   `crates/ghost-mcp/Cargo.toml` and re-publish on each release.
+`.github/workflows/registry.yml` publishes on every `v*` tag, after the GitHub
+Release for that tag exists. It authenticates with GitHub OIDC (the registry
+trusts a token minted by the workflow for the `io.github.NORTHTEKDevs/*`
+namespace), so there is no human login and no stored secret. It pins
+`mcp-publisher` by version and checksum, validates the manifest against the live
+schema, rewrites `server.json`'s `version` from the tag so the two cannot drift,
+publishes, and then queries the registry to confirm the entry is there.
+
+To re-publish without a new tag (a fix to the manifest itself, or a tag cut
+before the workflow existed): Actions -> Registry -> Run workflow, or
+`gh workflow run registry.yml`. That path publishes the version currently in
+`server.json` and still waits for its release to exist.
+
+Why a workflow and not the CLI by hand: the manual path is a GitHub device-code
+login that expires in minutes and had to be approved in a browser signed in as
+NORTHTEKDevs. It expired unused twice on 2026-09-04, and before that the
+manifest had never been valid, so Ghost had never been listed at all.
+
+## Manual fallback
+
+1. `mcp-publisher validate` - fix anything it names. `description` is capped
+   at 100 characters; the schema version must be current.
+2. `mcp-publisher login github` (device code, browser signed in as
+   NORTHTEKDevs).
+3. `mcp-publisher publish`, after the matching GitHub release exists.
 
 ## Also worth listing on
 
