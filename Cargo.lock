@@ -1095,7 +1095,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-browser"
-version = "0.21.5"
+version = "0.21.6"
 dependencies = [
  "base64",
  "futures-util",
@@ -1111,7 +1111,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-cache"
-version = "0.21.5"
+version = "0.21.6"
 dependencies = [
  "blake3",
  "crossbeam-channel",
@@ -1125,7 +1125,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-cli"
-version = "0.21.5"
+version = "0.21.6"
 dependencies = [
  "clap",
  "ghost-core",
@@ -1144,7 +1144,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-core"
-version = "0.21.5"
+version = "0.21.6"
 dependencies = [
  "blake3",
  "criterion",
@@ -1161,7 +1161,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-ground"
-version = "0.21.5"
+version = "0.21.6"
 dependencies = [
  "criterion",
  "ort",
@@ -1174,7 +1174,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-http"
-version = "0.21.5"
+version = "0.21.6"
 dependencies = [
  "axum",
  "clap",
@@ -1194,7 +1194,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-intent"
-version = "0.21.5"
+version = "0.21.6"
 dependencies = [
  "async-trait",
  "criterion",
@@ -1208,7 +1208,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-linux"
-version = "0.21.5"
+version = "0.21.6"
 dependencies = [
  "arboard",
  "ashpd",
@@ -1226,7 +1226,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-macos"
-version = "0.21.5"
+version = "0.21.6"
 dependencies = [
  "serde",
  "serde_json",
@@ -1236,7 +1236,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-mcp"
-version = "0.21.5"
+version = "0.21.6"
 dependencies = [
  "ghost-browser",
  "ghost-core",
@@ -1258,14 +1258,14 @@ dependencies = [
 
 [[package]]
 name = "ghost-platform"
-version = "0.21.5"
+version = "0.21.6"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "ghost-session"
-version = "0.21.5"
+version = "0.21.6"
 dependencies = [
  "async-trait",
  "ghost-browser",
@@ -1287,7 +1287,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-testbed"
-version = "0.21.5"
+version = "0.21.6"
 dependencies = [
  "windows",
 ]

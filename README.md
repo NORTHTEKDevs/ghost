@@ -5,13 +5,15 @@
 [![Release](https://img.shields.io/github/v/release/NORTHTEKDevs/ghost)](https://github.com/NORTHTEKDevs/ghost/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**The computer-use layer for AI agents, on Windows and Linux.** Ghost lets an
-agent operate any desktop app - including the ones with no API - **in the
-background without taking your screen or cursor**, and it **proves every action
-actually happened**.
+**Eyes and hands for coding agents, on Windows and Linux.** Ghost lets Claude Code,
+Codex, Cursor, or any harness that speaks MCP see and operate any desktop app -
+including the ones with no API - **in the background without taking your screen or
+cursor**, and it **proves every action actually happened**.
 
-Like Playwright, but for native desktop apps, and built for agents: an MCP server
-any model can mount to see and drive the desktop.
+Like Playwright, but for native desktop apps, and built for agents. The model
+driving Ghost is the one that looks: it reads the accessibility tree Ghost hands
+it, or a screenshot when pixels matter, and decides. Ghost's job is to perceive
+accurately, act precisely, and verify. **No vision API key is needed.**
 
 One MCP surface, two engines: Win32 UI Automation on Windows, AT-SPI2 over D-Bus
 on Linux. The verbs, the locator tiers and the act-then-verify loop are written
@@ -51,8 +53,13 @@ once and behave the same on both. [Platform support](#platforms) ·
 - **Drives apps with no API.** Legacy Win32, WPF, Electron, UWP, vendor portals - 
   the software that has no integration and most needs automating. No CDP, no
   browser, no app cooperation required.
-- **Model-agnostic.** Vision grounding works with any OpenAI-compatible model
-  (NVIDIA, OpenAI, Gemini, Groq, local vLLM/Ollama) or Anthropic. No vendor lock-in.
+- **Your agent already has eyes; Ghost does not need its own.** `ghost_see` returns
+  every element with its name, role, and on-screen centre, and `ghost_screenshot`
+  returns pixels when they matter. The model you are already running does the
+  looking. Ghost carries an optional built-in vision tier for callers that have no
+  model of their own (the CLI, the HTTP API, or a description like "the blue Submit
+  button" you would rather have Ghost resolve); it works with any OpenAI-compatible
+  or Anthropic endpoint and is off until you give it one.
 - **Accessibility-native and deep.** Real element discovery through the OS's own
   accessibility API - UI Automation on Windows, AT-SPI2 on Linux - not
   pixel-guessing. Elements come back with real names, roles and bounds.
@@ -64,15 +71,20 @@ Honest comparison vs Playwright-MCP / cua-driver / Computer Use:
 
 ## What is Ghost?
 
-Ghost gives you programmatic control over any desktop application - native Win32, Electron, WPF, UWP, GTK, Qt, or otherwise.
+Ghost is the layer between a model and the desktop. The model reasons; Ghost sees
+the screen the way the operating system does, acts on real controls without
+touching your foreground, and reports whether the action took. It gives
+programmatic control over any desktop application - native Win32, Electron, WPF,
+UWP, GTK, Qt, or otherwise - to an agent, a script, or a program.
 
 On **Windows** it uses UI Automation for element discovery, SendInput for keyboard/mouse injection, and DXGI/GDI for screen capture. On **Linux** it uses AT-SPI2 over D-Bus for discovery and actions, XTEST (X11) or the RemoteDesktop portal / uinput (Wayland) for input, and X11 `GetImage` or the Screenshot portal for capture. The Linux engine is pure Rust - no `-devel` packages to install.
 
 Ship it three ways:
 
+- **`ghost-mcp` server** - the primary surface: a Model Context Protocol server for
+  Claude Code, Claude Desktop, Codex, Cursor, and any MCP client (54 tools on Windows)
 - **`ghost` CLI** - one-shot commands, great for scripts and CI (`ghost click --name "Submit"`)
 - **`ghost-http` server** - local REST API, call it from Python, Node, curl, anything (`curl http://127.0.0.1:7878/list-windows`)
-- **`ghost-mcp` server** - Model Context Protocol server for Claude, Cursor, and any MCP client (54 tools on Windows)
 
 The MCP surface is 20 desktop verbs, 19 `ghost_browser_*` / `ghost_tab_*` tools for
 driving individual browser tabs in the background (Chrome, Comet, Edge, Brave), and
@@ -131,7 +143,7 @@ authorized to automate, and in line with the terms of the software you drive.
 **One-click - MCP Bundle (free).** Every release ships `ghost-windows-x64.mcpb` and
 `ghost-linux-x86_64.mcpb` on the [Releases page](https://github.com/NORTHTEKDevs/ghost/releases/latest).
 Open one in a client that supports MCP Bundles (Claude Desktop: *Settings -> Extensions ->
-Install from file*) and Ghost is registered, no PATH or config editing. Ghost is also listed in
+Install from file*) and Ghost is registered, no PATH or config editing, and no API key. Ghost is also listed in
 the [MCP registry](https://registry.modelcontextprotocol.io) as `io.github.NORTHTEKDevs/ghost`,
 so registry-aware clients can install it from there. The bundle holds the `ghost-mcp` server
 only; the CLI and HTTP server are in the archives below.
@@ -200,6 +212,79 @@ issue - it usually names the problem outright.
 - **Linux:** session type (X11/Wayland), AT-SPI bus reachability, whether
   applications are actually exposing accessible trees, the selected input
   backend, and screen capture.
+
+## Quick Start - coding agents and MCP clients
+
+This is the path Ghost is built for. Nothing to configure and no API key: the model
+you are already running is the vision model.
+
+**Claude Desktop:** download `ghost-windows-x64.mcpb` (or the Linux bundle) from the
+[latest release](https://github.com/NORTHTEKDevs/ghost/releases/latest) and open it:
+*Settings -> Extensions -> Install from file*.
+
+**Claude Code:**
+
+```bash
+claude mcp add ghost --scope user -- C:/path/to/ghost-mcp.exe
+```
+
+**Any other MCP client** (Codex, Cursor, a custom harness): register the binary as a
+stdio server.
+
+```json
+{
+  "mcpServers": {
+    "ghost": { "command": "C:/path/to/ghost-mcp.exe" }
+  }
+}
+```
+
+Ghost is also listed in the [MCP registry](https://registry.modelcontextprotocol.io)
+as `io.github.NORTHTEKDevs/ghost` for clients that install from there.
+
+**How an agent uses it.** The loop is look, act, confirm:
+
+1. `ghost_see window="Invoice Editor"` - every element in the window with its name,
+   role, enabled state, and on-screen centre. Text mode extracts the readable text
+   instead, roughly ten times cheaper in tokens than an image.
+2. `ghost_act window="Invoice Editor" name="Save" action="click"` - Ghost drives the
+   control in the background and returns `verified: true` only when the screen or
+   the control's value shows the action took.
+3. `ghost_screenshot window="Invoice Editor"` - pixels, for the moments a layout,
+   a chart, or a canvas needs the model's own eyes.
+
+Everything above works with no vision key. The model reads step 1 and step 3 and
+chooses; Ghost never has to guess what a picture means.
+
+54 tools on Windows (legacy names stay dispatchable): 20 desktop verbs covering
+see/snapshot/find/act/keys/scroll/drag/clipboard/screenshot/windows/shell/waits/query/run,
+19 `ghost_browser_*` / `ghost_tab_*` tools, and 15 Windows-only tools for the focus
+policy and isolated desktops. Building from source instead of downloading:
+`cargo build -p ghost-mcp --release`.
+
+Every tool runs on its own task, so a slow call does not block a fast one, and a
+second Ghost process can run alongside the first. Once it is mounted, run
+`ghost verify` to audit that on your own machine.
+
+### Shell control (`ghost_shell`)
+
+Ghost drives GUIs *and* the command line. `ghost_shell` runs terminal commands and
+persistent PowerShell sessions - builds, git, CLIs, file edits on hosts without file
+tools, or launching apps. `op=run` is a one-shot (`powershell`/`pwsh`/`cmd`); `op=open`
+starts a persistent PowerShell whose variables and cwd survive across `op=send` calls.
+Output is merged stdout+stderr, tail-capped for the agent's context window; a timed-out
+command keeps running and is drained with `op=read`; `ghost_stop` kills a runaway.
+`op=run` with the default `powershell` is served from a pre-spawned spare process, so
+a command costs about 85 ms instead of the 230-450 ms a fresh PowerShell start takes
+(the spare is single-use and replaced immediately; `GHOST_SHELL_WARM=off` disables it).
+
+Spawn a fresh Claude Code session from the agent:
+`ghost_shell op=run cmd='Start-Process wt -ArgumentList "pwsh","-NoExit","-Command","claude"'`,
+then drive the new terminal window with `ghost_see` / `ghost_act` / `ghost_key`.
+
+**Security:** shell access is powerful. Set `GHOST_SHELL=off` in the server's env to
+disable the verb entirely - every op then returns a clear refusal, leaving the GUI
+automation verbs fully usable.
 
 ## Quick Start - CLI
 
@@ -290,52 +375,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
-
-## Quick Start - Claude Desktop / MCP
-
-```bash
-cargo build -p ghost-mcp --release
-```
-
-Add to Claude Desktop config (`%APPDATA%\Claude\claude_desktop_config.json`):
-
-```json
-{
-  "mcpServers": {
-    "ghost": { "command": "C:/path/to/ghost-mcp.exe" }
-  }
-}
-```
-
-Works with any MCP client (Claude, Cursor, etc.). 54 tools on Windows (legacy names
-stay dispatchable): 20 desktop verbs covering
-see/snapshot/find/act/keys/scroll/drag/clipboard/screenshot/windows/shell/waits/query/run,
-19 `ghost_browser_*` / `ghost_tab_*` tools, and 15 Windows-only tools for the focus
-policy and isolated desktops.
-
-Every tool runs on its own task, so a slow call does not block a fast one, and a
-second Ghost process can run alongside the first. Once it is mounted, run
-`ghost verify` to audit that on your own machine.
-
-### Shell control (`ghost_shell`)
-
-Ghost drives GUIs *and* the command line. `ghost_shell` runs terminal commands and
-persistent PowerShell sessions - builds, git, CLIs, file edits on hosts without file
-tools, or launching apps. `op=run` is a one-shot (`powershell`/`pwsh`/`cmd`); `op=open`
-starts a persistent PowerShell whose variables and cwd survive across `op=send` calls.
-Output is merged stdout+stderr, tail-capped for the agent's context window; a timed-out
-command keeps running and is drained with `op=read`; `ghost_stop` kills a runaway.
-`op=run` with the default `powershell` is served from a pre-spawned spare process, so
-a command costs about 85 ms instead of the 230-450 ms a fresh PowerShell start takes
-(the spare is single-use and replaced immediately; `GHOST_SHELL_WARM=off` disables it).
-
-Spawn a fresh Claude Code session from the agent:
-`ghost_shell op=run cmd='Start-Process wt -ArgumentList "pwsh","-NoExit","-Command","claude"'`,
-then drive the new terminal window with `ghost_see` / `ghost_act` / `ghost_key`.
-
-**Security:** shell access is powerful. Set `GHOST_SHELL=off` in the server's env to
-disable the verb entirely - every op then returns a clear refusal, leaving the GUI
-automation verbs fully usable.
 
 ## Reliability Model
 
@@ -468,13 +507,26 @@ modifier that apps reading `GetKeyState` would ignore. Combos outside that set a
 rejected rather than silently dropped, because posting cannot set the modifier state
 those apps read; use the `foreground` policy for them.
 
-## Vision is model-agnostic
+## Vision: your agent is the model
 
-Description-based grounding works with any tool-capable vision model behind an
-OpenAI-compatible endpoint - NVIDIA (free default), OpenAI, Gemini, Groq, or a
-local vLLM / Ollama / LM Studio server - or Anthropic. Point `GHOST_VISION_BASE_URL`
-+ `GHOST_VISION_MODEL` at your endpoint and set `GHOST_VISION_API_KEY` (a keyless
-local server needs only the base URL). No vendor lock-in.
+Ghost is eyes and hands, not a brain. When a model drives it over MCP, that model
+does the looking: `ghost_see` gives it the window as structured elements with
+coordinates, `ghost_see mode=text` gives it the readable text, and
+`ghost_screenshot` gives it pixels when the structure is not enough. Claude, GPT,
+Gemini, and the strong open-weight vision models all read those directly. There is
+no key to set and nothing to configure, and Ghost never has to interpret an image
+on the model's behalf.
+
+**The optional built-in vision tier** exists for callers that have no model of their
+own - the CLI, the HTTP API, an intent file - and for the convenience of a
+description target (`ghost_find description="the blue Submit button"`) when you would
+rather have Ghost resolve it than read the tree yourself. It works with any
+tool-capable vision model behind an OpenAI-compatible endpoint (OpenAI, Gemini, Groq,
+NVIDIA, or a local vLLM / Ollama / LM Studio server) or Anthropic. Point
+`GHOST_VISION_BASE_URL` and `GHOST_VISION_MODEL` at the endpoint and set
+`GHOST_VISION_API_KEY` (a keyless local server needs only the base URL). Without it,
+description targets return a clear error naming the alternative; every other tool is
+unaffected.
 
 ## Emergency Stop
 
@@ -537,7 +589,10 @@ Supporting crates: `ghost-cache` (UIA snapshot + delta), `ghost-intent` (FSM +
 JSONLogic executor), `ghost-ground` (the locator tier cascade), `ghost-platform`
 (the capability matrix reported per OS).
 
-## Vision grounding (Set-of-Marks)
+## The built-in vision tier (Set-of-Marks)
+
+This section describes the optional tier above; an agent driving Ghost over MCP
+gets the same information from `ghost_see` and does not need it.
 
 When you locate an element by natural-language description (`ghost_find
 description="the blue submit button"`, or when a name/text lookup misses and

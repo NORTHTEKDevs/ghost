@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.21.6] - says what it is: eyes and hands for coding agents, no vision key
+
+- **The README, the bundle manifest and the registry entry now describe Ghost
+  correctly.** Ghost is the layer between a model and the desktop. The model
+  driving it over MCP does the looking - `ghost_see` for elements with
+  coordinates, `ghost_see mode=text` for readable text, `ghost_screenshot` for
+  pixels - and Ghost perceives, acts in the background, and verifies. The
+  previous copy led with "optional vision API key", which a first-time reader
+  parsed as "needs a key". It does not. The built-in vision tier is documented
+  as what it is: an optional convenience for callers with no model of their own
+  (CLI, HTTP, intent files) and for description targets. The MCP quick start now
+  opens with the agent's look-act-confirm loop and the bundle install, not with
+  `cargo build`.
+- No code changed. Documentation, manifest text and registry text only.
+
 ## [0.21.5] - binaries that say who built them, and no more reading other processes' memory
 
 - **Every Windows binary carries a version resource and an application

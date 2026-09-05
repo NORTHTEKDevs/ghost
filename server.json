@@ -2,11 +2,11 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.NORTHTEKDevs/ghost",
   "title": "Ghost",
-  "description": "Computer-use MCP server for Windows and Linux: drives any desktop app or browser in the background.",
+  "description": "Eyes and hands for coding agents on Windows and Linux: see and drive any desktop app, verified.",
   "repository": {
     "url": "https://github.com/NORTHTEKDevs/ghost",
     "source": "github"
   },
-  "version": "0.21.5",
+  "version": "0.21.6",
   "websiteUrl": "https://github.com/NORTHTEKDevs/ghost"
 }

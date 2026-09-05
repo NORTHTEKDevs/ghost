@@ -3,8 +3,8 @@
   "name": "ghost",
   "display_name": "Ghost",
   "version": "0.0.0",
-  "description": "Computer-use MCP server for Windows and Linux: drives any desktop app or browser in the background.",
-  "long_description": "Ghost drives any desktop application (Win32, WPF, UWP, Electron, GTK, Qt), including ones with no API, without stealing your focus or moving your cursor, and verifies every action before it reports success. It drives your own browser through the DevTools protocol when one is open with a debugging port, and its vision grounding is model-agnostic: the local tiers (UI Automation, OCR, pixel diff) work with no API key at all.\n\nThis bundle contains the `ghost-mcp` server binary for one platform. The full toolkit (CLI, HTTP server, source, Linux setup notes) is on the releases page.",
+  "description": "Eyes and hands for coding agents on Windows and Linux: see and drive any desktop app in the background.",
+  "long_description": "Ghost is the layer between a model and the desktop. The model you are already running does the looking: ghost_see returns every element in a window with its name, role and on-screen centre, ghost_see mode=text returns the readable text, and ghost_screenshot returns pixels when they matter. Ghost acts on real controls without stealing your focus or cursor, and reports verified: true only when the action demonstrably took. No vision API key is needed.\n\nIt drives any desktop application (Win32, WPF, UWP, Electron, GTK, Qt), including ones with no API, and your own browser through the DevTools protocol when one is open with a debugging port. This bundle contains the ghost-mcp server binary for one platform; the CLI, HTTP server, source and Linux setup notes are on the releases page.",
   "author": {
     "name": "Northtek",
     "email": "info@northtek.io",
@@ -28,16 +28,26 @@
       }
     }
   },
-  "keywords": ["computer-use", "desktop-automation", "ui-automation", "windows", "linux", "background", "agents"],
+  "keywords": [
+    "computer-use",
+    "desktop-automation",
+    "ui-automation",
+    "windows",
+    "linux",
+    "background",
+    "agents"
+  ],
   "license": "MIT",
   "compatibility": {
-    "platforms": ["win32"]
+    "platforms": [
+      "win32"
+    ]
   },
   "user_config": {
     "vision_api_key": {
       "type": "string",
-      "title": "Vision API key (optional)",
-      "description": "Key for an OpenAI-compatible vision model, used only for the vision grounding tier. Leave empty to run with the local tiers (UI Automation, OCR, pixel diff), which need no key.",
+      "title": "Vision API key for the optional built-in tier (not needed for agents)",
+      "description": "Leave empty. The model driving Ghost reads ghost_see and ghost_screenshot itself. This key only enables Ghost's optional built-in vision tier for description targets such as \"the blue Submit button\" (any OpenAI-compatible vision endpoint).",
       "sensitive": true,
       "required": false
     }

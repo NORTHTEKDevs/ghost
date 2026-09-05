@@ -90,7 +90,7 @@ jobs:
           jq --arg wurl "$base/ghost-windows-x64.mcpb" --arg wsha "$win"              --arg lurl "$base/ghost-linux-x86_64.mcpb" --arg lsha "$lin" '
             def env: [{
               "name": "GHOST_VISION_API_KEY",
-              "description": "Optional. Key for an OpenAI-compatible vision model (or OPENAI_API_KEY / NVIDIA_API_KEY / ANTHROPIC_API_KEY). The local tiers work with no key.",
+              "description": "Not needed for agents: the model driving Ghost reads ghost_see and ghost_screenshot itself. Only enables the optional built-in vision tier for description targets (any OpenAI-compatible vision endpoint).",
               "isRequired": false, "isSecret": true }];
             .packages = [
               { "registryType": "mcpb", "identifier": $wurl, "fileSha256": $wsha,
