@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.21.4] - one-click install: MCP Bundles, and a registry entry that installs
+
+- **Every release ships MCP Bundles.** `ghost-windows-x64.mcpb` and
+  `ghost-linux-x86_64.mcpb` contain the `ghost-mcp` server and a manifest;
+  open one in a client that supports bundles (Claude Desktop: Settings ->
+  Extensions -> Install from file) and Ghost is registered with no PATH or
+  config editing. The optional vision API key is a bundle setting, marked
+  sensitive. Each manifest is validated against the bundle schema before it
+  is packed.
+- **The registry entry is installable.** Ghost was listed in the MCP registry
+  for the first time in 0.21.3, as a repository-only entry. The registry
+  workflow now reads both bundle checksums off the published release and adds
+  two `mcpb` packages pinned by `fileSha256`, so registry-aware clients can
+  install Ghost directly and verify what they downloaded.
+- The workspace is now on one version (0.21.3), the crash on windows-latest
+  is root-caused (0.21.2), and this release changes no server behaviour: it
+  is packaging and publishing only.
+
 ## [0.21.3] - one version number
 
 - **Every binary reports the release version.** `ghost --version` said 0.3.0,

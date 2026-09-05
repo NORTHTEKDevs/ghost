@@ -68,6 +68,39 @@ jobs:
           echo "::error::release $TAG did not appear within 20 minutes; not publishing a version nobody can download"
           exit 1
 
+      - name: Attach the MCP Bundles from the release
+        # The committed server.json is listing-only because a bundle's checksum
+        # is only known once the release has built it. Read both checksums off
+        # the published release assets and add the two `mcpb` packages here,
+        # so the registry entry is installable and pinned to exactly the files
+        # on that release. Fails loudly if a bundle is missing rather than
+        # publishing a half-installable entry.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p sums
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir sums             --pattern 'ghost-windows-x64.mcpb.sha256' --pattern 'ghost-linux-x86_64.mcpb.sha256'
+          win=$(cut -d' ' -f1 sums/ghost-windows-x64.mcpb.sha256)
+          lin=$(cut -d' ' -f1 sums/ghost-linux-x86_64.mcpb.sha256)
+          [[ "$win" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::bad windows bundle checksum: $win"; exit 1; }
+          [[ "$lin" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::bad linux bundle checksum: $lin"; exit 1; }
+          base="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG"
+          jq --arg wurl "$base/ghost-windows-x64.mcpb" --arg wsha "$win"              --arg lurl "$base/ghost-linux-x86_64.mcpb" --arg lsha "$lin" '
+            def env: [{
+              "name": "GHOST_VISION_API_KEY",
+              "description": "Optional. Key for an OpenAI-compatible vision model (or OPENAI_API_KEY / NVIDIA_API_KEY / ANTHROPIC_API_KEY). The local tiers work with no key.",
+              "isRequired": false, "isSecret": true }];
+            .packages = [
+              { "registryType": "mcpb", "identifier": $wurl, "fileSha256": $wsha,
+                "transport": { "type": "stdio" }, "environmentVariables": env },
+              { "registryType": "mcpb", "identifier": $lurl, "fileSha256": $lsha,
+                "transport": { "type": "stdio" }, "environmentVariables": env }
+            ]' server.json > server.tmp
+          mv server.tmp server.json
+          jq . server.json
+
       - name: Install mcp-publisher (pinned)
         # Pinned by version AND checksum. `releases/latest/download` would pull
         # whatever was published last, which is exactly what a supply-chain

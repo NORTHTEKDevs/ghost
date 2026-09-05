@@ -1,0 +1,45 @@
+{
+  "manifest_version": "0.3",
+  "name": "ghost",
+  "display_name": "Ghost",
+  "version": "0.0.0",
+  "description": "Computer-use MCP server for Windows and Linux: drives any desktop app or browser in the background.",
+  "long_description": "Ghost drives any desktop application (Win32, WPF, UWP, Electron, GTK, Qt), including ones with no API, without stealing your focus or moving your cursor, and verifies every action before it reports success. It drives your own browser through the DevTools protocol when one is open with a debugging port, and its vision grounding is model-agnostic: the local tiers (UI Automation, OCR, pixel diff) work with no API key at all.\n\nThis bundle contains the `ghost-mcp` server binary for one platform. The full toolkit (CLI, HTTP server, source, Linux setup notes) is on the releases page.",
+  "author": {
+    "name": "Northtek",
+    "email": "info@northtek.io",
+    "url": "https://northtek.io/ghost"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/NORTHTEKDevs/ghost.git"
+  },
+  "homepage": "https://northtek.io/ghost",
+  "documentation": "https://github.com/NORTHTEKDevs/ghost#readme",
+  "support": "https://github.com/NORTHTEKDevs/ghost/issues",
+  "server": {
+    "type": "binary",
+    "entry_point": "ghost-mcp",
+    "mcp_config": {
+      "command": "${__dirname}/ghost-mcp",
+      "args": [],
+      "env": {
+        "GHOST_VISION_API_KEY": "${user_config.vision_api_key}"
+      }
+    }
+  },
+  "keywords": ["computer-use", "desktop-automation", "ui-automation", "windows", "linux", "background", "agents"],
+  "license": "MIT",
+  "compatibility": {
+    "platforms": ["win32"]
+  },
+  "user_config": {
+    "vision_api_key": {
+      "type": "string",
+      "title": "Vision API key (optional)",
+      "description": "Key for an OpenAI-compatible vision model, used only for the vision grounding tier. Leave empty to run with the local tiers (UI Automation, OCR, pixel diff), which need no key.",
+      "sensitive": true,
+      "required": false
+    }
+  }
+}

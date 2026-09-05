@@ -128,6 +128,14 @@ authorized to automate, and in line with the terms of the software you drive.
 
 ## Install
 
+**One-click - MCP Bundle (free).** Every release ships `ghost-windows-x64.mcpb` and
+`ghost-linux-x86_64.mcpb` on the [Releases page](https://github.com/NORTHTEKDevs/ghost/releases/latest).
+Open one in a client that supports MCP Bundles (Claude Desktop: *Settings -> Extensions ->
+Install from file*) and Ghost is registered, no PATH or config editing. Ghost is also listed in
+the [MCP registry](https://registry.modelcontextprotocol.io) as `io.github.NORTHTEKDevs/ghost`,
+so registry-aware clients can install it from there. The bundle holds the `ghost-mcp` server
+only; the CLI and HTTP server are in the archives below.
+
 **Option A - Prebuilt binaries (free).** Every release ships signed-by-checksum
 archives for both platforms on the
 [Releases page](https://github.com/NORTHTEKDevs/ghost/releases/latest):

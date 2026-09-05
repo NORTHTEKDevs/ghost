@@ -17,3 +17,6 @@ target-kit/
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/
+
+# Side build directories (e.g. target-cert/ when target/release is locked by a running server)
+target-*/

@@ -41,12 +41,34 @@ jobs:
           (Get-FileHash ghost-windows-x64.zip -Algorithm SHA256).Hash.ToLower() `
             + "  ghost-windows-x64.zip" | Out-File -Encoding ascii ghost-windows-x64.zip.sha256
 
+      - name: Pack the MCP Bundle (.mcpb)
+        # One-click install for clients that support MCP Bundles (Claude Desktop
+        # and others): manifest + the server binary, validated against the
+        # bundle schema before it is packed. The registry lists this file.
+        shell: pwsh
+        run: |
+          $version = "${env:GITHUB_REF}" -replace '^refs/tags/v', ''
+          New-Item -ItemType Directory -Force -Path bundle | Out-Null
+          jq --arg v $version --arg e 'ghost-mcp.exe' --arg p 'win32' `
+            '.version = $v | .server.entry_point = $e | .server.mcp_config.command = ("${__dirname}/" + $e) | .compatibility.platforms = [$p]' `
+            mcpb/manifest.template.json > bundle/manifest.json
+          Copy-Item target/release/ghost-mcp.exe bundle/
+          Copy-Item LICENSE bundle/
+          Copy-Item README.md bundle/
+          npx --yes @anthropic-ai/mcpb@2.1.2 validate bundle/manifest.json
+          npx --yes @anthropic-ai/mcpb@2.1.2 pack bundle ghost-windows-x64.mcpb
+          (Get-FileHash ghost-windows-x64.mcpb -Algorithm SHA256).Hash.ToLower() `
+            + "  ghost-windows-x64.mcpb" | Out-File -Encoding ascii ghost-windows-x64.mcpb.sha256
+          Get-Item ghost-windows-x64.mcpb | Select-Object Name, Length
+
       - uses: actions/upload-artifact@v4
         with:
           name: ghost-windows-x64
           path: |
             ghost-windows-x64.zip
             ghost-windows-x64.zip.sha256
+            ghost-windows-x64.mcpb
+            ghost-windows-x64.mcpb.sha256
 
   linux:
     name: Build Linux binaries
@@ -94,12 +116,29 @@ jobs:
           tar -czf ghost-linux-x86_64.tar.gz -C dist .
           sha256sum ghost-linux-x86_64.tar.gz > ghost-linux-x86_64.tar.gz.sha256
 
+      - name: Pack the MCP Bundle (.mcpb)
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF#refs/tags/v}"
+          mkdir -p bundle
+          jq --arg v "$version" --arg e 'ghost-mcp' --arg p 'linux' \
+            '.version = $v | .server.entry_point = $e | .server.mcp_config.command = ("${__dirname}/" + $e) | .compatibility.platforms = [$p]' \
+            mcpb/manifest.template.json > bundle/manifest.json
+          cp target/release/ghost-mcp LICENSE README.md bundle/
+          chmod +x bundle/ghost-mcp
+          npx --yes @anthropic-ai/mcpb@2.1.2 validate bundle/manifest.json
+          npx --yes @anthropic-ai/mcpb@2.1.2 pack bundle ghost-linux-x86_64.mcpb
+          sha256sum ghost-linux-x86_64.mcpb > ghost-linux-x86_64.mcpb.sha256
+          ls -l ghost-linux-x86_64.mcpb
+
       - uses: actions/upload-artifact@v4
         with:
           name: ghost-linux-x86_64
           path: |
             ghost-linux-x86_64.tar.gz
             ghost-linux-x86_64.tar.gz.sha256
+            ghost-linux-x86_64.mcpb
+            ghost-linux-x86_64.mcpb.sha256
 
   publish:
     name: Publish release
@@ -117,7 +156,7 @@ jobs:
       - name: Collect artifacts
         run: |
           mkdir -p release
-          find artifacts -type f \( -name '*.zip' -o -name '*.tar.gz' -o -name '*.sha256' \) \
+          find artifacts -type f \( -name '*.zip' -o -name '*.tar.gz' -o -name '*.mcpb' -o -name '*.sha256' \) \
             -exec cp {} release/ \;
           ls -la release
 
@@ -128,6 +167,12 @@ jobs:
           generate_release_notes: true
           body: |
             ## Install
+
+            **One-click (MCP Bundle).** Download `ghost-windows-x64.mcpb` or
+            `ghost-linux-x86_64.mcpb` and open it in a client that supports MCP
+            Bundles (Claude Desktop: Settings -> Extensions -> Install from file).
+            It contains the `ghost-mcp` server and nothing else; the CLI and HTTP
+            server are in the archives below.
 
             **Linux** (x86_64) — needs `at-spi2-core` and a desktop session:
 

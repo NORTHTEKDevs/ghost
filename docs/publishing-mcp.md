@@ -9,17 +9,18 @@ agent or user finds Ghost without already knowing it exists.
 - [`server.json`](../server.json) - the registry manifest (name, title, description,
   repository, version, website).
 
-It is a **listing-only** entry on purpose. The registry's package types are
-`npm`, `pypi`, `oci`, `nuget` and `mcpb`; there is no package type for "prebuilt
-binaries on a GitHub release", and the manifest that carried
-`"registryType": "github"` was rejected by `mcp-publisher validate` for exactly
-that reason (checked 2026-09-04 against schema 2025-12-11). A listing with no
-`packages` block validates and publishes, and points people at the repository,
-where the README carries the download, install and env-var instructions.
-
-To become installable from the registry itself, ship an `.mcpb` bundle
-(manifest + binary, `fileSha256` pinned) as a release asset and add an `mcpb`
-package entry. That is a release-pipeline change, tracked separately.
+The committed file is **listing-only** (name, description, repository, version);
+the installable part is added at publish time. The registry's package types are
+`npm`, `pypi`, `oci`, `nuget` and `mcpb` - there is no type for "binaries on a
+GitHub release", and a manifest that once said `"registryType": "github"` was
+rejected by `mcp-publisher validate` for exactly that reason. Ghost ships
+`mcpb`: the release workflow packs `ghost-windows-x64.mcpb` and
+`ghost-linux-x86_64.mcpb` (manifest from `mcpb/manifest.template.json` + the
+`ghost-mcp` binary, validated with `@anthropic-ai/mcpb` before packing), and the
+registry workflow reads their checksums off the published release and adds two
+`mcpb` packages pinned by `fileSha256` before it publishes. A bundle's checksum
+is only known after the release builds it, which is why the packages are not in
+the committed file.
 
 ## How it publishes
 
