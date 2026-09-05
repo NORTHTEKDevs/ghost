@@ -156,8 +156,9 @@ checksum, unzip, and add the folder to your `PATH`. Then run `ghost doctor`.
 two minutes. Every kit is built by `scripts/package-kit.ps1`, which refuses to package unless the full live
 desktop suite passes. Get it at **[northtek.io/ghost](https://northtek.io/ghost)**.
 
-The binaries are **not code-signed**, so Windows SmartScreen will warn you on first run (click *More info*
-→ *Run anyway*). The kit buys convenience, not capability - everything Ghost can do is in the free source
+The binaries are **not code-signed yet**, so Windows SmartScreen will warn you on first run (click *More info*
+→ *Run anyway*). The release pipeline signs them the moment a signing identity is configured; see
+[`docs/code-signing.md`](docs/code-signing.md). The kit buys convenience, not capability - everything Ghost can do is in the free source
 below, and building it yourself takes one command.
 
 **Option C - Build from source (free, MIT).** Ghost is open source. Compile it yourself:

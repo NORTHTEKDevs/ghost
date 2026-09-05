@@ -16,6 +16,11 @@ jobs:
   windows:
     name: Build Windows binaries
     runs-on: windows-latest
+    env:
+      # Code signing switches itself on when the Azure Artifact Signing secrets
+      # exist (docs/code-signing.md). Until then the binaries ship unsigned and
+      # SmartScreen warns on first run, which the README says.
+      SIGNING_ENABLED: ${{ secrets.AZURE_CLIENT_ID != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -26,6 +31,44 @@ jobs:
 
       - name: Build release binaries
         run: cargo build --release --bin ghost --bin ghost-http --bin ghost-mcp
+
+      - name: Sign the Windows binaries (Azure Artifact Signing)
+        # Signs in place, BEFORE staging, so the archive and the .mcpb both carry
+        # signed executables. Timestamped, so the signature outlives the cert.
+        if: env.SIGNING_ENABLED == 'true'
+        uses: azure/trusted-signing-action@v2.0.0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.SIGNING_PROFILE }}
+          files: |
+            ${{ github.workspace }}/target/release/ghost.exe
+            ${{ github.workspace }}/target/release/ghost-http.exe
+            ${{ github.workspace }}/target/release/ghost-mcp.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Verify the signatures
+        # A signing step that "succeeded" is not evidence; a Valid Authenticode
+        # status on every binary is. Fails the release otherwise.
+        if: env.SIGNING_ENABLED == 'true'
+        shell: pwsh
+        run: |
+          $bad = @()
+          foreach ($f in 'ghost.exe', 'ghost-http.exe', 'ghost-mcp.exe') {
+            $sig = Get-AuthenticodeSignature "target/release/$f"
+            "$f : $($sig.Status) : $($sig.SignerCertificate.Subject)"
+            if ($sig.Status -ne 'Valid') { $bad += $f }
+          }
+          if ($bad.Count) { Write-Error "unsigned or invalid: $($bad -join ', ')"; exit 1 }
+
+      - name: Signing skipped
+        if: env.SIGNING_ENABLED != 'true'
+        run: echo "::notice::Windows binaries are UNSIGNED - add the Azure Artifact Signing secrets (docs/code-signing.md) and they sign on the next tag."
 
       - name: Stage artifacts
         shell: pwsh
