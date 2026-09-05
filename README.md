@@ -158,7 +158,9 @@ desktop suite passes. Get it at **[northtek.io/ghost](https://northtek.io/ghost)
 
 The binaries are **not code-signed yet**, so Windows SmartScreen will warn you on first run (click *More info*
 → *Run anyway*). The release pipeline signs them the moment a signing identity is configured; see
-[`docs/code-signing.md`](docs/code-signing.md). The kit buys convenience, not capability - everything Ghost can do is in the free source
+[`docs/code-signing.md`](docs/code-signing.md). If an antivirus engine quarantines a release, verify the
+checksum and see [`docs/antivirus.md`](docs/antivirus.md) for what the binaries do to stay recognisable and how
+to report a false positive. The kit buys convenience, not capability - everything Ghost can do is in the free source
 below, and building it yourself takes one command.
 
 **Option C - Build from source (free, MIT).** Ghost is open source. Compile it yourself:

@@ -2,6 +2,7 @@
 name = "ghost-cli"
 version.workspace = true
 edition = "2021"
+build = "build.rs"
 description = "Command-line interface for Ghost desktop automation on Windows and Linux"
 keywords = ["automation", "windows", "cli", "desktop"]
 categories = ["command-line-utilities", "os::windows-apis"]
@@ -31,3 +32,6 @@ ghost-linux = { path = "../ghost-linux" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 ghost-macos = { path = "../ghost-macos" }
+
+[build-dependencies]
+winresource = "0.1.31"

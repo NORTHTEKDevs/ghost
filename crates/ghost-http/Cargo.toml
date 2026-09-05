@@ -2,6 +2,7 @@
 name = "ghost-http"
 version.workspace = true
 edition = "2021"
+build = "build.rs"
 description = "HTTP REST server for Ghost desktop automation on Windows and Linux"
 keywords = ["automation", "windows", "http", "rest"]
 categories = ["web-programming::http-server", "os::windows-apis"]
@@ -32,3 +33,6 @@ ghost-linux = { path = "../ghost-linux" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 ghost-macos = { path = "../ghost-macos" }
+
+[build-dependencies]
+winresource = "0.1.31"

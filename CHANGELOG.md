@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.21.5] - binaries that say who built them, and no more reading other processes' memory
+
+- **Every Windows binary carries a version resource and an application
+  manifest.** Company, product, file description, version and repository URL,
+  plus `asInvoker`, Windows 10/11 support, per-monitor DPI awareness and long
+  paths. Rust binaries ship with none of this unless the build adds it, and an
+  executable with no metadata is the single most common trait antivirus
+  heuristics use to score a file as a dropper. The shipped 0.21.4
+  `ghost-mcp.exe` had empty CompanyName, ProductName, FileDescription and
+  FileVersion, and no resources at all. Built by `crates/*/build.rs` with
+  `winresource`; a no-op on every non-Windows target.
+- **Command lines are read without `ReadProcessMemory`.** The orphan sweep and
+  the CDP router read a process's command line to recognise Ghost-launched
+  browsers and `--remote-debugging-port`. That used to walk the target's PEB
+  with `ReadProcessMemory` under `PROCESS_VM_READ` - the exact API triad
+  credential dumpers and injectors use, and one antivirus engines weight
+  heavily. It now uses `NtQueryInformationProcess(ProcessCommandLineInformation)`
+  with `PROCESS_QUERY_LIMITED_INFORMATION`: one documented call, least
+  privilege, and it works for 32-bit targets too, which the PEB walk refused.
+  `ReadProcessMemory` is no longer in the import table. Two new tests read
+  another process's command line by a marker only it carries, and prove a dead
+  pid reads as `None`.
+- `docs/antivirus.md` records what the binaries do to stay recognisable, how
+  to verify a download, and how to report a false positive to a vendor.
+
 ## [0.21.4] - one-click install: MCP Bundles, and a registry entry that installs
 
 - **Every release ships MCP Bundles.** `ghost-windows-x64.mcpb` and

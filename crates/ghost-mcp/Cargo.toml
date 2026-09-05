@@ -2,6 +2,7 @@
 name = "ghost-mcp"
 version.workspace = true
 edition = "2021"
+build = "build.rs"
 description = "MCP server binary exposing 54 Ghost desktop, browser, and shell automation tools over stdio JSON-RPC"
 keywords = ["automation", "windows", "mcp", "agent", "claude"]
 categories = ["os::windows-apis", "command-line-utilities"]
@@ -34,3 +35,6 @@ ghost-linux = { path = "../ghost-linux" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 ghost-macos = { path = "../ghost-macos" }
+
+[build-dependencies]
+winresource = "0.1.31"

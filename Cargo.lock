@@ -1095,7 +1095,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-browser"
-version = "0.21.4"
+version = "0.21.5"
 dependencies = [
  "base64",
  "futures-util",
@@ -1111,7 +1111,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-cache"
-version = "0.21.4"
+version = "0.21.5"
 dependencies = [
  "blake3",
  "crossbeam-channel",
@@ -1125,7 +1125,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-cli"
-version = "0.21.4"
+version = "0.21.5"
 dependencies = [
  "clap",
  "ghost-core",
@@ -1139,11 +1139,12 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "windows",
+ "winresource",
 ]
 
 [[package]]
 name = "ghost-core"
-version = "0.21.4"
+version = "0.21.5"
 dependencies = [
  "blake3",
  "criterion",
@@ -1160,7 +1161,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-ground"
-version = "0.21.4"
+version = "0.21.5"
 dependencies = [
  "criterion",
  "ort",
@@ -1173,7 +1174,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-http"
-version = "0.21.4"
+version = "0.21.5"
 dependencies = [
  "axum",
  "clap",
@@ -1188,11 +1189,12 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "winresource",
 ]
 
 [[package]]
 name = "ghost-intent"
-version = "0.21.4"
+version = "0.21.5"
 dependencies = [
  "async-trait",
  "criterion",
@@ -1206,7 +1208,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-linux"
-version = "0.21.4"
+version = "0.21.5"
 dependencies = [
  "arboard",
  "ashpd",
@@ -1224,7 +1226,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-macos"
-version = "0.21.4"
+version = "0.21.5"
 dependencies = [
  "serde",
  "serde_json",
@@ -1234,7 +1236,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-mcp"
-version = "0.21.4"
+version = "0.21.5"
 dependencies = [
  "ghost-browser",
  "ghost-core",
@@ -1251,18 +1253,19 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "windows",
+ "winresource",
 ]
 
 [[package]]
 name = "ghost-platform"
-version = "0.21.4"
+version = "0.21.5"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "ghost-session"
-version = "0.21.4"
+version = "0.21.5"
 dependencies = [
  "async-trait",
  "ghost-browser",
@@ -1284,7 +1287,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-testbed"
-version = "0.21.4"
+version = "0.21.5"
 dependencies = [
  "windows",
 ]
@@ -2749,6 +2752,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_spanned"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6662b5879511e06e8999a8a235d848113e942c9124f211511b16466ee2995f26"
+dependencies = [
+ "serde_core",
+]
+
+[[package]]
 name = "serde_urlencoded"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3141,6 +3153,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "toml"
+version = "1.1.5+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12c0ba9680044b4ce98d391a62094047eada0d64860b80166c39f4a6b5640785"
+dependencies = [
+ "indexmap",
+ "serde_core",
+ "serde_spanned",
+ "toml_datetime",
+ "toml_parser",
+ "toml_writer",
+ "winnow",
+]
+
+[[package]]
 name = "toml_datetime"
 version = "1.1.1+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3169,6 +3196,12 @@ checksum = "1d38ac1cf9b95face32296c0a3ede1fdc270627c9d9c02a7274dd6d960dc4d56"
 dependencies = [
  "winnow",
 ]
+
+[[package]]
+name = "toml_writer"
+version = "1.1.2+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d56353a2a665ad0f41a421187180aab746c8c325620617ad883a99a1cbe66d2"
 
 [[package]]
 name = "tower"
@@ -3893,6 +3926,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "winresource"
+version = "0.1.31"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0986a8b1d586b7d3e4fe3d9ea39fb451ae22869dcea4aa109d287a374d866087"
+dependencies = [
+ "toml",
+ "version_check",
 ]
 
 [[package]]
