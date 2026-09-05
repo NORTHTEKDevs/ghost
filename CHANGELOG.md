@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.21.7] - the whole desktop, not just eyes
+
+- **The README says what Ghost is actually used for.** 0.21.6 led with "eyes and
+  hands for coding agents", which undersold it: in a real session an agent calls
+  Ghost mostly to act on apps with no API, manage windows and processes, run
+  commands through `ghost_shell`, drive the browser it is already signed into,
+  read state back, and assert results. The top of the README now frames Ghost as
+  verified control of the whole desktop for agents and programs, a new "What
+  people use it for" section lists the nine use cases with their tools and
+  typical callers, the agent quick start names the non-vision verbs after the
+  look-act-confirm loop, and "no vision key" is one sentence rather than the
+  headline. The bundle manifest and the registry entry say the same.
+- No code changed. Documentation, manifest text and registry text only.
+
 ## [0.21.6] - says what it is: eyes and hands for coding agents, no vision key
 
 - **The README, the bundle manifest and the registry entry now describe Ghost

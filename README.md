@@ -5,15 +5,15 @@
 [![Release](https://img.shields.io/github/v/release/NORTHTEKDevs/ghost)](https://github.com/NORTHTEKDevs/ghost/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**Eyes and hands for coding agents, on Windows and Linux.** Ghost lets Claude Code,
-Codex, Cursor, or any harness that speaks MCP see and operate any desktop app -
-including the ones with no API - **in the background without taking your screen or
-cursor**, and it **proves every action actually happened**.
+**Verified control of the whole desktop, for agents and programs, on Windows and
+Linux.** Ghost gives Claude Code, Codex, Cursor, any MCP harness, or a plain script
+the operating system's own control surface: the apps with no API, the windows, the
+shell, and the browser you are already logged into - **in the background without
+taking your screen or cursor**, with **every action proven to have happened**.
 
-Like Playwright, but for native desktop apps, and built for agents. The model
-driving Ghost is the one that looks: it reads the accessibility tree Ghost hands
-it, or a screenshot when pixels matter, and decides. Ghost's job is to perceive
-accurately, act precisely, and verify. **No vision API key is needed.**
+Like Playwright, but for the native desktop, and built for agents. Ghost does the
+perceiving, the acting, and the verifying; the model you are already running does
+any looking that is needed, so there is no vision API key to set.
 
 One MCP surface, two engines: Win32 UI Automation on Windows, AT-SPI2 over D-Bus
 on Linux. The verbs, the locator tiers and the act-then-verify loop are written
@@ -53,13 +53,10 @@ once and behave the same on both. [Platform support](#platforms) ·
 - **Drives apps with no API.** Legacy Win32, WPF, Electron, UWP, vendor portals - 
   the software that has no integration and most needs automating. No CDP, no
   browser, no app cooperation required.
-- **Your agent already has eyes; Ghost does not need its own.** `ghost_see` returns
-  every element with its name, role, and on-screen centre, and `ghost_screenshot`
-  returns pixels when they matter. The model you are already running does the
-  looking. Ghost carries an optional built-in vision tier for callers that have no
-  model of their own (the CLI, the HTTP API, or a description like "the blue Submit
-  button" you would rather have Ghost resolve); it works with any OpenAI-compatible
-  or Anthropic endpoint and is off until you give it one.
+- **No vision key.** The model driving Ghost reads `ghost_see` (every element with
+  its name, role and on-screen centre) or `ghost_screenshot` itself. Ghost's own
+  vision tier is optional, exists for callers with no model of their own, and is off
+  until configured.
 - **Accessibility-native and deep.** Real element discovery through the OS's own
   accessibility API - UI Automation on Windows, AT-SPI2 on Linux - not
   pixel-guessing. Elements come back with real names, roles and bounds.
@@ -68,6 +65,27 @@ See it in one script: [`examples/background_agent_demo.py`](examples/background_
 drives an app in the background while the foreground stays yours.
 Honest comparison vs Playwright-MCP / cua-driver / Computer Use:
 [`docs/comparison.md`](docs/comparison.md).
+
+## What people use it for
+
+Vision is the smallest part of it. In a typical session an agent calls Ghost mostly
+to act, to manage windows and processes, to run commands, and to read state back.
+
+| Use | Tools | Typical caller |
+| --- | --- | --- |
+| Driving apps with no API: installers, legacy line-of-business software, vendor portals, WPF and Electron tools | `ghost_act`, `ghost_key`, `ghost_scroll`, `ghost_drag` | agents, RPA scripts |
+| Window and process control: launch invisibly, focus, minimize, restore, close, recover hidden windows, sweep orphaned browsers | `ghost_window`, `ghost_desktop_*`, `ghost_stats` | agents, ops scripts |
+| A terminal for the agent: builds, git, CLIs, persistent PowerShell state, spawning another Claude Code session | `ghost_shell`, `ghost_run` | coding agents on Windows |
+| Driving the browser you are already signed into, through its DevTools port: tabs, navigation, DOM clicks, JS eval, page text | 19 `ghost_browser_*` and `ghost_tab_*` tools | agents, web automations |
+| Reading data out of apps with no export: accessibility text, tab text, OCR | `ghost_see mode=text`, `ghost_tab_text` | agents, reporting scripts |
+| Making "did it work" a machine check: element exists, value equals, wait for idle or text | `ghost_assert`, `ghost_wait` | QA agents, CI |
+| Isolated desktops: overnight GUI work and parallel agents that never touch the human's screen | `ghost_window op=launch`, the focus policy, `ghost_desktop_*` | autonomous runs |
+| Reproducible multi-step flows with retries and conditions, no model in the loop | intents via `ghost run`, `POST /run`, `ghost_execute_intent` | scheduled jobs |
+| The clipboard as a bridge into apps that resist typing | `ghost_clipboard` | all of the above |
+
+Every row runs under the same guarantees: the action returns `verified`, the
+default policy never takes your foreground, and Ctrl+Alt+G stops every Ghost
+process at once.
 
 ## What is Ghost?
 
@@ -215,8 +233,7 @@ issue - it usually names the problem outright.
 
 ## Quick Start - coding agents and MCP clients
 
-This is the path Ghost is built for. Nothing to configure and no API key: the model
-you are already running is the vision model.
+This is the path Ghost is built for. Nothing to configure and no API key.
 
 **Claude Desktop:** download `ghost-windows-x64.mcpb` (or the Linux bundle) from the
 [latest release](https://github.com/NORTHTEKDevs/ghost/releases/latest) and open it:
@@ -253,8 +270,14 @@ as `io.github.NORTHTEKDevs/ghost` for clients that install from there.
 3. `ghost_screenshot window="Invoice Editor"` - pixels, for the moments a layout,
    a chart, or a canvas needs the model's own eyes.
 
-Everything above works with no vision key. The model reads step 1 and step 3 and
-chooses; Ghost never has to guess what a picture means.
+The model reads step 1 and step 3 and chooses; Ghost never has to guess what a
+picture means, and no vision key is involved.
+
+Beyond the loop: `ghost_shell` runs commands and persistent PowerShell sessions,
+`ghost_window` launches, lists, focuses, restores and closes windows (on a hidden
+desktop by default), `ghost_assert` and `ghost_wait` turn "did it work" into a
+check, and the `ghost_tab_*` tools drive the browser you are already signed into.
+Most real sessions spend more calls there than on looking.
 
 54 tools on Windows (legacy names stay dispatchable): 20 desktop verbs covering
 see/snapshot/find/act/keys/scroll/drag/clipboard/screenshot/windows/shell/waits/query/run,

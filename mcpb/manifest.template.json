@@ -3,8 +3,8 @@
   "name": "ghost",
   "display_name": "Ghost",
   "version": "0.0.0",
-  "description": "Eyes and hands for coding agents on Windows and Linux: see and drive any desktop app in the background.",
-  "long_description": "Ghost is the layer between a model and the desktop. The model you are already running does the looking: ghost_see returns every element in a window with its name, role and on-screen centre, ghost_see mode=text returns the readable text, and ghost_screenshot returns pixels when they matter. Ghost acts on real controls without stealing your focus or cursor, and reports verified: true only when the action demonstrably took. No vision API key is needed.\n\nIt drives any desktop application (Win32, WPF, UWP, Electron, GTK, Qt), including ones with no API, and your own browser through the DevTools protocol when one is open with a debugging port. This bundle contains the ghost-mcp server binary for one platform; the CLI, HTTP server, source and Linux setup notes are on the releases page.",
+  "description": "Verified control of the whole desktop for agents and programs on Windows and Linux: apps with no API, windows, shell, browser.",
+  "long_description": "Ghost gives an agent or a program the operating system's own control surface: the apps with no API, the windows, the shell, and the browser you are already logged into, in the background without taking your screen or cursor, with every action verified. It drives real controls through UI Automation and posted window messages, launches apps on hidden desktops, runs commands and persistent PowerShell sessions, drives Chromium-family browsers through the DevTools protocol, reads text out of apps with no export, and turns \"did it work\" into a machine check.\n\nThe model driving Ghost does any looking that is needed, via ghost_see (every element with name, role and centre) or ghost_screenshot, so no vision API key is required. This bundle contains the ghost-mcp server binary for one platform; the CLI, HTTP server, source and Linux setup notes are on the releases page.",
   "author": {
     "name": "Northtek",
     "email": "info@northtek.io",

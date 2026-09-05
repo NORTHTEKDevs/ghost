@@ -20,7 +20,7 @@ resolver = "2"
 # `ghost-http` /health, `ghost-mcp` serverInfo) and the release tag matches it;
 # before this each crate carried its own and only ghost-mcp was ever bumped.
 [workspace.package]
-version = "0.21.6"
+version = "0.21.7"
 
 [workspace.dependencies]
 tokio = { version = "1", features = ["full"] }
