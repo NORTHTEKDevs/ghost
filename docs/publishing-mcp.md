@@ -66,7 +66,7 @@ third party access to an account, which an automated session must not do.
 | Glama | indexes GitHub; `glama.json` (in repo) names the maintainer; claimed with the maintainer account | listed: https://glama.ai/mcp/servers/hcu78gk1x6 (categories: OS Automation, Browser Automation, Shell Access) |
 | Smithery | `smithery mcp publish ghost-windows-x64.mcpb -n info-j5od/ghost` from the bundle directory after `smithery login` (the account namespace is `info-j5od`, not NORTHTEKDevs) | listed: https://smithery.ai/servers/info-j5od/ghost |
 | LobeHub marketplace | `npx -y @lobehub/market-cli login`, `github connect`, then `plugin publish https://github.com/NORTHTEKDevs/ghost` from the repo root (`lhm.plugin.json` must be in the working directory) | listed: https://lobehub.com/mcp/northtekdevs-ghost (northtekdevs-ghost@0.21.7) |
-| mcp.so | website submission behind Sign In; the only submit path is a paid $39 "Pay and submit automatically" | not submitted: paid listing, owner's call |
+| mcp.so | website submission behind Sign In; the only submit path is a paid $39 "Pay and submit automatically" | declined: paid listing only, we do not pay for directory placement |
 | cursor.directory | cursor.directory/plugins/new scans the repo for Agent Plugins files (agent-plugins.org): root `plugin.json` + `mcp.json` (both in repo, both validate against the 1.0.0 schemas); no sign-in was required to submit | submitted: https://cursor.directory/plugins/ghost, hidden until their security scan finishes |
 
 Every directory that accepts submissions now has one. The metadata files they
