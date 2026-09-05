@@ -1,6 +1,6 @@
 [package]
 name = "ghost-testbed"
-version = "0.1.0"
+version.workspace = true
 edition = "2021"
 description = "A tiny Win32 window with an edit box and buttons: the deterministic target for Ghost's live tests"
 license = "MIT"

@@ -1,6 +1,6 @@
 [package]
 name = "ghost-macos"
-version = "0.1.0"
+version.workspace = true
 edition = "2021"
 license = "MIT"
 description = "Ghost's macOS engine surface: the same module tree as ghost-core/ghost-linux (uia, input, capture, system, process, ocr, error) so ghost-session compiles on macOS. Pure Rust, no native Accessibility/CGEvent/ScreenCaptureKit backend yet -- every capability that would need one returns an honest Unsupported error instead of a native implementation. See docs/macos-build.md."

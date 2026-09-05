@@ -1,6 +1,6 @@
 [package]
 name = "ghost-browser"
-version = "0.5.0"
+version.workspace = true
 edition = "2021"
 description = "Background browser automation for Ghost via the Chrome DevTools Protocol"
 keywords = ["automation", "browser", "cdp", "chrome", "agent"]

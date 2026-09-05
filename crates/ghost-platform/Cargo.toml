@@ -1,6 +1,6 @@
 [package]
 name = "ghost-platform"
-version = "0.1.0"
+version.workspace = true
 edition = "2021"
 description = "Cross-platform contract for Ghost: the capability model, shared types, and per-OS backend selection (Windows full; macOS/Linux scaffolded)."
 

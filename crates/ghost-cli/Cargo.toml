@@ -1,8 +1,8 @@
 [package]
 name = "ghost-cli"
-version = "0.3.0"
+version.workspace = true
 edition = "2021"
-description = "Command-line interface for Ghost Windows desktop automation"
+description = "Command-line interface for Ghost desktop automation on Windows and Linux"
 keywords = ["automation", "windows", "cli", "desktop"]
 categories = ["command-line-utilities", "os::windows-apis"]
 license = "MIT"

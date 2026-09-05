@@ -16,6 +16,12 @@ members = [
 ]
 resolver = "2"
 
+# One version for every crate. The binaries surface it (`ghost --version`,
+# `ghost-http` /health, `ghost-mcp` serverInfo) and the release tag matches it;
+# before this each crate carried its own and only ghost-mcp was ever bumped.
+[workspace.package]
+version = "0.21.3"
+
 [workspace.dependencies]
 tokio = { version = "1", features = ["full"] }
 thiserror = "1"

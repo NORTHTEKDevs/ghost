@@ -1,6 +1,6 @@
 [package]
 name = "ghost-ground"
-version = "0.1.0"
+version.workspace = true
 edition = "2021"
 description = "Hybrid grounding cascade for Ghost — coordinate contract, types, parser, engine, and YOLO tier."
 

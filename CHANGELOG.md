@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.21.3] - one version number
+
+- **Every binary reports the release version.** `ghost --version` said 0.3.0,
+  `ghost-http` answered `/health` with 0.3.0, and `ghost-mcp` said 0.21.2,
+  because each crate carried its own version and only the MCP server's was
+  ever bumped. The workspace now has one version, set once in the root
+  `Cargo.toml` under `[workspace.package]`, and every crate inherits it.
+  Thirteen crates went from seven different numbers to one, and the release
+  tag is that number.
+- Crate descriptions that still said "Windows desktop automation" say Windows
+  and Linux.
+
 ## [0.21.2] - a CI crash root-caused, `role` narrows every action, a manifest that publishes
 
 - **The intermittent `STATUS_ACCESS_VIOLATION` in `cargo test -p ghost-core --lib`

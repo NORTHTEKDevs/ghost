@@ -1,8 +1,8 @@
 [package]
 name = "ghost-http"
-version = "0.3.0"
+version.workspace = true
 edition = "2021"
-description = "HTTP REST server for Ghost Windows desktop automation"
+description = "HTTP REST server for Ghost desktop automation on Windows and Linux"
 keywords = ["automation", "windows", "http", "rest"]
 categories = ["web-programming::http-server", "os::windows-apis"]
 license = "MIT"

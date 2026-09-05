@@ -1,6 +1,6 @@
 [package]
 name = "ghost-linux"
-version = "0.18.1"
+version.workspace = true
 edition = "2021"
 license = "MIT"
 description = "Ghost's Linux automation engine: AT-SPI2 accessibility, X11/Wayland input, and screen capture"
