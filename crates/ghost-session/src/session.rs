@@ -1425,7 +1425,26 @@ impl GhostSession {
         let ws = WindowState::from_str(state).ok_or(GhostError::Core(
             crate::engine::error::CoreError::Win32 { code: 0, context: "invalid window state" }
         ))?;
-        set_window_state(name, ws).map_err(GhostError::Core)
+        match set_window_state(name, ws) {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                // A window on one of Ghost's own hidden desktops is in neither
+                // the user-desktop list nor the hidden-window list, so the name
+                // lookup above cannot see it: `op=launch` could put an app on a
+                // hidden desktop and `op=state state=close` could not close it.
+                // The target resolver knows those windows; use the handle it
+                // resolves, but only when the title really matches the name the
+                // caller gave (never the session anchor by accident).
+                let want = name.to_lowercase();
+                if let Ok(t) = self.resolve_target(Some(name)).await {
+                    if t.hwnd != 0 && t.title.to_lowercase().contains(&want) {
+                        return crate::engine::uia::tree::set_window_state_hwnd(t.hwnd, ws)
+                            .map_err(GhostError::Core);
+                    }
+                }
+                Err(GhostError::Core(e))
+            }
+        }
     }
 
     /// Wait N milliseconds. Polls the emergency-stop flag so ghost_stop (or
@@ -2040,7 +2059,7 @@ impl GhostSession {
                 }
             }
             (By::Name(n), None) if action == "type" => {
-                let all = self.tree.find_all_in_hwnd(hwnd, Some(n), None, 16).map_err(GhostError::Core)?;
+                let all = self.tree.find_all_in_hwnd(hwnd, Some(n), role_filter, 16).map_err(GhostError::Core)?;
                 let pos = all
                     .iter()
                     .position(|el| crate::engine::uia::patterns::is_editable_role(el.control_type()))
@@ -2052,8 +2071,10 @@ impl GhostSession {
                 // that merely CONTAINS the name (a page whose title says
                 // "clicked:same" while the caller wants the "Same" button, and
                 // the title walks first). For an action, an exact name and an
-                // interactive role outrank a bare substring hit.
-                let all = self.tree.find_all_in_hwnd(hwnd, Some(n), None, 16).map_err(GhostError::Core)?;
+                // interactive role outrank a bare substring hit. An explicit
+                // `role` narrows the candidates first - it is the fix the
+                // not-clickable error recommends, so it must actually apply here.
+                let all = self.tree.find_all_in_hwnd(hwnd, Some(n), role_filter, 16).map_err(GhostError::Core)?;
                 Ok(Self::rank_for_action(all, n))
             }
             (By::Role(r), None) => self.tree.find_by_role_in_hwnd(hwnd, r).map_err(GhostError::Core),

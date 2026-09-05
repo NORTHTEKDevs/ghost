@@ -1234,7 +1234,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-mcp"
-version = "0.21.1"
+version = "0.21.2"
 dependencies = [
  "ghost-browser",
  "ghost-core",

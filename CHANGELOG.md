@@ -1,5 +1,57 @@
 # Changelog
 
+## [0.21.2] - a CI crash root-caused, `role` narrows every action, a manifest that publishes
+
+- **The intermittent `STATUS_ACCESS_VIOLATION` in `cargo test -p ghost-core --lib`
+  is root-caused and fixed.** The STA pool worker created its UI Automation
+  object before its job loop and dropped it when the thread closure ended,
+  which is after `CoUninitialize()`. Releasing a COM interface once its
+  apartment is gone is undefined behaviour. It ran on every pool drop, which is
+  exactly what the pool tests do, and on 2026-09-02 it crashed windows-latest
+  mid-run while those tests were in flight (134 of 153 tests had finished;
+  the pool tests had not). The object is now released before the apartment is
+  torn down, the ordering the hidden-desktop path already enforced. It never
+  reproduced locally (50 of 50 runs green before and after the change), so the
+  proof is the ordering itself and the CI record from here on.
+- **`role` narrows an action by name on every route.** 0.21.1's
+  "cannot be clicked" error told the caller to add `role=button`, but the
+  non-indexed name lookup on the background and hidden-desktop routes ignored
+  `role`, so following the advice produced the same error. Both routes now
+  filter by role before ranking the matches.
+- **The hidden-window listing answers with windows, not noise.** 0.21.1's
+  filter (a caption and a title, no owner) matched 118 windows on a normal
+  desktop: 55 invisible popup hosts, 27 console hosts, and a tail of tray and
+  message sinks. Nobody finds a lost browser window in that. It now also
+  requires a system menu, a minimise box, no `WS_EX_TOOLWINDOW`, and at least
+  a dialog-sized rectangle - the shape of a real application frame. Same
+  desktop, same moment: 118 rows before, 44 after, with the genuinely hidden
+  window still found.
+- **A window on one of Ghost's hidden desktops can be closed by name.**
+  `op=state` resolved names against the user desktop only, so an app started
+  with `op=launch` (which puts it on a hidden desktop under the default policy)
+  answered "process not found" to every state change, including `close`; the
+  only way out was killing the process. It now falls back to the resolved
+  window handle, which reaches any desktop.
+- **Vanished windows are reachable for `restore` only.** 0.21.1 let every
+  `ghost_window op=state` fall through to hidden windows when nothing visible
+  matched, so a `close` by substring could end an invisible helper window the
+  caller had never seen. Only `state=restore` consults hidden windows now;
+  the other states report "not found" as before.
+- **The registry manifest publishes.** `server.json` pinned a schema the
+  registry has retired, carried a 289-character description against a limit
+  of 100, and declared a `registryType` of `github` that the registry does not
+  define (its package types are npm, pypi, oci, nuget and mcpb), so
+  `mcp-publisher validate` had never passed and Ghost was never listed. It is
+  now a listing-only entry on schema 2025-12-11 that validates and points at
+  the repository; `docs/publishing-mcp.md` records why and what an installable
+  `.mcpb` entry would take.
+- Two new live tests, both on Ghost's hidden desktop so they never touch your
+  screen: `hidden_window_recovery` hides a window from outside Ghost and proves
+  it disappears from `op=list`, appears in the hidden listing with its pid and
+  title, and comes back with `op=state state=restore`;
+  `index_disambiguation` covers the user-desktop background route as well as
+  the hidden-desktop one.
+
 ## [0.21.1] - index is honoured everywhere; a raised window is never left hidden
 
 - **`ghost_act index=N` now selects the nth match on every route.** Under the

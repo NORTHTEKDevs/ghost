@@ -1132,7 +1132,12 @@ async fn dispatch_hidden(
             let text = p["text_input"].as_str().or_else(|| p["text"].as_str());
             let by = parse_by(p)?;
             let idx = parse_index(p)?;
-            session.hidden_act(t, by, action, text, idx, p["role"].as_str()).await.map_err(err)
+            let mut out = session.hidden_act(t, by, action, text, idx, p["role"].as_str()).await.map_err(err)?;
+            // Echo the index like the user-desktop and CDP routes do.
+            if let (Some(obj), Some(i)) = (out.as_object_mut(), idx) {
+                obj.insert("index".into(), json!(i));
+            }
+            Ok(out)
         }
         "ghost_key" => {
             let keys = p["keys"].as_str().ok_or("ghost_key: missing 'keys' param")?;

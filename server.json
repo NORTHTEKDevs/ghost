@@ -1,34 +1,12 @@
 {
-  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.NORTHTEKDevs/ghost",
+  "title": "Ghost",
   "description": "Computer-use MCP server for Windows and Linux: drives any desktop app or browser in the background.",
   "repository": {
     "url": "https://github.com/NORTHTEKDevs/ghost",
     "source": "github"
   },
-  "version": "0.21.1",
-  "websiteUrl": "https://github.com/NORTHTEKDevs/ghost",
-  "packages": [
-    {
-      "registryType": "github",
-      "identifier": "NORTHTEKDevs/ghost",
-      "version": "0.21.1",
-      "transport": { "type": "stdio" },
-      "runtimeHint": "Prebuilt ghost-mcp from the GitHub release (Windows 10/11 or Linux x86_64), or `cargo build --release -p ghost-mcp`.",
-      "environmentVariables": [
-        {
-          "name": "GHOST_VISION_API_KEY",
-          "description": "Optional. API key for OpenAI-compatible vision grounding (or OPENAI_API_KEY / NVIDIA_API_KEY / ANTHROPIC_API_KEY). Local tiers (cache/UIA/OCR/CV) work with no key.",
-          "isRequired": false,
-          "isSecret": true
-        },
-        {
-          "name": "GHOST_VISION_BASE_URL",
-          "description": "Optional. Endpoint for a self-hosted / alternate OpenAI-compatible vision model (vLLM/Ollama/LM Studio/OpenAI/Gemini/Groq).",
-          "isRequired": false,
-          "isSecret": false
-        }
-      ]
-    }
-  ]
+  "version": "0.21.2",
+  "websiteUrl": "https://github.com/NORTHTEKDevs/ghost"
 }

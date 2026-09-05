@@ -97,6 +97,14 @@ impl StaPool {
                         }
                     }
                 }
+                // Release the automation object BEFORE the apartment goes away.
+                // `uia` would otherwise drop at the end of this closure, after
+                // `CoUninitialize`, and a `Release` on a torn-down apartment is
+                // undefined behaviour: it is the intermittent
+                // STATUS_ACCESS_VIOLATION seen in `cargo test -p ghost-core --lib`
+                // on windows-latest while the pool tests (which drop pools) were
+                // in flight. Same ordering rule as `Desktop::with_uia`.
+                drop(uia);
                 unsafe {
                     CoUninitialize();
                 }

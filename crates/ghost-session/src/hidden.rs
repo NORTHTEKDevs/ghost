@@ -113,11 +113,18 @@ fn find_in(
 /// For any other action by NAME: rank the matches the way the user-desktop
 /// route does (exact name, then interactive role, then walk order), so a title
 /// or text node that merely contains the name does not win over the control.
-fn find_for_action(tree: &UiaTree, hwnd: isize, by: &By) -> Result<(UiaElement, usize)> {
-    let By::Name(n) = by else { return find_in(tree, hwnd, by, None, None) };
-    let all = core(tree.find_all_in_hwnd(hwnd, Some(n), None, 16))?;
+fn find_for_action(
+    tree: &UiaTree,
+    hwnd: isize,
+    by: &By,
+    role_filter: Option<&str>,
+) -> Result<(UiaElement, usize)> {
+    let By::Name(n) = by else { return find_in(tree, hwnd, by, None, role_filter) };
+    // An explicit `role` narrows the candidates first: it is the fix the
+    // not-clickable error recommends, so it has to apply on this path too.
+    let all = core(tree.find_all_in_hwnd(hwnd, Some(n), role_filter, 16))?;
     if all.is_empty() {
-        return find_in(tree, hwnd, by, None, None);
+        return find_in(tree, hwnd, by, None, role_filter);
     }
     let total = all.len();
     GhostSession::rank_for_action(all, n)
@@ -128,11 +135,16 @@ fn find_for_action(tree: &UiaTree, hwnd: isize, by: &By) -> Result<(UiaElement, 
         })
 }
 
-fn find_for_typing(tree: &UiaTree, hwnd: isize, by: &By) -> Result<(UiaElement, usize)> {
-    let By::Name(n) = by else { return find_in(tree, hwnd, by, None, None) };
-    let all = core(tree.find_all_in_hwnd(hwnd, Some(n), None, 16))?;
+fn find_for_typing(
+    tree: &UiaTree,
+    hwnd: isize,
+    by: &By,
+    role_filter: Option<&str>,
+) -> Result<(UiaElement, usize)> {
+    let By::Name(n) = by else { return find_in(tree, hwnd, by, None, role_filter) };
+    let all = core(tree.find_all_in_hwnd(hwnd, Some(n), role_filter, 16))?;
     if all.is_empty() {
-        return find_in(tree, hwnd, by, None, None);
+        return find_in(tree, hwnd, by, None, role_filter);
     }
     let total = all.len();
     let pos = all
@@ -172,7 +184,11 @@ fn find_in_once(
     // the only caller that needs the whole match list.
     let Some(idx) = index else {
         let hit = match (name, role) {
-            (Some(n), _) => core(tree.find_by_name_in_hwnd(hwnd, n))?,
+            // name+role: only an element matching BOTH counts, on this path
+            // too - a role the caller gave must never be dropped for a
+            // name-only hit (that is how role=edit once clicked a button).
+            (Some(n), Some(r)) => core(tree.find_all_in_hwnd(hwnd, Some(n), Some(r), 1))?.into_iter().next(),
+            (Some(n), None) => core(tree.find_by_name_in_hwnd(hwnd, n))?,
             (None, Some(r)) => core(tree.find_by_role_in_hwnd(hwnd, r))?,
             (None, None) => None,
         };
@@ -443,9 +459,9 @@ impl GhostSession {
             // An explicit index is the caller's disambiguation and wins over the
             // editable-field preference for `type`.
             let (el, _) = if action == "type" && index.is_none() {
-                find_for_typing(tree, hwnd, &by)?
+                find_for_typing(tree, hwnd, &by, role_filter.as_deref())?
             } else if index.is_none() {
-                find_for_action(tree, hwnd, &by)?
+                find_for_action(tree, hwnd, &by, role_filter.as_deref())?
             } else {
                 find_in(tree, hwnd, &by, index, role_filter.as_deref())?
             };

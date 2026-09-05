@@ -378,7 +378,9 @@ calls, the client's own terminal usually retakes OS focus. Ghost is built for th
 - **Windows never disappear**: minimized windows stay in `ghost_window list` (with `state`)
   and `op=focus` auto-restores them. A window that something hid outright (not visible,
   not minimized) shows up with `op=list include_hidden=true` as `state: "hidden"`, and
-  `op=state state=restore` brings it back without activating it.
+  `op=state state=restore` brings it back without activating it. `op=state` also
+  reaches windows on Ghost's own hidden desktops, so an app started with `op=launch`
+  can be closed by name.
 - **Stop always works**: `ghost_stop` preempts the in-flight call the moment it arrives
   (dedicated stdin reader), and Ctrl+Alt+G remains the OS-level kill switch.
 

@@ -2,7 +2,7 @@ use super::element::{role_id_to_name, ElementDescriptor, UiaElement, INTERACTIVE
 use crate::error::CoreError;
 use crate::focus;
 use windows::Win32::Foundation::POINT;
-use windows::Win32::Foundation::{BOOL, FALSE, HWND, LPARAM, TRUE, WPARAM};
+use windows::Win32::Foundation::{BOOL, FALSE, HWND, LPARAM, RECT, TRUE, WPARAM};
 use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
 use windows::Win32::UI::Accessibility::*;
 use windows::Win32::UI::WindowsAndMessaging::WindowFromPoint;
@@ -758,6 +758,7 @@ pub struct WindowInfo {
     pub state: &'static str,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowState {
     Maximize,
     Minimize,
@@ -826,15 +827,38 @@ pub fn list_windows() -> Result<Vec<WindowInfo>, CoreError> {
 /// Only unowned, titled windows with a caption bar qualify, which keeps the
 /// countless invisible helper windows (IME, DDE, tray hosts) out.
 unsafe extern "system" fn enum_hidden_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
-    use windows::Win32::UI::WindowsAndMessaging::{GetWindowLongPtrW, GWL_STYLE, WS_CAPTION};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, GetWindowRect, GWL_EXSTYLE, GWL_STYLE, WS_CAPTION, WS_EX_TOOLWINDOW,
+        WS_MINIMIZEBOX, WS_SYSMENU,
+    };
     if IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() {
         return TRUE;
     }
     if GetWindow(hwnd, GW_OWNER).map(|o| !o.is_invalid()).unwrap_or(false) {
         return TRUE;
     }
+    // A normal application frame: caption, system menu and a minimise box. The
+    // desktop is full of invisible helper windows that carry a caption and a
+    // title but none of the rest (popup hosts, tray and message sinks); on this
+    // machine they outnumbered real windows 117 to 1, which is not an answer a
+    // person can read.
     let style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
-    if style & WS_CAPTION.0 != WS_CAPTION.0 {
+    let wanted = WS_CAPTION.0 | WS_SYSMENU.0 | WS_MINIMIZEBOX.0;
+    if style & wanted != wanted {
+        return TRUE;
+    }
+    // A tool window is by definition not a window the user "lost": it never
+    // appears in the taskbar or Alt-Tab even when it is visible.
+    let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+    if ex_style & WS_EX_TOOLWINDOW.0 != 0 {
+        return TRUE;
+    }
+    // Nobody loses a window smaller than a dialog. Hidden windows keep the
+    // size they had, so a real frame is still full size here.
+    let mut rect = RECT::default();
+    if GetWindowRect(hwnd, &mut rect).is_ok()
+        && ((rect.right - rect.left) < 200 || (rect.bottom - rect.top) < 100)
+    {
         return TRUE;
     }
     let mut title = [0u16; 512];
@@ -1009,20 +1033,59 @@ pub fn focus_window(name: &str) -> Result<(), CoreError> {
     Ok(())
 }
 
+/// Apply a window state to a handle the caller already resolved.
+///
+/// `set_window_state` looks a window up by name across the user desktop, which
+/// cannot see a window on one of Ghost's own hidden desktops: launching an app
+/// there and then asking to close it by name failed with "process not found",
+/// leaving no way to close it but killing the process. Posting `WM_CLOSE` and
+/// calling `ShowWindow` work on a handle whatever desktop it belongs to.
+pub fn set_window_state_hwnd(hwnd_raw: isize, state: WindowState) -> Result<(), CoreError> {
+    if hwnd_raw == 0 {
+        return Err(CoreError::ProcessNotFound { name: "window handle 0".to_string() });
+    }
+    let hwnd = HWND(hwnd_raw as *mut _);
+    unsafe {
+        match state {
+            WindowState::Maximize => {
+                let _ = ShowWindow(hwnd, SW_MAXIMIZE);
+            }
+            WindowState::Minimize => {
+                let _ = ShowWindow(hwnd, SW_MINIMIZE);
+            }
+            WindowState::Restore => {
+                let _ = ShowWindow(hwnd, SW_RESTORE);
+            }
+            WindowState::Close => {
+                let _ = PostMessageW(hwnd, WM_CLOSE, WPARAM(0), LPARAM(0));
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn set_window_state(name: &str, state: WindowState) -> Result<(), CoreError> {
     let name_lower = name.to_lowercase();
     let windows = list_windows()?;
     let matches_name = |w: &&WindowInfo| w.name.to_lowercase().contains(&name_lower);
-    // A vanished window (hidden, not minimised) is still reachable here, so
-    // `restore` is the recovery path for a window nothing else can see.
+    // A vanished window (hidden, not minimised) is still reachable here, but
+    // ONLY for `restore` - the recovery path for a window nothing else can
+    // see. Close/minimize/maximize never fall through to hidden windows: a
+    // substring that matches nothing visible must not close an invisible
+    // helper window the caller never saw.
     let hidden;
     let win = match windows.iter().find(matches_name) {
         Some(w) => w,
-        None => {
+        None if matches!(state, WindowState::Restore) => {
             hidden = list_hidden_windows()?;
             hidden.iter().find(matches_name).ok_or_else(|| CoreError::ProcessNotFound {
                 name: name.to_string(),
             })?
+        }
+        None => {
+            return Err(CoreError::ProcessNotFound {
+                name: name.to_string(),
+            })
         }
     };
     let hwnd = HWND(win.hwnd as *mut _);

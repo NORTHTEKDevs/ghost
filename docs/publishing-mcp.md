@@ -6,19 +6,31 @@ agent or user finds Ghost without already knowing it exists.
 
 ## What's in the repo
 
-- [`server.json`](../server.json) — the registry manifest (name, description,
-  repository, version, transport, env vars).
+- [`server.json`](../server.json) - the registry manifest (name, title, description,
+  repository, version, website).
+
+It is a **listing-only** entry on purpose. The registry's package types are
+`npm`, `pypi`, `oci`, `nuget` and `mcpb`; there is no package type for "prebuilt
+binaries on a GitHub release", and the manifest that carried
+`"registryType": "github"` was rejected by `mcp-publisher validate` for exactly
+that reason (checked 2026-09-04 against schema 2025-12-11). A listing with no
+`packages` block validates and publishes, and points people at the repository,
+where the README carries the download, install and env-var instructions.
+
+To become installable from the registry itself, ship an `.mcpb` bundle
+(manifest + binary, `fileSha256` pinned) as a release asset and add an `mcpb`
+package entry. That is a release-pipeline change, tracked separately.
 
 ## Steps
 
-1. **Verify the manifest against the live schema.** The registry schema is
-   versioned and evolves; before publishing, validate `server.json` with the
-   official `mcp-publisher` CLI (`mcp-publisher validate`) and update the
-   `$schema` / `registryType` fields if the current schema differs from what's
-   pinned here. Do not publish a manifest you haven't validated.
+1. **Validate against the live schema.** The schema is versioned and the
+   registry rejects deprecated ones (`2025-07-09` was refused; `2025-12-11` is
+   current as of 2026-09-04). Run `mcp-publisher validate` and fix anything it
+   names. Do not publish a manifest you haven't validated. `description` is
+   capped at 100 characters.
 2. **Authenticate** as the `io.github.NORTHTEKDevs/*` namespace owner (GitHub
    OAuth via `mcp-publisher login github`).
-3. **Publish**: `mcp-publisher publish`.
+3. **Publish**: `mcp-publisher publish`, after the matching GitHub release exists.
 4. **Bump on release**: keep `version` in `server.json` in lockstep with
    `crates/ghost-mcp/Cargo.toml` and re-publish on each release.
 

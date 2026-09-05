@@ -677,6 +677,38 @@ pub fn focus_window(name: &str) -> Result<()> {
 ///
 /// Under a native Wayland session there is no EWMH, so this reports
 /// `Unsupported` rather than silently doing nothing.
+/// Mirrors `ghost_core::uia::tree::set_window_state_hwnd`: apply a state to an
+/// already-resolved handle. Ghost's hidden desktops are a Windows concept, but
+/// the shared session layer calls this on both engines, so it resolves the
+/// interned AT-SPI handle and drives the window the same way the name path does.
+pub fn set_window_state_hwnd(hwnd: isize, state: WindowState) -> Result<()> {
+    let tree = A11yTree::new()?;
+    let win = tree
+        .list_windows()?
+        .into_iter()
+        .find(|w| w.hwnd == hwnd)
+        .ok_or(CoreError::WindowGone)?;
+    if state == WindowState::Close {
+        if let Some(addr) = handles::resolve(hwnd) {
+            let a = addr.clone();
+            if tree
+                .bridge()
+                .run_default(move |ctx| Box::pin(async move { ops::do_best_action(ctx, &a).await }))
+                .is_ok()
+            {
+                return Ok(());
+            }
+        }
+    }
+    let action = match state {
+        WindowState::Maximize => crate::wm::WmAction::Maximize,
+        WindowState::Minimize => crate::wm::WmAction::Minimize,
+        WindowState::Restore => crate::wm::WmAction::Restore,
+        WindowState::Close => crate::wm::WmAction::Close,
+    };
+    crate::wm::apply(win.pid, Some(&win.name), action)
+}
+
 pub fn set_window_state(name: &str, state: WindowState) -> Result<()> {
     let tree = A11yTree::new()?;
     let want = name.to_lowercase();
