@@ -1,0 +1,25 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "ghost",
+  "version": "0.21.7",
+  "description": "Verified control of the whole desktop for agents on Windows and Linux: apps with no API, windows, shell, browser.",
+  "author": {
+    "name": "Northtek",
+    "email": "info@northtek.io",
+    "url": "https://northtek.io"
+  },
+  "homepage": "https://github.com/NORTHTEKDevs/ghost",
+  "repository": "https://github.com/NORTHTEKDevs/ghost",
+  "license": "MIT",
+  "keywords": [
+    "computer-use",
+    "desktop-automation",
+    "ui-automation",
+    "mcp",
+    "windows",
+    "linux",
+    "background",
+    "agents",
+    "browser"
+  ]
+}
