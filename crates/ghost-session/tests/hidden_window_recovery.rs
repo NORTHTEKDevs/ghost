@@ -141,3 +141,64 @@ async fn a_window_hidden_from_outside_is_listed_and_restorable() {
     // the test binary lives.
     let _ = child.wait();
 }
+
+/// The guard itself, in isolation: `restore_if_hidden` is what the action paths
+/// call after they raise a window, and it had no test of its own - it was
+/// shipped on the strength of the incident report alone.
+#[tokio::test]
+#[ignore]
+async fn restore_if_hidden_shows_a_hidden_window_and_leaves_everything_else_alone() {
+    let Some(exe) = testbed_exe() else {
+        eprintln!("skipped: build the testbed first (cargo build -p ghost-testbed --release)");
+        return;
+    };
+    let title = format!("Ghost Guard {}", std::process::id());
+    let mut child = std::process::Command::new(&exe)
+        .args(["--title", &title])
+        .spawn()
+        .expect("spawn the testbed");
+    let pid = child.id();
+    let session = GhostSession::new().expect("session");
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut hwnd = 0isize;
+    while Instant::now() < deadline && hwnd == 0 {
+        if let Ok(ws) = session.list_windows().await {
+            if let Some(w) = ws.iter().find(|w| w.name.contains(&title)) {
+                hwnd = w.hwnd;
+            }
+        }
+        if hwnd == 0 {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+    assert!(hwnd != 0, "the testbed window never appeared");
+
+    // A visible window is not the guard's business: it must not act.
+    assert!(
+        !ghost_core::uia::tree::restore_if_hidden(hwnd),
+        "the guard must do nothing to a window that is already visible"
+    );
+
+    hide_from_outside(hwnd);
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert!(!is_visible(hwnd), "precondition: the window is hidden");
+
+    // Now it acts, and reports that it did.
+    assert!(
+        ghost_core::uia::tree::restore_if_hidden(hwnd),
+        "the guard must show a window that is hidden and not minimised"
+    );
+    assert!(is_visible(hwnd), "the window must be visible after the guard runs");
+
+    // Idempotent: a second call has nothing left to do.
+    assert!(
+        !ghost_core::uia::tree::restore_if_hidden(hwnd),
+        "the guard must report false when there was nothing to restore"
+    );
+    // A null handle is not a window.
+    assert!(!ghost_core::uia::tree::restore_if_hidden(0));
+
+    let _ = ghost_core::process::kill(pid);
+    let _ = child.wait();
+}

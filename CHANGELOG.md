@@ -50,7 +50,9 @@
   it disappears from `op=list`, appears in the hidden listing with its pid and
   title, and comes back with `op=state state=restore`;
   `index_disambiguation` covers the user-desktop background route as well as
-  the hidden-desktop one.
+  the hidden-desktop one, and `restore_if_hidden` is exercised directly: it
+  leaves a visible window alone, shows a hidden one, reports false when there
+  was nothing to do, and treats a null handle as no window.
 
 ## [0.21.1] - index is honoured everywhere; a raised window is never left hidden
 
