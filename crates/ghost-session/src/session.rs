@@ -2048,17 +2048,7 @@ impl GhostSession {
         let is_targets = |h: isize| {
             h != 0 && (h == target_hwnd || (target_pid != 0 && crate::engine::system::window_pid(h) == target_pid))
         };
-        let deadline = std::time::Instant::now() + Duration::from_millis(settle_ms);
-        let taken_by = loop {
-            let now = crate::engine::system::foreground_window();
-            if now != fg_before && is_targets(now) {
-                break now;
-            }
-            if std::time::Instant::now() >= deadline {
-                return None;
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        };
+        let taken_by = wait_for_theft(fg_before, settle_ms, is_targets, crate::engine::system::foreground_window).await?;
         let started = std::time::Instant::now();
         // Where the foreground belongs: the window the human had, unless that
         // was already one of the target's own popups.
@@ -2878,7 +2868,13 @@ impl GhostSession {
     /// without foreground or cursor movement. `key` is one key name ("Enter",
     /// "Tab", "F5", "a"). Modifier combos are rejected upstream (posting can't set
     /// the modifier state apps read). Returns {focus_preserved, cursor_preserved}.
-    pub async fn key_background(&self, window: &str, key: &str, hwnd_hint: Option<isize>) -> Result<serde_json::Value> {
+    ///
+    /// `settle_ms` is how long to keep watching for the target taking the
+    /// foreground after the key is posted. A theft already visible is always
+    /// handed back; pass 0 when the caller runs its own watch right after (the
+    /// MCP server's post-call guard does, for 100 ms), since two back-to-back
+    /// watches for the same theft only added their lengths to every key.
+    pub async fn key_background(&self, window: &str, key: &str, hwnd_hint: Option<isize>, settle_ms: u64) -> Result<serde_json::Value> {
 
         if is_stopped() { return Err(GhostError::Stopped); }
         let windows_list = core_list_windows().map_err(GhostError::Core)?;
@@ -2909,7 +2905,7 @@ impl GhostSession {
             }
         }
 
-        let focus_guard = self.foreground_guard_end_within(win_hwnd, win.pid, fg_before, 0, 60).await;
+        let focus_guard = self.foreground_guard_end_within(win_hwnd, win.pid, fg_before, 0, settle_ms).await;
         let fg_after = crate::engine::system::foreground_window();
         let cur_after = crate::engine::system::cursor_pos();
         Ok(serde_json::json!({
@@ -3255,6 +3251,72 @@ impl<'a> OpsDispatcher for SessionOpsDispatcher<'a> {
             }
         }
         Ok(())
+    }
+}
+
+/// Watch for the foreground moving from `fg_before` to a window `is_targets`
+/// accepts, for up to `settle_ms`, and answer that window. The foreground is
+/// checked at once and then every 20 ms, and every check comes before the
+/// deadline test, so a theft is still seen when a sleep overshoots.
+async fn wait_for_theft(
+    fg_before: isize,
+    settle_ms: u64,
+    is_targets: impl Fn(isize) -> bool,
+    foreground: impl Fn() -> isize,
+) -> Option<isize> {
+    let deadline = std::time::Instant::now() + Duration::from_millis(settle_ms);
+    loop {
+        let now = foreground();
+        if now != fg_before && is_targets(now) {
+            return Some(now);
+        }
+        if std::time::Instant::now() >= deadline {
+            return None;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+#[cfg(test)]
+mod theft_watch_tests {
+    //! `ghost_key` in the background: the key path's own watch is 0 ms when the
+    //! MCP guard (100 ms) follows. These pin that the split still catches a
+    //! theft at either moment, and that the key path's check adds no wait.
+    use super::wait_for_theft;
+    use std::time::{Duration, Instant};
+
+    const HUMAN: isize = 1;
+    const TARGET: isize = 2;
+
+    /// The foreground as the target thread would leave it: the human's window
+    /// until `steal_after`, the target's after.
+    fn stolen_after(start: Instant, steal_after: Option<Duration>) -> impl Fn() -> isize {
+        move || match steal_after {
+            Some(d) if start.elapsed() >= d => TARGET,
+            _ => HUMAN,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_theft_already_visible_is_caught_by_the_key_paths_zero_ms_check() {
+        let fg = stolen_after(Instant::now(), Some(Duration::ZERO));
+        assert_eq!(wait_for_theft(HUMAN, 0, |h| h == TARGET, fg).await, Some(TARGET));
+    }
+
+    #[tokio::test]
+    async fn a_theft_after_the_key_returns_is_caught_by_the_following_guard() {
+        let start = Instant::now();
+        let fg = stolen_after(start, Some(Duration::from_millis(40)));
+        assert_eq!(wait_for_theft(HUMAN, 0, |h| h == TARGET, &fg).await, None, "nothing yet at 0 ms");
+        assert_eq!(wait_for_theft(HUMAN, 100, |h| h == TARGET, &fg).await, Some(TARGET));
+    }
+
+    #[tokio::test]
+    async fn a_zero_settle_checks_once_and_does_not_wait() {
+        let fg = stolen_after(Instant::now(), None);
+        let start = Instant::now();
+        assert_eq!(wait_for_theft(HUMAN, 0, |h| h == TARGET, fg).await, None);
+        assert!(start.elapsed() < Duration::from_millis(40), "took {:?}", start.elapsed());
     }
 }
 

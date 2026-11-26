@@ -1,0 +1,262 @@
+{
+ "window_order": [
+  "Ghost Key Bed 2",
+  "Ghost Key Bed"
+ ],
+ "keys": {
+  "n": 20,
+  "q_in_target": 20,
+  "q_in_decoy": 0,
+  "response_window_is_target": 20,
+  "errors": 0,
+  "raw": [
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 132.1,
+    "focus_preserved": true,
+    "focus_guard": false
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 127.6,
+    "focus_preserved": true,
+    "focus_guard": false
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 126.5,
+    "focus_preserved": true,
+    "focus_guard": false
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 125.8,
+    "focus_preserved": true,
+    "focus_guard": false
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 126.1,
+    "focus_preserved": true,
+    "focus_guard": false
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 126.9,
+    "focus_preserved": true,
+    "focus_guard": false
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 127.3,
+    "focus_preserved": true,
+    "focus_guard": false
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 126.7,
+    "focus_preserved": true,
+    "focus_guard": false
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 125.6,
+    "focus_preserved": true,
+    "focus_guard": false
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 126.9,
+    "focus_preserved": true,
+    "focus_guard": false
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 126.1,
+    "focus_preserved": true,
+    "focus_guard": false
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 127.3,
+    "focus_preserved": true,
+    "focus_guard": false
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 125.7,
+    "focus_preserved": true,
+    "focus_guard": false
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 127.1,
+    "focus_preserved": true,
+    "focus_guard": false
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 125.7,
+    "focus_preserved": true,
+    "focus_guard": false
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 125.3,
+    "focus_preserved": true,
+    "focus_guard": false
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 126.3,
+    "focus_preserved": true,
+    "focus_guard": false
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 126.9,
+    "focus_preserved": true,
+    "focus_guard": false
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 125.6,
+    "focus_preserved": true,
+    "focus_guard": false
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 127.3,
+    "focus_preserved": true,
+    "focus_guard": false
+   }
+  ]
+ },
+ "edit_command": {
+  "n": 20,
+  "response_window_is_target": 20,
+  "errors": 0,
+  "raw": [
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 118.3
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 126.8
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 126.3
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 125.7
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 127.6
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 126.4
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 126.7
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 128.0
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 126.6
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 125.1
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 127.2
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 126.8
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 125.4
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 126.9
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 126.6
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 126.2
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 125.2
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 126.4
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 127.2
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 128.3
+   }
+  ]
+ }
+}
