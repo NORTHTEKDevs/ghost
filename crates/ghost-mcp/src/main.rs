@@ -700,6 +700,86 @@ fn wrap_tool_result(r: std::result::Result<Value, (i64, String)>) -> Value {
     }
 }
 
+/// What a tool does, for the emergency-stop gate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ToolClass {
+    /// Reads only: still answers while stopped, so an agent can see where it was.
+    Observe,
+    /// Changes something (input, focus, windows, processes, pages, clipboard,
+    /// outbound requests): refused while stopped.
+    Act,
+    /// Part of stopping safely (stop, reset, ending a shell, dropping to the
+    /// background focus policy): always allowed.
+    Control,
+}
+
+/// The class of every tool this server dispatches. `None` = a name this table
+/// does not know, which the gate treats as `Act`: a new tool is refused while
+/// stopped until someone decides it only reads (pinned by a test that every
+/// registered tool is listed here).
+fn tool_class(name: &str, args: &Value) -> Option<ToolClass> {
+    use ToolClass::*;
+    let op = |default: &'static str| args["op"].as_str().unwrap_or(default).to_string();
+    Some(match name {
+        "ghost_stop" | "ghost_reset" => Control,
+        "ghost_see" | "ghost_find" | "ghost_snapshot" | "ghost_screenshot" | "ghost_screenshot_region"
+        | "ghost_query" | "ghost_assert" | "ghost_stats" | "ghost_cache_stats" | "ghost_cache_invalidate"
+        | "ghost_event_seq" | "ghost_list_windows" | "ghost_get_clipboard" | "ghost_get_selection"
+        | "ghost_get_text" | "ghost_read_text" | "ghost_describe_screen" | "ghost_describe_screen_fast"
+        | "ghost_describe_screen_delta" | "ghost_locate_by_description" | "ghost_find_text_local"
+        | "ghost_render_marks" | "ghost_wait_until" | "ghost_wait_for_idle" | "ghost_wait_for_element"
+        | "ghost_wait_for_value" | "ghost_wait_for_event" | "ghost_http_get" | "ghost_focus_policy"
+        | "ghost_session_state" | "ghost_browser_tabs" | "ghost_browser_list_installed" | "ghost_tab_find"
+        | "ghost_tab_text" | "ghost_tab_screenshot" | "ghost_tab_describe" | "ghost_tab_wait_for"
+        | "ghost_desktop_windows" | "ghost_desktop_wait_for_window" | "ghost_desktop_capture"
+        | "ghost_desktop_describe" => Observe,
+        // for=text clicks and for=navigate drives the address bar; the rest only wait.
+        "ghost_wait" => match args["for"].as_str().unwrap_or("ms") {
+            "text" | "navigate" => Act,
+            _ => Observe,
+        },
+        "ghost_window" => match op("list").as_str() {
+            "list" | "anchor" => Observe,
+            _ => Act,
+        },
+        "ghost_clipboard" => if op("get") == "get" { Observe } else { Act },
+        "ghost_shell" => match op("run").as_str() {
+            "list" | "read" => Observe,
+            "kill" => Control,
+            _ => Act,
+        },
+        "ghost_set_focus_policy" => {
+            if args["policy"].as_str().is_some_and(|p| p.eq_ignore_ascii_case("background")) { Control } else { Act }
+        }
+        "ghost_act" | "ghost_key" | "ghost_scroll" | "ghost_drag" | "ghost_run" | "ghost_click" | "ghost_type"
+        | "ghost_click_at" | "ghost_launch" | "ghost_press" | "ghost_hotkey" | "ghost_key_down" | "ghost_key_up"
+        | "ghost_hover" | "ghost_right_click" | "ghost_double_click" | "ghost_set_clipboard"
+        | "ghost_focus_window" | "ghost_window_state" | "ghost_batch_actions" | "ghost_http_post"
+        | "ghost_navigate_and_wait" | "ghost_click_and_wait_for_text" | "ghost_fill_form"
+        | "ghost_execute_intent" | "ghost_click_background" | "ghost_click_by_description"
+        | "ghost_type_by_description" | "ghost_click_text_local" | "ghost_browser_launch"
+        | "ghost_browser_attach" | "ghost_browser_close" | "ghost_tab_open" | "ghost_tab_close"
+        | "ghost_tab_navigate" | "ghost_tab_click" | "ghost_tab_type" | "ghost_tab_press" | "ghost_tab_eval"
+        | "ghost_tab_scroll" | "ghost_tab_select_option" | "ghost_desktop_create" | "ghost_desktop_close"
+        | "ghost_desktop_launch" | "ghost_desktop_click" | "ghost_desktop_scroll" | "ghost_desktop_type"
+        | "ghost_desktop_press" | "ghost_desktop_shortcut" => Act,
+        _ => return None,
+    })
+}
+
+/// The emergency-stop gate for one tool call: `Err` when `stopped` and the
+/// tool is not a read or part of stopping. Pure, so it is tested without
+/// raising the real stop (which would stop every Ghost on the machine).
+fn stop_gate(name: &str, args: &Value, stopped: bool) -> std::result::Result<(), String> {
+    let class = tool_class(name, args).unwrap_or(ToolClass::Act);
+    if stopped && class == ToolClass::Act {
+        return Err(format!(
+            "{name} refused: emergency stop active - Ghost is stopped and refuses actions until ghost_reset"
+        ));
+    }
+    Ok(())
+}
+
 fn dispatch_tool<'a>(
     session: &'a GhostSession,
     name: &'a str,
@@ -715,6 +795,11 @@ fn dispatch_tool_inner<'a>(
     in_run: bool, // prevent double-routing of ghost_run to avoid infinite recursion
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = std::result::Result<Value, String>> + Send + 'a>> {
     Box::pin(async move {
+        // The emergency stop, before anything else: every route below (the
+        // extended surface, CDP, hidden desktops, the user's desktop) and every
+        // ghost_run step passes here. The paths themselves check again at the
+        // moment of dispatch (docs/plans/2026-11-26-emergency-stop-gate.md).
+        stop_gate(name, args, ghost_session::error::is_stopped())?;
         // Extended surface (browsers/tabs, isolated desktops, focus policy) is
         // self-contained in `ext`; everything else routes as before.
         if ext::owns(name) {
@@ -3862,6 +3947,9 @@ async fn run_batch_op(
         "act" | "ghost_act" => "ghost_act",
         other => return Err(format!("unknown batch op: {other}")),
     };
+    // Batch ops go straight to handle_tool, past dispatch_tool_inner's gate:
+    // check each one, so a stop raised mid-batch holds the rest back.
+    stop_gate(method, params, ghost_session::error::is_stopped())?;
     Box::pin(handle_tool(session, method, params)).await
 }
 

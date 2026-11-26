@@ -36,8 +36,20 @@ const STOP_EVENT_NAME: &str = r"Local\ghost-emergency-stop-event";
 
 static REGISTERED: AtomicBool = AtomicBool::new(false);
 
+/// Whether the emergency stop is active - raised here, or by any other Ghost
+/// process through the shared event.
+///
+/// The event is read directly, not only through the watcher thread's copy:
+/// the watcher polls once a second, so a process started while a stop was in
+/// force (every CLI command, `ghost-http`, a fresh `ghost-mcp`) acted for up
+/// to a second before it knew (docs/plans/2026-11-26-emergency-stop-audit.md).
 pub fn is_stopped() -> bool {
-    STOP_FLAG.load(Ordering::Acquire)
+    STOP_FLAG.load(Ordering::Acquire) || stop_event_raised()
+}
+
+/// The shared event is signalled. A zero-timeout wait only reads its state.
+fn stop_event_raised() -> bool {
+    open_stop_event().is_some_and(|ev| unsafe { WaitForSingleObject(ev.0, 0) == WAIT_OBJECT_0 })
 }
 
 /// Trip the stop locally and broadcast it to every other ghost process.

@@ -88,6 +88,11 @@ impl GhostSession {
                 "unknown focus policy '{policy}'; use background, prefer_background, or foreground"
             ))
         })?;
+        // Dropping to `background` only takes powers away, so it stays
+        // available while stopped; anything that hands out real input does not.
+        if p != ghost_core::focus::FocusPolicy::Background {
+            crate::error::ensure_not_stopped()?;
+        }
         ghost_core::focus::set_policy(p).map_err(GhostError::Core)?;
         Ok(p.as_str())
     }
@@ -105,6 +110,7 @@ impl GhostSession {
         mode: &str,
         which: Option<&str>,
     ) -> Result<serde_json::Value> {
+        crate::error::ensure_not_stopped()?;
         let mode: ghost_browser::LaunchMode =
             mode.parse().unwrap_or(ghost_browser::LaunchMode::Headless);
         let executable = match which {
@@ -168,6 +174,7 @@ impl GhostSession {
     /// Attach to a browser already running with `--remote-debugging-port=<port>`.
     /// Ghost never closes a browser it did not start.
     pub async fn browser_attach(&self, id: &str, port: u16) -> Result<serde_json::Value> {
+        crate::error::ensure_not_stopped()?;
         let browser = ghost_browser::Browser::attach(port)
             .await
             .map_err(|e| GhostError::Intent(e.to_string()))?;
@@ -191,6 +198,7 @@ impl GhostSession {
     /// Close a browser ghost launched and forget its tabs. Attached browsers are
     /// disconnected but left running - they belong to the user.
     pub async fn browser_close(&self, id: &str) -> Result<()> {
+        crate::error::ensure_not_stopped()?;
         let browser = self.browser_handle(id).await?;
         browser
             .close()
@@ -214,6 +222,7 @@ impl GhostSession {
     /// Open a background tab and return its target id. Opening never brings the
     /// tab or its window to the front.
     pub async fn tab_open(&self, browser_id: &str, url: &str) -> Result<String> {
+        crate::error::ensure_not_stopped()?;
         let browser = self.browser_handle(browser_id).await?;
         let tab = browser
             .new_tab(url)
@@ -246,6 +255,7 @@ impl GhostSession {
     }
 
     pub async fn tab_close(&self, browser_id: &str, target_id: &str) -> Result<()> {
+        crate::error::ensure_not_stopped()?;
         let browser = self.browser_handle(browser_id).await?;
         browser
             .close_tab(target_id)
@@ -284,6 +294,7 @@ impl GhostSession {
 
     #[cfg(windows)]
     pub async fn desktop_create(&self, id: &str) -> Result<serde_json::Value> {
+        crate::error::ensure_not_stopped()?;
         let d = ghost_core::DesktopSession::create(id).map_err(GhostError::Core)?;
         let info = serde_json::json!({
             "id": id,
@@ -301,6 +312,7 @@ impl GhostSession {
     /// first: they have no visible window, so leaving them would strand them.
     #[cfg(windows)]
     pub async fn desktop_close(&self, id: &str) -> Result<serde_json::Value> {
+        crate::error::ensure_not_stopped()?;
         let d = self.desktop_handle(id).await?;
         let mut killed = Vec::new();
         if let Ok(windows) = d.all_windows() {
@@ -319,6 +331,7 @@ impl GhostSession {
 
     #[cfg(windows)]
     pub async fn desktop_launch(&self, id: &str, command: &str) -> Result<u32> {
+        crate::error::ensure_not_stopped()?;
         self.desktop_handle(id)
             .await?
             .launch(command)
@@ -362,6 +375,7 @@ impl GhostSession {
         y: i32,
         button: &str,
     ) -> Result<()> {
+        crate::error::ensure_not_stopped()?;
         let d = self.desktop_handle(id).await?;
         match button {
             "right" => d.right_click(hwnd, x, y),
@@ -379,6 +393,7 @@ impl GhostSession {
         direction: &str,
         amount: i32,
     ) -> Result<()> {
+        crate::error::ensure_not_stopped()?;
         let (notches, horizontal) = match direction {
             "up" => (amount, false),
             "down" => (-amount, false),
@@ -394,6 +409,7 @@ impl GhostSession {
 
     #[cfg(windows)]
     pub async fn desktop_type(&self, id: &str, hwnd: isize, text: &str) -> Result<()> {
+        crate::error::ensure_not_stopped()?;
         self.desktop_handle(id)
             .await?
             .type_text(hwnd, text)
@@ -402,6 +418,7 @@ impl GhostSession {
 
     #[cfg(windows)]
     pub async fn desktop_press(&self, id: &str, hwnd: isize, key: &str) -> Result<()> {
+        crate::error::ensure_not_stopped()?;
         self.desktop_handle(id)
             .await?
             .press(hwnd, key)
@@ -410,6 +427,7 @@ impl GhostSession {
 
     #[cfg(windows)]
     pub async fn desktop_shortcut(&self, id: &str, hwnd: isize, name: &str) -> Result<()> {
+        crate::error::ensure_not_stopped()?;
         self.desktop_handle(id)
             .await?
             .shortcut(hwnd, name)

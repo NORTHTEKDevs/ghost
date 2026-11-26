@@ -39,7 +39,10 @@ const LAUNCH_WINDOW_WAIT: Duration = Duration::from_millis(5_000);
 const UIA_BUTTON: u32 = 50000;
 
 fn core<T>(r: std::result::Result<T, crate::engine::error::CoreError>) -> Result<T> {
-    r.map_err(GhostError::Core)
+    r.map_err(|e| match e {
+        crate::engine::error::CoreError::Stopped => GhostError::Stopped,
+        e => GhostError::Core(e),
+    })
 }
 
 /// Plain-data view of a located element (COM objects cannot leave the worker).
@@ -325,6 +328,7 @@ impl GhostSession {
     /// by pid: Store apps (Win11 Notepad) hand off to a broker, so the window's
     /// pid is not the launched pid.
     pub async fn launch_hidden(&self, command: &str) -> Result<Value> {
+        crate::error::ensure_not_stopped()?;
         let d = self.auto_desktop().await?;
         let before: std::collections::HashSet<isize> =
             core(d.windows())?.into_iter().map(|w| w.hwnd).collect();
@@ -469,13 +473,14 @@ impl GhostSession {
         index: Option<usize>,
         role_filter: Option<&str>,
     ) -> Result<Value> {
+        crate::error::ensure_not_stopped()?;
         let role_filter = role_filter.map(str::to_string);
         let d = self.desktop_for(t).await?;
         let hwnd = t.hwnd;
         let title = t.title.clone();
         let action = action.to_string();
         let text = text.map(str::to_string);
-        let out: Result<Value> = core(d.with_uia(move |tree| -> Result<Value> {
+        let out: Result<Value> = core(d.with_uia_action(move |tree| -> Result<Value> {
             let t_start = Instant::now();
             // An explicit index is the caller's disambiguation and wins over the
             // editable-field preference for `type`.
@@ -657,13 +662,14 @@ impl GhostSession {
     /// the window's text control, a named key as WM_KEYDOWN/UP, and the editing
     /// shortcuts Ctrl+C/X/V/A/Z as semantic edit messages.
     pub async fn hidden_key(&self, t: &WindowTarget, keys: &str) -> Result<Value> {
+        crate::error::ensure_not_stopped()?;
         let d = self.desktop_for(t).await?;
         let hwnd = t.hwnd;
         let spec = keys.trim().to_string();
         let lower = spec.to_lowercase();
         let how: &'static str = if spec.chars().count() == 1 {
             let ch = spec.chars().next().unwrap();
-            core(d.exec(move || {
+            core(d.exec_action(move || {
                 let target = BackgroundClicker::text_target(hwnd)
                     .unwrap_or_else(|| BackgroundClicker::focused_control(hwnd));
                 BackgroundClicker::send_char(target, ch)
@@ -701,6 +707,7 @@ impl GhostSession {
     /// `ghost_click_at` (screen coordinates on the hidden desktop, as returned by
     /// `ghost_find`/`ghost_see` there).
     pub async fn hidden_click_at(&self, t: &WindowTarget, x: i32, y: i32) -> Result<Value> {
+        crate::error::ensure_not_stopped()?;
         let d = self.desktop_for(t).await?;
         let hwnd = t.hwnd;
         // Posted to the deepest child window under the point, not the
@@ -710,7 +717,7 @@ impl GhostSession {
         // the user-desktop click_at: the window's and its owner's titles every
         // poll, whole-window persisting pixels at 80 ms.
         let (changed, by): (Option<bool>, Option<crate::click_verify::Signal>) =
-            core(d.exec(move || -> Result<(Option<bool>, Option<crate::click_verify::Signal>)> {
+            core(d.exec_action(move || -> Result<(Option<bool>, Option<crate::click_verify::Signal>)> {
                 let composited = ghost_core::input::window_class(hwnd).starts_with("chrome_");
                 let before = if composited { None } else { capture_window_printwindow(hwnd).ok() };
                 let titles_before = crate::session::titles_of(hwnd);
@@ -762,6 +769,7 @@ impl GhostSession {
 
     /// `ghost_scroll` on a hidden-desktop window (posted wheel messages).
     pub async fn hidden_scroll(&self, t: &WindowTarget, direction: &str, amount: i32) -> Result<Value> {
+        crate::error::ensure_not_stopped()?;
         let d = self.desktop_for(t).await?;
         let (notches, horizontal) = wheel(direction, amount)?;
         core(d.scroll(t.hwnd, 0, 0, notches, horizontal))?;
@@ -771,6 +779,7 @@ impl GhostSession {
     /// `ghost_scroll` on a user-desktop window under the background policy: the
     /// wheel message is posted to the window, the real pointer never moves.
     pub async fn scroll_background(&self, t: &WindowTarget, direction: &str, amount: i32) -> Result<Value> {
+        crate::error::ensure_not_stopped()?;
         let (notches, horizontal) = wheel(direction, amount)?;
         core(ghost_core::desktop::scroll_window(t.hwnd, notches, horizontal))?;
         Ok(json!({ "ok": true, "mode": "background", "window": t.title, "direction": direction, "amount": amount }))

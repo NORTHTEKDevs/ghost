@@ -184,6 +184,15 @@ fn json_err(e: (StatusCode, String)) -> (StatusCode, Json<Value>) {
     (e.0, Json(json!({"error": e.1})))
 }
 
+/// Every route that changes something calls this before queueing its command:
+/// while the emergency stop is active (Ctrl+Alt+G, or `ghost_stop` in any
+/// Ghost process) it answers 409 instead. The session paths check again when
+/// the command runs, in case the stop arrived while it waited in the queue.
+fn refuse_if_stopped() -> Result<(), (StatusCode, Json<Value>)> {
+    ghost_session::error::ensure_not_stopped()
+        .map_err(|e| json_err((StatusCode::CONFLICT, e.to_string())))
+}
+
 #[derive(Deserialize)]
 struct ByReq { name: Option<String>, role: Option<String> }
 impl ByReq {
@@ -207,20 +216,25 @@ impl ByReq {
 #[derive(Deserialize)] struct ClipReq { text: String }
 
 async fn h_click(State(s): State<AppState>, Json(req): Json<ByReq>) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    refuse_if_stopped()?;
     let by = req.into_by().map_err(json_err)?;
     send(&s.tx, |reply| Cmd::Click { by, reply }).await.map(Json).map_err(json_err)
 }
 async fn h_click_at(State(s): State<AppState>, Json(r): Json<ClickAt>) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    refuse_if_stopped()?;
     send(&s.tx, |reply| Cmd::ClickAt { x: r.x, y: r.y, reply }).await.map(Json).map_err(json_err)
 }
 async fn h_type(State(s): State<AppState>, Json(r): Json<TypeReq>) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    refuse_if_stopped()?;
     let by = ByReq { name: r.name, role: r.role }.into_by().map_err(json_err)?;
     send(&s.tx, |reply| Cmd::Type { by, text: r.text, reply }).await.map(Json).map_err(json_err)
 }
 async fn h_press(State(s): State<AppState>, Json(r): Json<PressReq>) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    refuse_if_stopped()?;
     send(&s.tx, |reply| Cmd::Press { key: r.key, reply }).await.map(Json).map_err(json_err)
 }
 async fn h_hotkey(State(s): State<AppState>, Json(r): Json<HotkeyReq>) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    refuse_if_stopped()?;
     send(&s.tx, |reply| Cmd::Hotkey { mods: r.mods, key: r.key, reply }).await.map(Json).map_err(json_err)
 }
 async fn h_screenshot(State(s): State<AppState>) -> Result<([(axum::http::HeaderName, &'static str); 1], Vec<u8>), (StatusCode, Json<Value>)> {
@@ -228,15 +242,18 @@ async fn h_screenshot(State(s): State<AppState>) -> Result<([(axum::http::Header
     Ok(([(axum::http::header::CONTENT_TYPE, "image/png")], png))
 }
 async fn h_launch(State(s): State<AppState>, Json(r): Json<LaunchReq>) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    refuse_if_stopped()?;
     send(&s.tx, |reply| Cmd::Launch { exe: r.exe, reply }).await.map(Json).map_err(json_err)
 }
 async fn h_list_windows(State(s): State<AppState>) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     send(&s.tx, |reply| Cmd::ListWindows { reply }).await.map(Json).map_err(json_err)
 }
 async fn h_focus_window(State(s): State<AppState>, Json(r): Json<FocusReq>) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    refuse_if_stopped()?;
     send(&s.tx, |reply| Cmd::FocusWindow { name: r.name, reply }).await.map(Json).map_err(json_err)
 }
 async fn h_window_state(State(s): State<AppState>, Json(r): Json<WindowStateReq>) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    refuse_if_stopped()?;
     send(&s.tx, |reply| Cmd::WindowState { name: r.name, state: r.state, reply }).await.map(Json).map_err(json_err)
 }
 async fn h_describe(State(s): State<AppState>, Json(r): Json<DescribeReq>) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
@@ -250,9 +267,11 @@ async fn h_get_clip(State(s): State<AppState>) -> Result<Json<Value>, (StatusCod
     send(&s.tx, |reply| Cmd::GetClipboard { reply }).await.map(Json).map_err(json_err)
 }
 async fn h_set_clip(State(s): State<AppState>, Json(r): Json<ClipReq>) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    refuse_if_stopped()?;
     send(&s.tx, |reply| Cmd::SetClipboard { text: r.text, reply }).await.map(Json).map_err(json_err)
 }
 async fn h_run(State(s): State<AppState>, body: String) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    refuse_if_stopped()?;
     send(&s.tx, |reply| Cmd::Run { json: body, reply }).await.map(Json).map_err(json_err)
 }
 

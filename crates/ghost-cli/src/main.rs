@@ -237,10 +237,48 @@ async fn main() -> ExitCode {
     }
 }
 
+/// Whether a subcommand changes anything (and so is refused while the
+/// emergency stop is active). Reads, `serve`, `doctor` and `verify` are not:
+/// `serve` and `verify` run ghost-mcp, which gates each call itself.
+fn cli_acts(cmd: &Command) -> bool {
+    match cmd {
+        Command::Click { .. }
+        | Command::ClickAt { .. }
+        | Command::Type { .. }
+        | Command::Press { .. }
+        | Command::Hotkey { .. }
+        | Command::Launch { .. }
+        | Command::FocusWindow { .. }
+        | Command::WindowState { .. }
+        | Command::SetClipboard { .. }
+        | Command::Run { .. }
+        | Command::Act { .. }
+        | Command::Key { .. } => true,
+        Command::Window { op, .. } => op != "list",
+        Command::Screenshot { .. }
+        | Command::ListWindows
+        | Command::Describe { .. }
+        | Command::GetClipboard
+        | Command::See { .. }
+        | Command::Find { .. }
+        | Command::Query { .. }
+        | Command::Snapshot { .. }
+        | Command::Serve
+        | Command::Doctor
+        | Command::Verify { .. } => false,
+    }
+}
+
 async fn run(cli: Cli) -> Result<(), String> {
     // Serve is special — it exec/spawns ghost-mcp, no GhostSession needed.
     if let Command::Serve = &cli.command {
         return run_serve();
+    }
+
+    // The emergency stop, read from the shared event: this process may have
+    // started after a stop was raised elsewhere.
+    if cli_acts(&cli.command) {
+        ghost_session::error::ensure_not_stopped().map_err(|e| e.to_string())?;
     }
 
     let session = GhostSession::new()

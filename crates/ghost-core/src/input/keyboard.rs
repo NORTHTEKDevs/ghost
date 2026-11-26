@@ -52,7 +52,7 @@ pub fn type_text(text: &str) -> Result<(), CoreError> {
     focus::require_foreground_allowed("type_text")?;
     for ch in text.chars() {
         if is_stopped() {
-            return Err(CoreError::Win32 { code: 0, context: "stopped" });
+            return Err(CoreError::Stopped);
         }
         let inputs = text_to_inputs(&ch.to_string());
         unsafe {
@@ -70,7 +70,7 @@ pub fn type_text(text: &str) -> Result<(), CoreError> {
 /// UIA ValuePattern.SetValue and Playwright's fill() semantics).
 pub fn clear_focused_field() -> Result<(), CoreError> {
     if is_stopped() {
-        return Err(CoreError::Win32 { code: 0, context: "stopped" });
+        return Err(CoreError::Stopped);
     }
     // Ctrl+A and Delete go to whatever window holds the real keyboard focus,
     // which under the background policy is the HUMAN'S - and those two keys in
@@ -105,7 +105,7 @@ pub fn clear_focused_field() -> Result<(), CoreError> {
 /// Press and release a virtual key (non-Unicode, for special keys like Enter, Tab, etc.)
 pub fn press_key(vk: VIRTUAL_KEY) -> Result<(), CoreError> {
     if is_stopped() {
-        return Err(CoreError::Win32 { code: 0, context: "stopped" });
+        return Err(CoreError::Stopped);
     }
     focus::require_foreground_allowed("press_key")?;
     let inputs = [key_event(vk, false), key_event(vk, true)];
@@ -121,7 +121,7 @@ pub fn press_key(vk: VIRTUAL_KEY) -> Result<(), CoreError> {
 /// Hold a key down without releasing (pair with key_up for held modifiers).
 pub fn key_down(vk: VIRTUAL_KEY) -> Result<(), CoreError> {
     if is_stopped() {
-        return Err(CoreError::Win32 { code: 0, context: "stopped" });
+        return Err(CoreError::Stopped);
     }
     focus::require_foreground_allowed("key_down")?;
     let inputs = [key_event(vk, false)];
@@ -137,7 +137,7 @@ pub fn key_down(vk: VIRTUAL_KEY) -> Result<(), CoreError> {
 /// Release a key held by key_down.
 pub fn key_up(vk: VIRTUAL_KEY) -> Result<(), CoreError> {
     if is_stopped() {
-        return Err(CoreError::Win32 { code: 0, context: "stopped" });
+        return Err(CoreError::Stopped);
     }
     focus::require_foreground_allowed("key_up")?;
     let inputs = [key_event(vk, true)];

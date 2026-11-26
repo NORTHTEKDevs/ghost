@@ -46,6 +46,7 @@ pub fn get_clipboard() -> Result<String, CoreError> {
 
 /// Write text to the clipboard, replacing any existing content.
 pub fn set_clipboard(text: &str) -> Result<(), CoreError> {
+    crate::stop::ensure_not_stopped()?;
     let wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0u16)).collect();
     let byte_len = wide.len() * 2;
     unsafe {

@@ -139,6 +139,7 @@ pub(crate) fn quote_if_needed(path: &str) -> String {
 /// Falls back to an App Paths lookup when the direct call cannot find the
 /// executable, so bare names like "msedge.exe" work as a user would expect.
 pub fn launch(exe: &str) -> Result<u32, CoreError> {
+    crate::stop::ensure_not_stopped()?;
     match launch_raw(exe) {
         Ok(pid) => Ok(pid),
         Err(direct_err) => match resolve_via_app_paths(exe) {

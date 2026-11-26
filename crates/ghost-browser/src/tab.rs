@@ -133,6 +133,7 @@ impl Tab {
 
     /// Navigate and wait for the document to finish loading.
     pub async fn navigate(&self, url: &str, timeout_ms: u64) -> Result<()> {
+        crate::error::ensure_not_stopped()?;
         self.call("Page.navigate", json!({ "url": url })).await?;
         self.wait_for_load(timeout_ms).await
     }
@@ -239,6 +240,7 @@ impl Tab {
     /// Not `element.click()`: that produces an untrusted event with no preceding
     /// move/press, which many sites and most drag/hover UIs ignore.
     pub async fn click(&self, selector: &str, timeout_ms: u64) -> Result<()> {
+        crate::error::ensure_not_stopped()?;
         // `element_center` already fails cleanly when the selector matches nothing, so
         // trying it first turns the common case (element already present) into one
         // round trip instead of a wait-then-locate pair. Only fall back to waiting
@@ -281,6 +283,7 @@ impl Tab {
     /// Click at viewport coordinates with a button (`left`|`right`|`middle`) and a
     /// click count (2 = double-click).
     pub async fn click_at_ex(&self, x: f64, y: f64, button: &str, count: u32) -> Result<()> {
+        crate::error::ensure_not_stopped()?;
         // The move arms hover state for menus and hover-reveal controls; the press
         // and release are awaited so the caller knows the click was really handled.
         self.dispatch_move(x, y)?;
@@ -458,6 +461,7 @@ impl Tab {
     /// processed the move, and a caller reading the hover result immediately would see
     /// the old state.
     pub async fn hover(&self, selector: &str, timeout_ms: u64) -> Result<()> {
+        crate::error::ensure_not_stopped()?;
         self.wait_for_selector(selector, timeout_ms).await?;
         let (x, y) = self.element_center(selector).await?;
         self.dispatch_move(x, y)?;
@@ -471,6 +475,7 @@ impl Tab {
     /// magnitude faster, and it is layout-independent, so the text is identical no
     /// matter which keyboard layout the user has active.
     pub async fn type_text(&self, selector: &str, text: &str, clear: bool) -> Result<()> {
+        crate::error::ensure_not_stopped()?;
         self.wait_for_selector(selector, 10_000).await?;
         let focus = format!(
             r#"(() => {{
@@ -503,6 +508,7 @@ impl Tab {
 
     /// Send a key to whatever is focused in the page.
     pub async fn press(&self, key: &str, modifiers: &[String]) -> Result<()> {
+        crate::error::ensure_not_stopped()?;
         let d = keys::describe(key).ok_or_else(|| BrowserError::Cdp {
             method: "Input.dispatchKeyEvent".into(),
             message: format!("unknown key name '{key}'"),
@@ -558,6 +564,7 @@ impl Tab {
 
     /// Scroll the page (or a scrollable element) without touching the wheel.
     pub async fn scroll(&self, selector: &str, dx: f64, dy: f64) -> Result<()> {
+        crate::error::ensure_not_stopped()?;
         let expr = if selector.is_empty() {
             format!("window.scrollBy({dx}, {dy}); true")
         } else {
@@ -578,6 +585,7 @@ impl Tab {
 
     /// Choose an option in a `<select>` and fire the events a real choice fires.
     pub async fn select_option(&self, selector: &str, value: &str) -> Result<()> {
+        crate::error::ensure_not_stopped()?;
         let expr = format!(
             r#"(() => {{
                 const el = document.querySelector({sel});
@@ -606,6 +614,7 @@ impl Tab {
     /// itself; doing it to a browser the user is using would switch their tab out
     /// from under them.
     pub async fn bring_to_front(&self) -> Result<()> {
+        crate::error::ensure_not_stopped()?;
         self.call("Page.bringToFront", json!({})).await?;
         Ok(())
     }

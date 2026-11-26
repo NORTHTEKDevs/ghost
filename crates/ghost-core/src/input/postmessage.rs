@@ -79,6 +79,7 @@ impl BackgroundClicker {
     /// Post a left-click pair to `hwnd` at client-relative `(x, y)`.
     /// Returns `CoreError::WindowGone` if `hwnd` is invalid by the time we check.
     pub fn click(hwnd_raw: isize, client_xy: (i32, i32)) -> Result<(), CoreError> {
+        crate::stop::ensure_not_stopped()?;
         let hwnd = hwnd_of(hwnd_raw);
         unsafe {
             if !IsWindow(hwnd).as_bool() {
@@ -101,6 +102,7 @@ impl BackgroundClicker {
     /// correct client point via ScreenToClient, whereas a size-derived offset
     /// would land in the container's corner.
     pub fn click_screen(hwnd_raw: isize, screen_x: i32, screen_y: i32) -> Result<(), CoreError> {
+        crate::stop::ensure_not_stopped()?;
         let hwnd = hwnd_of(hwnd_raw);
         unsafe {
             if !IsWindow(hwnd).as_bool() {
@@ -127,6 +129,7 @@ impl BackgroundClicker {
     /// Post a double-click (down, up, dblclk, up) at a SCREEN point - no cursor,
     /// no foreground. `hwnd_raw` is the control/container window handle.
     pub fn double_click_screen(hwnd_raw: isize, screen_x: i32, screen_y: i32) -> Result<(), CoreError> {
+        crate::stop::ensure_not_stopped()?;
         let hwnd = hwnd_of(hwnd_raw);
         let pt = Self::client_pt(hwnd, screen_x, screen_y)?;
         let lp = mouse_lparam(pt.x, pt.y);
@@ -144,6 +147,7 @@ impl BackgroundClicker {
     /// Post a right-click (rbutton down, up) at a SCREEN point - no cursor,
     /// no foreground.
     pub fn right_click_screen(hwnd_raw: isize, screen_x: i32, screen_y: i32) -> Result<(), CoreError> {
+        crate::stop::ensure_not_stopped()?;
         let hwnd = hwnd_of(hwnd_raw);
         let pt = Self::client_pt(hwnd, screen_x, screen_y)?;
         let lp = mouse_lparam(pt.x, pt.y);
@@ -161,6 +165,7 @@ impl BackgroundClicker {
     /// WM_MOUSEMOVE reaches the control's message queue but won't move the OS
     /// cursor, so visual hover effects may not appear.
     pub fn hover_screen(hwnd_raw: isize, screen_x: i32, screen_y: i32) -> Result<(), CoreError> {
+        crate::stop::ensure_not_stopped()?;
         let hwnd = hwnd_of(hwnd_raw);
         let pt = Self::client_pt(hwnd, screen_x, screen_y)?;
         unsafe {
@@ -174,6 +179,7 @@ impl BackgroundClicker {
     /// non-activating way to press a real Win32 button (no cursor, no foreground).
     /// SendMessageTimeout with ABORTIFHUNG so a wedged target can't block us.
     pub fn button_click(hwnd_raw: isize) -> Result<(), CoreError> {
+        crate::stop::ensure_not_stopped()?;
         let hwnd = hwnd_of(hwnd_raw);
         unsafe {
             if !IsWindow(hwnd).as_bool() {
@@ -198,6 +204,7 @@ impl BackgroundClicker {
     /// on the modifier keyboard state apps read via GetKeyState. Uses a synchronous
     /// bounded send so a following clipboard read sees the result.
     pub fn edit_command(hwnd_raw: isize, cmd: EditCommand) -> Result<(), CoreError> {
+        crate::stop::ensure_not_stopped()?;
         let hwnd = hwnd_of(hwnd_raw);
         let (msg, wparam, lparam) = match cmd {
             EditCommand::Copy => (WM_COPY, WPARAM(0), LPARAM(0)),
@@ -372,6 +379,7 @@ impl BackgroundClicker {
     /// keyboard state (GetKeyState) for modifiers, which posting doesn't set; the
     /// caller rejects combos in background mode instead of sending a broken combo.
     pub fn send_key(hwnd_raw: isize, vk: u16) -> Result<(), CoreError> {
+        crate::stop::ensure_not_stopped()?;
         let hwnd = hwnd_of(hwnd_raw);
         unsafe {
             if !IsWindow(hwnd).as_bool() {
@@ -409,6 +417,7 @@ impl BackgroundClicker {
     /// Post a character (WM_CHAR) to `hwnd` - for text a virtual key can't express
     /// directly. No foreground, no cursor.
     pub fn send_char(hwnd_raw: isize, ch: char) -> Result<(), CoreError> {
+        crate::stop::ensure_not_stopped()?;
         let hwnd = hwnd_of(hwnd_raw);
         unsafe {
             if !IsWindow(hwnd).as_bool() {
@@ -428,6 +437,7 @@ impl BackgroundClicker {
     /// SendMessage (the text pointer has to outlive the call), bounded by a
     /// timeout so a hung target can't wedge us.
     pub fn set_text(hwnd_raw: isize, text: &str) -> Result<(), CoreError> {
+        crate::stop::ensure_not_stopped()?;
         let hwnd = hwnd_of(hwnd_raw);
         unsafe {
             if !IsWindow(hwnd).as_bool() {

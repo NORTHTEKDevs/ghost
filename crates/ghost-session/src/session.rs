@@ -424,6 +424,9 @@ impl GhostSession {
     pub fn new() -> Result<Self> {
         let com_guard = init_com().map_err(GhostError::Core)?;
         register_emergency_stop().map_err(GhostError::Core)?;
+        // The browser crate cannot read the stop itself; give it the check so
+        // its page-changing calls refuse while stopped.
+        ghost_browser::set_stop_check(is_stopped);
         let tree = UiaTree::new().map_err(GhostError::Core)?;
 
         // Report the optional built-in vision tier (presence only, never values).
@@ -1007,6 +1010,7 @@ impl GhostSession {
         window: Option<&str>,
         description: &str,
     ) -> Result<()> {
+        crate::error::ensure_not_stopped()?;
         if let Some(w) = window {
             let (x, y, hwnd) = match self.locate_by_description_som_in_window(w, description).await? {
                 Some(hit) => hit,
@@ -1035,6 +1039,7 @@ impl GhostSession {
 
     /// Vision fallback + click + type. For form fills where UIA name is unstable.
     pub async fn type_by_description(&self, description: &str, text: &str) -> Result<()> {
+        crate::error::ensure_not_stopped()?;
         let (x, y) = self.locate_by_description(description).await?;
         self.click_at(x, y).await?;
         crate::engine::input::keyboard::type_text(text).map_err(GhostError::Core)
@@ -1470,6 +1475,7 @@ impl GhostSession {
 
     /// Launch a process by name or path. Returns PID.
     pub async fn launch(&self, exe: &str) -> Result<u32> {
+        crate::error::ensure_not_stopped()?;
         proc_launch(exe).map_err(GhostError::Core)
     }
 
@@ -1596,6 +1602,7 @@ impl GhostSession {
 
     /// Write text to the clipboard.
     pub async fn set_clipboard(&self, text: &str) -> Result<()> {
+        crate::error::ensure_not_stopped()?;
         core_set_clipboard(text).map_err(GhostError::Core)
     }
 
@@ -1624,6 +1631,7 @@ impl GhostSession {
     /// restoring it first if minimized. Errors loudly on failure - callers use this
     /// to guarantee keyboard input lands in the intended window.
     pub async fn ensure_window_foreground(&self, name: &str) -> Result<()> {
+        crate::error::ensure_not_stopped()?;
         let n = name.to_string();
         tokio::task::spawn_blocking(move || core_focus_window(&n))
             .await
@@ -1753,11 +1761,13 @@ impl GhostSession {
 
     /// Bring a window to the foreground by partial name match.
     pub async fn focus_window(&self, name: &str) -> Result<()> {
+        crate::error::ensure_not_stopped()?;
         core_focus_window(name).map_err(GhostError::Core)
     }
 
     /// Change window state: "maximize", "minimize", "restore", or "close".
     pub async fn window_state(&self, name: &str, state: &str) -> Result<()> {
+        crate::error::ensure_not_stopped()?;
         let ws = WindowState::from_str(state).ok_or(GhostError::Core(
             crate::engine::error::CoreError::Win32 { code: 0, context: "invalid window state" }
         ))?;
@@ -1942,6 +1952,7 @@ impl GhostSession {
         url: &str,
         idle_timeout_ms: u64,
     ) -> Result<()> {
+        crate::error::ensure_not_stopped()?;
         // Tolerate transient FocusFailed - the navigation action itself will surface a real
         // error if the window is truly unreachable. Other errors (ProcessNotFound, etc.) still propagate.
         if let Err(e) = self.focus_window(window_name).await {
@@ -2210,6 +2221,7 @@ impl GhostSession {
         submit: Option<By>,
         idle_timeout_ms: u64,
     ) -> Result<()> {
+        crate::error::ensure_not_stopped()?;
         for (by, text) in fields {
             let el = self.find(by.clone()).await?;
             el.click()?;
@@ -2247,6 +2259,7 @@ impl GhostSession {
     /// This eliminates the cross-call focus race: instead of focus_window + find + click
     /// in three separate MCP round-trips, one ghost_act call does them atomically.
     pub async fn act(&self, by: By, action: &str, text: Option<&str>) -> Result<serde_json::Value> {
+        crate::error::ensure_not_stopped()?;
         // find() already upserts into the locator cache on success.
         let el = self.find(by).await?;
         self.act_on_element(el, action, text).await
@@ -2307,6 +2320,7 @@ impl GhostSession {
         action: &str,
         text: Option<&str>,
     ) -> Result<serde_json::Value> {
+        crate::error::ensure_not_stopped()?;
         let name = el.name();
 
         // Fail fast on disabled controls for ALL actions - the coordinate paths
@@ -3034,6 +3048,7 @@ impl GhostSession {
     /// Coordinate-based action with the same focus-anchoring and verification
     /// guarantees as the UIA path. Used for OCR/VLM-grounded dispatch.
     pub async fn act_at(&self, x: i32, y: i32, action: &str, text: Option<&str>) -> Result<serde_json::Value> {
+        crate::error::ensure_not_stopped()?;
         // Bring the window under the target point to the foreground BEFORE any input,
         // so clicks/keystrokes land in the window that owns the coordinates.
         let focus_confirmed = tokio::task::spawn_blocking(move || {
@@ -3166,6 +3181,7 @@ impl GhostSession {
     /// Compile a JSON intent and run it through the FsmExecutor, dispatching ops against
     /// this session. See `ghost-intent::compiler` for intent schema.
     pub async fn execute_intent(&self, json: &str) -> Result<IntentResult> {
+        crate::error::ensure_not_stopped()?;
         let intent: CompiledIntent = IntentCompiler::compile(json).map_err(GhostError::from)?;
         let dispatcher = SessionOpsDispatcher { session: self };
         let executor = FsmExecutor::new(&dispatcher);

@@ -16,4 +16,5 @@ pub mod uia;
 pub mod capture;
 pub mod ocr;
 pub mod process;
+pub mod stop;
 pub mod system;

@@ -66,6 +66,7 @@ pub fn invoke(element: &UiaElement) -> Result<(), CoreError> {
 /// window foreground and moves the real cursor, defeating background dispatch.
 /// If the element has no InvokePattern, returns `NotActionableInBackground`.
 pub fn invoke_ex(element: &UiaElement, allow_fallback: bool) -> Result<(), CoreError> {
+    crate::stop::ensure_not_stopped()?;
     unsafe {
         match try_invoke(&element.0)? {
             true => return Ok(()),
@@ -141,6 +142,7 @@ pub fn set_value(element: &UiaElement, value: &str) -> Result<(), CoreError> {
 /// this NEVER falls back to click+keyboard (which needs foreground and moves the
 /// cursor). If the element has no ValuePattern, returns `NotActionableInBackground`.
 pub fn set_value_ex(element: &UiaElement, value: &str, allow_fallback: bool) -> Result<(), CoreError> {
+    crate::stop::ensure_not_stopped()?;
     unsafe {
         if let Ok(pattern) = element.0.GetCurrentPattern(UIA_ValuePatternId) {
             let vp: IUIAutomationValuePattern = pattern.cast()
