@@ -1,0 +1,890 @@
+{
+ "exe": "C:\\Users\\Krist\\projects\\active\\ghost\\target-improve\\release\\ghost-mcp.exe",
+ "n": 20,
+ "ops": [
+  {
+   "op": "see_text",
+   "n": 20,
+   "median_ms": 19.8,
+   "p95_ms": 30.9,
+   "min_ms": 12.9,
+   "max_ms": 30.9,
+   "correct": 20,
+   "accuracy": 1.0,
+   "errors": 0,
+   "verified_true": 0,
+   "verified_null": 20,
+   "verified_false": 0
+  },
+  {
+   "op": "see_full",
+   "n": 20,
+   "median_ms": 21.1,
+   "p95_ms": 29.0,
+   "min_ms": 13.7,
+   "max_ms": 29.0,
+   "correct": 20,
+   "accuracy": 1.0,
+   "errors": 0,
+   "verified_true": 0,
+   "verified_null": 20,
+   "verified_false": 0
+  },
+  {
+   "op": "find",
+   "n": 20,
+   "median_ms": 12.3,
+   "p95_ms": 16.0,
+   "min_ms": 10.5,
+   "max_ms": 16.0,
+   "correct": 20,
+   "accuracy": 1.0,
+   "errors": 0,
+   "verified_true": 0,
+   "verified_null": 20,
+   "verified_false": 0
+  },
+  {
+   "op": "act_click[increment]",
+   "n": 20,
+   "median_ms": 42.6,
+   "p95_ms": 58.6,
+   "min_ms": 41.9,
+   "max_ms": 58.6,
+   "correct": 20,
+   "accuracy": 1.0,
+   "errors": 0,
+   "verified_true": 20,
+   "verified_null": 0,
+   "verified_false": 0
+  },
+  {
+   "op": "act_type",
+   "n": 20,
+   "median_ms": 4.4,
+   "p95_ms": 6.1,
+   "min_ms": 3.7,
+   "max_ms": 6.1,
+   "correct": 20,
+   "accuracy": 1.0,
+   "errors": 0,
+   "verified_true": 20,
+   "verified_null": 0,
+   "verified_false": 0
+  }
+ ],
+ "raw": {
+  "see_text": [
+   {
+    "ms": 18.583099998068064,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 18
+   },
+   {
+    "ms": 17.18980000441661,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 16
+   },
+   {
+    "ms": 13.037200005783234,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 12
+   },
+   {
+    "ms": 12.86890000483254,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 12
+   },
+   {
+    "ms": 16.19850000133738,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 16
+   },
+   {
+    "ms": 19.672000002174173,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 19
+   },
+   {
+    "ms": 29.821599993738346,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 29
+   },
+   {
+    "ms": 26.436500003910623,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 25
+   },
+   {
+    "ms": 18.720500003837515,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 18
+   },
+   {
+    "ms": 16.780899997684173,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 16
+   },
+   {
+    "ms": 19.891299998562317,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 19
+   },
+   {
+    "ms": 23.206800004118122,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 22
+   },
+   {
+    "ms": 17.943400001968257,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 17
+   },
+   {
+    "ms": 19.036800003959797,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 18
+   },
+   {
+    "ms": 30.882899998687208,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 30
+   },
+   {
+    "ms": 27.3522999996203,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 27
+   },
+   {
+    "ms": 24.366099998587742,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 24
+   },
+   {
+    "ms": 22.77440000034403,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 22
+   },
+   {
+    "ms": 23.7180999974953,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 23
+   },
+   {
+    "ms": 22.53249999921536,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 22
+   }
+  ],
+  "see_full": [
+   {
+    "ms": 24.06120000523515,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 23,
+    "bytes": 1236
+   },
+   {
+    "ms": 28.376800000842195,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 28,
+    "bytes": 1236
+   },
+   {
+    "ms": 26.174100006755907,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 25,
+    "bytes": 1236
+   },
+   {
+    "ms": 28.9757999998983,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 28,
+    "bytes": 1236
+   },
+   {
+    "ms": 24.27289999468485,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 24,
+    "bytes": 1236
+   },
+   {
+    "ms": 21.74389999709092,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 21,
+    "bytes": 1236
+   },
+   {
+    "ms": 23.387499997625127,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 23,
+    "bytes": 1236
+   },
+   {
+    "ms": 22.12600000348175,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 21,
+    "bytes": 1236
+   },
+   {
+    "ms": 25.314499995147344,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 25,
+    "bytes": 1236
+   },
+   {
+    "ms": 20.51490000303602,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 20,
+    "bytes": 1236
+   },
+   {
+    "ms": 24.39809999486897,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 24,
+    "bytes": 1236
+   },
+   {
+    "ms": 16.172800002095755,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 15,
+    "bytes": 1236
+   },
+   {
+    "ms": 18.39559999643825,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 18,
+    "bytes": 1236
+   },
+   {
+    "ms": 15.790599994943477,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 15,
+    "bytes": 1236
+   },
+   {
+    "ms": 14.590799997677095,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 14,
+    "bytes": 1236
+   },
+   {
+    "ms": 15.075399998750072,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 14,
+    "bytes": 1236
+   },
+   {
+    "ms": 15.144500001042616,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 14,
+    "bytes": 1236
+   },
+   {
+    "ms": 13.748299999861047,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 13,
+    "bytes": 1236
+   },
+   {
+    "ms": 14.55559999885736,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 14,
+    "bytes": 1236
+   },
+   {
+    "ms": 13.683400000445545,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 13,
+    "bytes": 1236
+   }
+  ],
+  "find": [
+   {
+    "ms": 11.471099998743739,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 11,
+    "source": "uia",
+    "matches": 2
+   },
+   {
+    "ms": 12.804500001948327,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 12,
+    "source": "uia",
+    "matches": 2
+   },
+   {
+    "ms": 14.320300004328601,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 14,
+    "source": "uia",
+    "matches": 2
+   },
+   {
+    "ms": 11.930799999390729,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 11,
+    "source": "uia",
+    "matches": 2
+   },
+   {
+    "ms": 11.741200003598351,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 11,
+    "source": "uia",
+    "matches": 2
+   },
+   {
+    "ms": 11.444499999925029,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 11,
+    "source": "uia",
+    "matches": 2
+   },
+   {
+    "ms": 13.955100002931431,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 13,
+    "source": "uia",
+    "matches": 2
+   },
+   {
+    "ms": 11.294800002360716,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 11,
+    "source": "uia",
+    "matches": 2
+   },
+   {
+    "ms": 14.713100004883017,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 14,
+    "source": "uia",
+    "matches": 2
+   },
+   {
+    "ms": 15.14609999867389,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 14,
+    "source": "uia",
+    "matches": 2
+   },
+   {
+    "ms": 12.270799998077564,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 12,
+    "source": "uia",
+    "matches": 2
+   },
+   {
+    "ms": 11.270399998466019,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 11,
+    "source": "uia",
+    "matches": 2
+   },
+   {
+    "ms": 10.69390000338899,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 10,
+    "source": "uia",
+    "matches": 2
+   },
+   {
+    "ms": 12.367900002573151,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 12,
+    "source": "uia",
+    "matches": 2
+   },
+   {
+    "ms": 10.506799997529015,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 10,
+    "source": "uia",
+    "matches": 2
+   },
+   {
+    "ms": 14.644700000644661,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 14,
+    "source": "uia",
+    "matches": 2
+   },
+   {
+    "ms": 15.599599995766766,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 15,
+    "source": "uia",
+    "matches": 2
+   },
+   {
+    "ms": 11.466500000096858,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 11,
+    "source": "uia",
+    "matches": 2
+   },
+   {
+    "ms": 13.09179999952903,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 12,
+    "source": "uia",
+    "matches": 2
+   },
+   {
+    "ms": 16.027000005124137,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 15,
+    "source": "uia",
+    "matches": 2
+   }
+  ],
+  "act_click[increment]": [
+   {
+    "ms": 42.577399995934684,
+    "is_error": false,
+    "correct": true,
+    "before": 2,
+    "after": 3,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 42
+   },
+   {
+    "ms": 42.37250000005588,
+    "is_error": false,
+    "correct": true,
+    "before": 3,
+    "after": 4,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 42
+   },
+   {
+    "ms": 44.45950000081211,
+    "is_error": false,
+    "correct": true,
+    "before": 4,
+    "after": 5,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 44
+   },
+   {
+    "ms": 41.86230000050273,
+    "is_error": false,
+    "correct": true,
+    "before": 5,
+    "after": 6,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 41
+   },
+   {
+    "ms": 43.64260000147624,
+    "is_error": false,
+    "correct": true,
+    "before": 6,
+    "after": 7,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 43
+   },
+   {
+    "ms": 42.63379999611061,
+    "is_error": false,
+    "correct": true,
+    "before": 7,
+    "after": 8,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 42
+   },
+   {
+    "ms": 42.230600003676955,
+    "is_error": false,
+    "correct": true,
+    "before": 8,
+    "after": 9,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 41
+   },
+   {
+    "ms": 44.13819999899715,
+    "is_error": false,
+    "correct": true,
+    "before": 9,
+    "after": 10,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 43
+   },
+   {
+    "ms": 42.10939999757102,
+    "is_error": false,
+    "correct": true,
+    "before": 10,
+    "after": 11,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 41
+   },
+   {
+    "ms": 58.603799996490125,
+    "is_error": false,
+    "correct": true,
+    "before": 11,
+    "after": 12,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 58
+   },
+   {
+    "ms": 42.504199998802505,
+    "is_error": false,
+    "correct": true,
+    "before": 12,
+    "after": 13,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 42
+   },
+   {
+    "ms": 43.03060000529513,
+    "is_error": false,
+    "correct": true,
+    "before": 13,
+    "after": 14,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 42
+   },
+   {
+    "ms": 42.56339999847114,
+    "is_error": false,
+    "correct": true,
+    "before": 14,
+    "after": 15,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 42
+   },
+   {
+    "ms": 42.93189999589231,
+    "is_error": false,
+    "correct": true,
+    "before": 15,
+    "after": 16,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 42
+   },
+   {
+    "ms": 42.245000004186295,
+    "is_error": false,
+    "correct": true,
+    "before": 16,
+    "after": 17,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 42
+   },
+   {
+    "ms": 44.187899999087676,
+    "is_error": false,
+    "correct": true,
+    "before": 17,
+    "after": 18,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 43
+   },
+   {
+    "ms": 42.833200001041405,
+    "is_error": false,
+    "correct": true,
+    "before": 18,
+    "after": 19,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 42
+   },
+   {
+    "ms": 43.13450000336161,
+    "is_error": false,
+    "correct": true,
+    "before": 19,
+    "after": 20,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 42
+   },
+   {
+    "ms": 42.62239999661688,
+    "is_error": false,
+    "correct": true,
+    "before": 20,
+    "after": 21,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 42
+   },
+   {
+    "ms": 42.57369999686489,
+    "is_error": false,
+    "correct": true,
+    "before": 21,
+    "after": 22,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 42
+   }
+  ],
+  "act_type": [
+   {
+    "ms": 4.237799999827985,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 4
+   },
+   {
+    "ms": 3.7360999995144084,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 3
+   },
+   {
+    "ms": 5.595599999651313,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 5
+   },
+   {
+    "ms": 4.247600001690444,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 4
+   },
+   {
+    "ms": 4.830599995329976,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 4
+   },
+   {
+    "ms": 3.8080000012996607,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 3
+   },
+   {
+    "ms": 6.067800000892021,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 5
+   },
+   {
+    "ms": 4.080500002601184,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 3
+   },
+   {
+    "ms": 5.287200001475867,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 5
+   },
+   {
+    "ms": 4.599799998686649,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 4
+   },
+   {
+    "ms": 5.710299999918789,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 5
+   },
+   {
+    "ms": 4.136199997446965,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 4
+   },
+   {
+    "ms": 4.479000002902467,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 4
+   },
+   {
+    "ms": 4.901299995253794,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 4
+   },
+   {
+    "ms": 4.186900005151983,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 4
+   },
+   {
+    "ms": 4.233400002704002,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 4
+   },
+   {
+    "ms": 4.877999999735039,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 4
+   },
+   {
+    "ms": 4.454299996723421,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 4
+   },
+   {
+    "ms": 3.7137000035727397,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 3
+   },
+   {
+    "ms": 3.830599998764228,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 3
+   }
+  ]
+ },
+ "cold_start": {
+  "n": 10,
+  "median_ms": 18.8,
+  "p95_ms": 59.4,
+  "raw": [
+   21.8,
+   18.3,
+   18.2,
+   20.9,
+   18.9,
+   18.8,
+   18.0,
+   59.4,
+   19.2,
+   18.4
+  ]
+ },
+ "tools_list": {
+  "bytes": 32094,
+  "tools": 54
+ },
+ "surface": "user"
+}

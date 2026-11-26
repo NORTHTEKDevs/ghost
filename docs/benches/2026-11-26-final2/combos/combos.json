@@ -1,0 +1,370 @@
+{
+ "Ctrl+A": [
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": "select_all",
+   "key": null,
+   "ms": 117.6
+  },
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": "select_all",
+   "key": null,
+   "ms": 126.8
+  },
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": "select_all",
+   "key": null,
+   "ms": 119.3
+  },
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": "select_all",
+   "key": null,
+   "ms": 129.8
+  },
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": "select_all",
+   "key": null,
+   "ms": 127.3
+  },
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": "select_all",
+   "key": null,
+   "ms": 123.7
+  },
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": "select_all",
+   "key": null,
+   "ms": 123.8
+  },
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": "select_all",
+   "key": null,
+   "ms": 122.8
+  },
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": "select_all",
+   "key": null,
+   "ms": 127.7
+  },
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": "select_all",
+   "key": null,
+   "ms": 123.8
+  }
+ ],
+ "Ctrl+S": [
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": true,
+   "error": "ghost_key background: combo 'Ctrl+S' was not sent. A posted keystroke cannot carry modifiers (apps read the real keyboard state), so it would arrive as the bare key. Background shortcuts that work: Ctrl+C/X/V/A/Z. Other combos need the foreground policy, which only the operator can unlock",
+   "command": null,
+   "key": null,
+   "ms": 0.8
+  },
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": true,
+   "error": "ghost_key background: combo 'Ctrl+S' was not sent. A posted keystroke cannot carry modifiers (apps read the real keyboard state), so it would arrive as the bare key. Background shortcuts that work: Ctrl+C/X/V/A/Z. Other combos need the foreground policy, which only the operator can unlock",
+   "command": null,
+   "key": null,
+   "ms": 0.7
+  },
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": true,
+   "error": "ghost_key background: combo 'Ctrl+S' was not sent. A posted keystroke cannot carry modifiers (apps read the real keyboard state), so it would arrive as the bare key. Background shortcuts that work: Ctrl+C/X/V/A/Z. Other combos need the foreground policy, which only the operator can unlock",
+   "command": null,
+   "key": null,
+   "ms": 0.6
+  },
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": true,
+   "error": "ghost_key background: combo 'Ctrl+S' was not sent. A posted keystroke cannot carry modifiers (apps read the real keyboard state), so it would arrive as the bare key. Background shortcuts that work: Ctrl+C/X/V/A/Z. Other combos need the foreground policy, which only the operator can unlock",
+   "command": null,
+   "key": null,
+   "ms": 0.8
+  },
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": true,
+   "error": "ghost_key background: combo 'Ctrl+S' was not sent. A posted keystroke cannot carry modifiers (apps read the real keyboard state), so it would arrive as the bare key. Background shortcuts that work: Ctrl+C/X/V/A/Z. Other combos need the foreground policy, which only the operator can unlock",
+   "command": null,
+   "key": null,
+   "ms": 1.0
+  },
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": true,
+   "error": "ghost_key background: combo 'Ctrl+S' was not sent. A posted keystroke cannot carry modifiers (apps read the real keyboard state), so it would arrive as the bare key. Background shortcuts that work: Ctrl+C/X/V/A/Z. Other combos need the foreground policy, which only the operator can unlock",
+   "command": null,
+   "key": null,
+   "ms": 0.8
+  },
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": true,
+   "error": "ghost_key background: combo 'Ctrl+S' was not sent. A posted keystroke cannot carry modifiers (apps read the real keyboard state), so it would arrive as the bare key. Background shortcuts that work: Ctrl+C/X/V/A/Z. Other combos need the foreground policy, which only the operator can unlock",
+   "command": null,
+   "key": null,
+   "ms": 0.7
+  },
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": true,
+   "error": "ghost_key background: combo 'Ctrl+S' was not sent. A posted keystroke cannot carry modifiers (apps read the real keyboard state), so it would arrive as the bare key. Background shortcuts that work: Ctrl+C/X/V/A/Z. Other combos need the foreground policy, which only the operator can unlock",
+   "command": null,
+   "key": null,
+   "ms": 0.7
+  },
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": true,
+   "error": "ghost_key background: combo 'Ctrl+S' was not sent. A posted keystroke cannot carry modifiers (apps read the real keyboard state), so it would arrive as the bare key. Background shortcuts that work: Ctrl+C/X/V/A/Z. Other combos need the foreground policy, which only the operator can unlock",
+   "command": null,
+   "key": null,
+   "ms": 0.8
+  },
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": true,
+   "error": "ghost_key background: combo 'Ctrl+S' was not sent. A posted keystroke cannot carry modifiers (apps read the real keyboard state), so it would arrive as the bare key. Background shortcuts that work: Ctrl+C/X/V/A/Z. Other combos need the foreground policy, which only the operator can unlock",
+   "command": null,
+   "key": null,
+   "ms": 0.8
+  }
+ ],
+ "Ctrl+Shift+K": [
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": true,
+   "error": "ghost_key background: combo 'Ctrl+Shift+K' was not sent. A posted keystroke cannot carry modifiers (apps read the real keyboard state), so it would arrive as the bare key. Background shortcuts that work: Ctrl+C/X/V/A/Z. Other combos need the foreground policy, which only the operator can unlock",
+   "command": null,
+   "key": null,
+   "ms": 0.6
+  },
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": true,
+   "error": "ghost_key background: combo 'Ctrl+Shift+K' was not sent. A posted keystroke cannot carry modifiers (apps read the real keyboard state), so it would arrive as the bare key. Background shortcuts that work: Ctrl+C/X/V/A/Z. Other combos need the foreground policy, which only the operator can unlock",
+   "command": null,
+   "key": null,
+   "ms": 0.7
+  },
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": true,
+   "error": "ghost_key background: combo 'Ctrl+Shift+K' was not sent. A posted keystroke cannot carry modifiers (apps read the real keyboard state), so it would arrive as the bare key. Background shortcuts that work: Ctrl+C/X/V/A/Z. Other combos need the foreground policy, which only the operator can unlock",
+   "command": null,
+   "key": null,
+   "ms": 0.9
+  },
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": true,
+   "error": "ghost_key background: combo 'Ctrl+Shift+K' was not sent. A posted keystroke cannot carry modifiers (apps read the real keyboard state), so it would arrive as the bare key. Background shortcuts that work: Ctrl+C/X/V/A/Z. Other combos need the foreground policy, which only the operator can unlock",
+   "command": null,
+   "key": null,
+   "ms": 0.6
+  },
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": true,
+   "error": "ghost_key background: combo 'Ctrl+Shift+K' was not sent. A posted keystroke cannot carry modifiers (apps read the real keyboard state), so it would arrive as the bare key. Background shortcuts that work: Ctrl+C/X/V/A/Z. Other combos need the foreground policy, which only the operator can unlock",
+   "command": null,
+   "key": null,
+   "ms": 0.6
+  },
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": true,
+   "error": "ghost_key background: combo 'Ctrl+Shift+K' was not sent. A posted keystroke cannot carry modifiers (apps read the real keyboard state), so it would arrive as the bare key. Background shortcuts that work: Ctrl+C/X/V/A/Z. Other combos need the foreground policy, which only the operator can unlock",
+   "command": null,
+   "key": null,
+   "ms": 0.6
+  },
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": true,
+   "error": "ghost_key background: combo 'Ctrl+Shift+K' was not sent. A posted keystroke cannot carry modifiers (apps read the real keyboard state), so it would arrive as the bare key. Background shortcuts that work: Ctrl+C/X/V/A/Z. Other combos need the foreground policy, which only the operator can unlock",
+   "command": null,
+   "key": null,
+   "ms": 0.6
+  },
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": true,
+   "error": "ghost_key background: combo 'Ctrl+Shift+K' was not sent. A posted keystroke cannot carry modifiers (apps read the real keyboard state), so it would arrive as the bare key. Background shortcuts that work: Ctrl+C/X/V/A/Z. Other combos need the foreground policy, which only the operator can unlock",
+   "command": null,
+   "key": null,
+   "ms": 0.7
+  },
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": true,
+   "error": "ghost_key background: combo 'Ctrl+Shift+K' was not sent. A posted keystroke cannot carry modifiers (apps read the real keyboard state), so it would arrive as the bare key. Background shortcuts that work: Ctrl+C/X/V/A/Z. Other combos need the foreground policy, which only the operator can unlock",
+   "command": null,
+   "key": null,
+   "ms": 0.7
+  },
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": true,
+   "error": "ghost_key background: combo 'Ctrl+Shift+K' was not sent. A posted keystroke cannot carry modifiers (apps read the real keyboard state), so it would arrive as the bare key. Background shortcuts that work: Ctrl+C/X/V/A/Z. Other combos need the foreground policy, which only the operator can unlock",
+   "command": null,
+   "key": null,
+   "ms": 0.6
+  }
+ ],
+ "Alt+X": [
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": true,
+   "error": "ghost_key background: combo 'Alt+X' was not sent. A posted keystroke cannot carry modifiers (apps read the real keyboard state), so it would arrive as the bare key. Background shortcuts that work: Ctrl+C/X/V/A/Z. Other combos need the foreground policy, which only the operator can unlock",
+   "command": null,
+   "key": null,
+   "ms": 0.7
+  },
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": true,
+   "error": "ghost_key background: combo 'Alt+X' was not sent. A posted keystroke cannot carry modifiers (apps read the real keyboard state), so it would arrive as the bare key. Background shortcuts that work: Ctrl+C/X/V/A/Z. Other combos need the foreground policy, which only the operator can unlock",
+   "command": null,
+   "key": null,
+   "ms": 0.9
+  },
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": true,
+   "error": "ghost_key background: combo 'Alt+X' was not sent. A posted keystroke cannot carry modifiers (apps read the real keyboard state), so it would arrive as the bare key. Background shortcuts that work: Ctrl+C/X/V/A/Z. Other combos need the foreground policy, which only the operator can unlock",
+   "command": null,
+   "key": null,
+   "ms": 0.8
+  },
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": true,
+   "error": "ghost_key background: combo 'Alt+X' was not sent. A posted keystroke cannot carry modifiers (apps read the real keyboard state), so it would arrive as the bare key. Background shortcuts that work: Ctrl+C/X/V/A/Z. Other combos need the foreground policy, which only the operator can unlock",
+   "command": null,
+   "key": null,
+   "ms": 0.7
+  },
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": true,
+   "error": "ghost_key background: combo 'Alt+X' was not sent. A posted keystroke cannot carry modifiers (apps read the real keyboard state), so it would arrive as the bare key. Background shortcuts that work: Ctrl+C/X/V/A/Z. Other combos need the foreground policy, which only the operator can unlock",
+   "command": null,
+   "key": null,
+   "ms": 0.7
+  },
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": true,
+   "error": "ghost_key background: combo 'Alt+X' was not sent. A posted keystroke cannot carry modifiers (apps read the real keyboard state), so it would arrive as the bare key. Background shortcuts that work: Ctrl+C/X/V/A/Z. Other combos need the foreground policy, which only the operator can unlock",
+   "command": null,
+   "key": null,
+   "ms": 1.0
+  },
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": true,
+   "error": "ghost_key background: combo 'Alt+X' was not sent. A posted keystroke cannot carry modifiers (apps read the real keyboard state), so it would arrive as the bare key. Background shortcuts that work: Ctrl+C/X/V/A/Z. Other combos need the foreground policy, which only the operator can unlock",
+   "command": null,
+   "key": null,
+   "ms": 0.6
+  },
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": true,
+   "error": "ghost_key background: combo 'Alt+X' was not sent. A posted keystroke cannot carry modifiers (apps read the real keyboard state), so it would arrive as the bare key. Background shortcuts that work: Ctrl+C/X/V/A/Z. Other combos need the foreground policy, which only the operator can unlock",
+   "command": null,
+   "key": null,
+   "ms": 0.9
+  },
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": true,
+   "error": "ghost_key background: combo 'Alt+X' was not sent. A posted keystroke cannot carry modifiers (apps read the real keyboard state), so it would arrive as the bare key. Background shortcuts that work: Ctrl+C/X/V/A/Z. Other combos need the foreground policy, which only the operator can unlock",
+   "command": null,
+   "key": null,
+   "ms": 0.7
+  },
+  {
+   "edit_after": "base",
+   "bare_key_typed": false,
+   "is_error": true,
+   "error": "ghost_key background: combo 'Alt+X' was not sent. A posted keystroke cannot carry modifiers (apps read the real keyboard state), so it would arrive as the bare key. Background shortcuts that work: Ctrl+C/X/V/A/Z. Other combos need the foreground policy, which only the operator can unlock",
+   "command": null,
+   "key": null,
+   "ms": 0.7
+  }
+ ]
+}

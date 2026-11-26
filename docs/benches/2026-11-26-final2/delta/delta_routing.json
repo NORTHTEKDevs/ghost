@@ -1,0 +1,226 @@
+{
+ "explicit": [
+  {
+   "nochange_empty": true,
+   "target_reported": true,
+   "decoy_not_reported": true,
+   "errors": 0,
+   "seqs": [
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "nochange_empty": true,
+   "target_reported": true,
+   "decoy_not_reported": true,
+   "errors": 0,
+   "seqs": [
+    5,
+    6,
+    7
+   ]
+  },
+  {
+   "nochange_empty": true,
+   "target_reported": true,
+   "decoy_not_reported": true,
+   "errors": 0,
+   "seqs": [
+    8,
+    9,
+    10
+   ]
+  },
+  {
+   "nochange_empty": true,
+   "target_reported": true,
+   "decoy_not_reported": true,
+   "errors": 0,
+   "seqs": [
+    11,
+    12,
+    13
+   ]
+  },
+  {
+   "nochange_empty": true,
+   "target_reported": true,
+   "decoy_not_reported": true,
+   "errors": 0,
+   "seqs": [
+    14,
+    15,
+    16
+   ]
+  },
+  {
+   "nochange_empty": true,
+   "target_reported": true,
+   "decoy_not_reported": true,
+   "errors": 0,
+   "seqs": [
+    17,
+    18,
+    19
+   ]
+  },
+  {
+   "nochange_empty": true,
+   "target_reported": true,
+   "decoy_not_reported": true,
+   "errors": 0,
+   "seqs": [
+    20,
+    21,
+    22
+   ]
+  },
+  {
+   "nochange_empty": true,
+   "target_reported": true,
+   "decoy_not_reported": true,
+   "errors": 0,
+   "seqs": [
+    23,
+    24,
+    25
+   ]
+  },
+  {
+   "nochange_empty": true,
+   "target_reported": true,
+   "decoy_not_reported": true,
+   "errors": 0,
+   "seqs": [
+    26,
+    27,
+    28
+   ]
+  },
+  {
+   "nochange_empty": true,
+   "target_reported": true,
+   "decoy_not_reported": true,
+   "errors": 0,
+   "seqs": [
+    29,
+    30,
+    31
+   ]
+  }
+ ],
+ "anchored": [
+  {
+   "nochange_empty": true,
+   "target_reported": true,
+   "decoy_not_reported": true,
+   "errors": 0,
+   "seqs": [
+    33,
+    34,
+    35
+   ]
+  },
+  {
+   "nochange_empty": true,
+   "target_reported": true,
+   "decoy_not_reported": true,
+   "errors": 0,
+   "seqs": [
+    36,
+    37,
+    38
+   ]
+  },
+  {
+   "nochange_empty": true,
+   "target_reported": true,
+   "decoy_not_reported": true,
+   "errors": 0,
+   "seqs": [
+    39,
+    40,
+    41
+   ]
+  },
+  {
+   "nochange_empty": true,
+   "target_reported": true,
+   "decoy_not_reported": true,
+   "errors": 0,
+   "seqs": [
+    42,
+    43,
+    44
+   ]
+  },
+  {
+   "nochange_empty": true,
+   "target_reported": true,
+   "decoy_not_reported": true,
+   "errors": 0,
+   "seqs": [
+    45,
+    46,
+    47
+   ]
+  },
+  {
+   "nochange_empty": true,
+   "target_reported": true,
+   "decoy_not_reported": true,
+   "errors": 0,
+   "seqs": [
+    48,
+    49,
+    50
+   ]
+  },
+  {
+   "nochange_empty": true,
+   "target_reported": true,
+   "decoy_not_reported": true,
+   "errors": 0,
+   "seqs": [
+    51,
+    52,
+    53
+   ]
+  },
+  {
+   "nochange_empty": true,
+   "target_reported": true,
+   "decoy_not_reported": true,
+   "errors": 0,
+   "seqs": [
+    54,
+    55,
+    56
+   ]
+  },
+  {
+   "nochange_empty": true,
+   "target_reported": true,
+   "decoy_not_reported": true,
+   "errors": 0,
+   "seqs": [
+    57,
+    58,
+    59
+   ]
+  },
+  {
+   "nochange_empty": true,
+   "target_reported": true,
+   "decoy_not_reported": true,
+   "errors": 0,
+   "seqs": [
+    60,
+    61,
+    62
+   ]
+  }
+ ]
+}
