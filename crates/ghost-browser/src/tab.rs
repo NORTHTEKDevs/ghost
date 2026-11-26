@@ -615,7 +615,8 @@ impl Tab {
     /// A tab that is not compositing produces no frame, and `Page.captureScreenshot`
     /// simply never returns while it waits for one - the single worst stall in the
     /// browser backend. Two ways to force a frame, measured against each other on a
-    /// background tab (`examples/shot_probe.rs`):
+    /// background tab (by a probe that was never committed; the numbers below are
+    /// the original author's):
     ///
     /// | strategy | per capture |
     /// |---|---|
@@ -631,6 +632,12 @@ impl Tab {
     /// tab is active in its window - invisible and harmless in a browser ghost
     /// launched, unacceptable in the user's own browser where it would switch their
     /// tab. So owned browsers take the fast path and attached ones take the override.
+    ///
+    /// On a headless browser the fast path still cost ~1 s per capture until
+    /// 2026-11-25: Chrome's GPU compositor without a display produced a frame
+    /// about once a second, whatever was asked of the tab. The fix is at launch
+    /// (`--disable-gpu-compositing`, see `launch::base_args`), not here;
+    /// docs/benches/2026-11-25-stage-3 has the strategies that were measured.
     pub async fn screenshot(&self, full_page: bool) -> Result<Vec<u8>> {
         if self.owned_browser {
             // Cheap (~1ms) and idempotent, so it is re-asserted per capture rather

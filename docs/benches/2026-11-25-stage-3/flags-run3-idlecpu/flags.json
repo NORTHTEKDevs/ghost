@@ -1,0 +1,338 @@
+[
+ {
+  "n": 20,
+  "first_ms": 1523.3,
+  "median_ms": 1001.6,
+  "p95_ms": 1523.3,
+  "valid": 20,
+  "centre_ok": 20,
+  "idle_cpu_pct_of_one_core": -0.6,
+  "raw": [
+   {
+    "ms": 1523.3,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 100.5,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 282.2,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 721.7,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1001.2,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1007.2,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 999.0,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1014.6,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1008.0,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1001.3,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1005.7,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1001.8,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1004.0,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1006.8,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1002.2,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1002.8,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1001.4,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 998.8,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1000.2,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 998.3,
+    "ok": true,
+    "centre_ok": true
+   }
+  ],
+  "variant": "A: ghost headless as shipped"
+ },
+ {
+  "n": 20,
+  "first_ms": 60.2,
+  "median_ms": 31.8,
+  "p95_ms": 60.2,
+  "valid": 20,
+  "centre_ok": 20,
+  "idle_cpu_pct_of_one_core": 3.5,
+  "raw": [
+   {
+    "ms": 60.2,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 30.3,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 30.8,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 31.8,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 32.0,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 30.6,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 30.9,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 33.1,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 28.9,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 31.8,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 31.9,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 32.1,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 30.3,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 32.5,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 30.8,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 32.1,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 29.6,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 33.2,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 30.0,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 31.7,
+    "ok": true,
+    "centre_ok": true
+   }
+  ],
+  "variant": "E: + --disable-gpu"
+ },
+ {
+  "n": 20,
+  "first_ms": 40.5,
+  "median_ms": 31.2,
+  "p95_ms": 40.5,
+  "valid": 20,
+  "centre_ok": 20,
+  "idle_cpu_pct_of_one_core": 3.7,
+  "raw": [
+   {
+    "ms": 40.5,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 30.9,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 31.0,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 31.4,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 29.7,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 30.3,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 32.0,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 31.6,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 31.6,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 30.7,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 31.4,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 31.0,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 31.0,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 32.5,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 29.6,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 33.1,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 29.6,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 32.9,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 29.8,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 31.7,
+    "ok": true,
+    "centre_ok": true
+   }
+  ],
+  "variant": "F: + --disable-gpu-compositing"
+ }
+]

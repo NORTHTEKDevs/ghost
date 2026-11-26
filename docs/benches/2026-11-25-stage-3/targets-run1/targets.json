@@ -1,0 +1,446 @@
+[
+ {
+  "how": "createTarget background:true (ghost today)",
+  "n": 20,
+  "first_ms": 1554.6,
+  "median_ms": 1005.9,
+  "p95_ms": 1554.6,
+  "valid": 20,
+  "centre_ok": 20,
+  "raw": [
+   {
+    "ms": 1554.6,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 87.4,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 289.0,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 716.2,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1014.7,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1006.9,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1000.5,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1016.1,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1002.1,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1015.3,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1014.1,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1002.9,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1013.1,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1001.9,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1000.9,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1005.0,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1006.2,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1005.6,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1016.6,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1012.5,
+    "ok": true,
+    "centre_ok": true
+   }
+  ]
+ },
+ {
+  "how": "createTarget background:false",
+  "n": 20,
+  "first_ms": 1527.4,
+  "median_ms": 1003.1,
+  "p95_ms": 1527.4,
+  "valid": 20,
+  "centre_ok": 20,
+  "raw": [
+   {
+    "ms": 1527.4,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 74.1,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 258.7,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 759.1,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 919.0,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 83.8,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1003.5,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1005.8,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1017.2,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1004.3,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1000.8,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1015.5,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1017.4,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1008.8,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1001.1,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1002.7,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1001.3,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1014.2,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1001.5,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1004.5,
+    "ok": true,
+    "centre_ok": true
+   }
+  ]
+ },
+ {
+  "how": "createTarget newWindow:true background:true",
+  "n": 20,
+  "first_ms": 1461.0,
+  "median_ms": 1002.7,
+  "p95_ms": 1461.0,
+  "valid": 20,
+  "centre_ok": 20,
+  "raw": [
+   {
+    "ms": 1461.0,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 184.3,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 261.7,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 744.9,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 872.6,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 130.0,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1015.2,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 999.4,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1014.3,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1003.8,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1003.1,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1015.8,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1009.1,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1002.3,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 999.0,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1017.4,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1001.5,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1001.2,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1009.5,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1007.1,
+    "ok": true,
+    "centre_ok": true
+   }
+  ]
+ },
+ {
+  "how": "the browser's initial tab, navigated",
+  "n": 20,
+  "first_ms": 506.1,
+  "median_ms": 1007.2,
+  "p95_ms": 1018.6,
+  "valid": 20,
+  "centre_ok": 20,
+  "raw": [
+   {
+    "ms": 506.1,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1010.0,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 136.8,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 613.5,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 393.0,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1007.8,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1007.0,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1009.9,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1018.6,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1006.7,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1005.0,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1009.2,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1012.0,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1005.4,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1005.6,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1003.8,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1009.1,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1007.7,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1010.4,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1007.4,
+    "ok": true,
+    "centre_ok": true
+   }
+  ]
+ }
+]
