@@ -1,0 +1,4 @@
+    Checking ghost-cli v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-cli)
+    Checking ghost-mcp v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-mcp)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.61s
+exit=0

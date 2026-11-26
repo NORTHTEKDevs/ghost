@@ -1,0 +1,3 @@
+<stdin>:4: SyntaxWarning: "\g" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\g"? A raw string is also an option.
+{"enabled": true, "synthetic_foreground_changes": 0, "foreground_taken_during_input": 0}
+during_input_incidents present: True

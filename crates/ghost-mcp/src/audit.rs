@@ -89,6 +89,12 @@ struct State {
     samples: u64,
     human_changes: u64,
     incidents: Vec<Incident>,
+    /// Changes classed as the human's (real input in the last 1.5 s) whose
+    /// target is a window Ghost drives, made with no click or Alt+Tab behind
+    /// them: Ghost's window took the foreground while the human typed. The
+    /// synthetic rule cannot see these - GetLastInputInfo counts the human's
+    /// typing - and `verify` used to miss them (round 1, C6).
+    during_input: Vec<Incident>,
     /// The window the human most recently chose themselves (a foreground
     /// change with real input behind it). The foreground guard hands the
     /// foreground back here when the window it recorded before a verb was
@@ -302,6 +308,16 @@ fn in_flight_names() -> Vec<String> {
     v
 }
 
+/// Whether a human-classed foreground change was really Ghost's: its target is
+/// a window Ghost drives and the input hooks saw no click or Alt+Tab choosing
+/// it. `chose` is `None` when the hooks are not installed - then nothing is
+/// claimed either way.
+#[cfg(any(windows, test))]
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn taken_during_input(to_is_ghosts: bool, chose: Option<bool>) -> bool {
+    to_is_ghosts && chose == Some(false)
+}
+
 /// The attribution rule, kept pure so it is unit-tested: a foreground change is
 /// the human's when real input arrived within the window, synthetic otherwise.
 #[cfg(any(windows, test))]
@@ -330,6 +346,7 @@ fn observe(
     title: String,
     idle_ms: u64,
     to_is_protected: bool,
+    chose: Option<bool>,
 ) -> Option<Incident> {
     let mut st = state().lock().unwrap_or_else(|p| p.into_inner());
     st.samples += 1;
@@ -340,6 +357,23 @@ fn observe(
             st.human_changes += 1;
             if !to_is_protected {
                 st.last_human_hwnd = hwnd;
+            }
+            if taken_during_input(to_is_protected, chose) {
+                st.during_input.push(Incident {
+                    epoch_ms: SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map(|d| d.as_millis() as u64)
+                        .unwrap_or(0),
+                    from_hwnd: last,
+                    to_hwnd: hwnd,
+                    to_title: title,
+                    idle_ms,
+                    in_flight: in_flight_names(),
+                });
+                if st.during_input.len() > MAX_RECENT {
+                    let excess = st.during_input.len() - MAX_RECENT;
+                    st.during_input.drain(0..excess);
+                }
             }
             None
         }
@@ -443,7 +477,16 @@ pub fn snapshot() -> Value {
             "idle_ms": i.idle_ms,
             "in_flight": i.in_flight,
         })).collect::<Vec<_>>(),
-        "rule": "a foreground change with no real hardware input in the previous 1.5 s is synthetic (GetLastInputInfo); tool calls in flight at that moment are listed",
+        "foreground_taken_during_input": st.during_input.len(),
+        "during_input_incidents": st.during_input.iter().rev().take(MAX_RECENT).map(|i| json!({
+            "epoch_ms": i.epoch_ms,
+            "from_hwnd": i.from_hwnd,
+            "to_hwnd": i.to_hwnd,
+            "to_title": i.to_title,
+            "idle_ms": i.idle_ms,
+            "in_flight": i.in_flight,
+        })).collect::<Vec<_>>(),
+        "rule": "a foreground change with no real hardware input in the previous 1.5 s is synthetic (GetLastInputInfo); tool calls in flight at that moment are listed. A change with real input behind it that lands on a window Ghost drives, with no real click or Alt+Tab choosing it, is listed under during_input_incidents",
     })
 }
 
@@ -658,7 +701,13 @@ fn sampler() {
             // is suspect, not just one currently protected: protection expires
             // while a thief still holds the screen.
             let to_is_ghosts = is_protected(h, Instant::now(), pid_of) || is_ever_driven(h, pid_of);
-            if let Some(incident) = observe(&mut prev, h, title.clone(), idle_ms, to_is_ghosts) {
+            let chose = crate::realinput::watching().then(|| {
+                crate::realinput::human_chose_a_window(
+                    crate::realinput::since_real_click(),
+                    crate::realinput::since_real_alt(),
+                )
+            });
+            if let Some(incident) = observe(&mut prev, h, title.clone(), idle_ms, to_is_ghosts, chose) {
                 tracing::warn!(
                     to = %incident.to_title,
                     idle_ms = incident.idle_ms,
@@ -741,24 +790,49 @@ mod tests {
         // still not be recorded as the window the human chose, or the sentinel
         // would hand the foreground back to the thief.
         let mut prev = None;
-        observe(&mut prev, 700, "human's editor".into(), 50, false);
-        observe(&mut prev, 701, "human's editor".into(), 50, false);
+        observe(&mut prev, 700, "human's editor".into(), 50, false, None);
+        observe(&mut prev, 701, "human's editor".into(), 50, false, None);
         assert_eq!(last_human_foreground(), 701);
-        observe(&mut prev, 702, "the browser Ghost drives".into(), 50, true);
+        observe(&mut prev, 702, "the browser Ghost drives".into(), 50, true, None);
         assert_eq!(last_human_foreground(), 701, "the driven window must not overwrite it");
-        observe(&mut prev, 703, "human's other window".into(), 50, false);
+        observe(&mut prev, 703, "human's other window".into(), 50, false, None);
         assert_eq!(last_human_foreground(), 703);
+    }
+
+    #[test]
+    fn taken_during_input_needs_a_ghost_window_and_no_click_or_alt_tab() {
+        assert!(taken_during_input(true, Some(false)));
+        assert!(!taken_during_input(true, Some(true)), "the human clicked it or alt-tabbed to it");
+        assert!(!taken_during_input(true, None), "no hooks: no claim");
+        assert!(!taken_during_input(false, Some(false)), "not a window Ghost drives");
+    }
+
+    #[test]
+    fn a_ghost_window_taking_the_foreground_while_the_human_types_is_recorded() {
+        let _serial = serial();
+        let mut prev = None;
+        observe(&mut prev, 900, "human's editor".into(), 50, false, Some(false));
+        let before = snapshot()["foreground_taken_during_input"].as_u64().unwrap();
+        // idle 50 ms: the human is typing, so the synthetic rule calls it theirs
+        assert!(observe(&mut prev, 901, "ghost-driven".into(), 50, true, Some(false)).is_none());
+        let snap = snapshot();
+        assert_eq!(snap["foreground_taken_during_input"].as_u64().unwrap(), before + 1);
+        assert_eq!(snap["during_input_incidents"][0]["to_hwnd"], 901);
+        // the human deliberately switching to it is not recorded
+        observe(&mut prev, 902, "human's editor".into(), 50, false, Some(false));
+        observe(&mut prev, 901, "ghost-driven".into(), 50, true, Some(true));
+        assert_eq!(snapshot()["foreground_taken_during_input"].as_u64().unwrap(), before + 1);
     }
 
     #[test]
     fn observe_counts_and_records_in_flight_tools() {
         let _serial = serial();
         let mut prev = None;
-        assert!(observe(&mut prev, 10, "a".into(), 5_000, false).is_none(), "first sample sets the baseline");
-        assert!(observe(&mut prev, 10, String::new(), 5_000, false).is_none());
-        assert!(observe(&mut prev, 11, "human".into(), 100, false).is_none());
+        assert!(observe(&mut prev, 10, "a".into(), 5_000, false, None).is_none(), "first sample sets the baseline");
+        assert!(observe(&mut prev, 10, String::new(), 5_000, false, None).is_none());
+        assert!(observe(&mut prev, 11, "human".into(), 100, false, None).is_none());
         let guard = begin("ghost_window");
-        let inc = observe(&mut prev, 12, "stolen".into(), 9_000, false).expect("synthetic change");
+        let inc = observe(&mut prev, 12, "stolen".into(), 9_000, false, None).expect("synthetic change");
         assert_eq!(inc.to_title, "stolen");
         assert_eq!(inc.in_flight, vec!["ghost_window".to_string()]);
         drop(guard);

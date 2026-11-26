@@ -1,0 +1,271 @@
+   Compiling ghost-mcp v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-mcp)
+   Compiling ghost-cli v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.44s
+     Running unittests src\lib.rs (target-improve\debug\deps\ghost_browser-784c1be5f8b6ae89.exe)
+
+running 26 tests
+test keys::tests::non_printing_keys_emit_no_text ... ok
+test tab::tests::js_string_escapes_embedded_quotes ... ok
+test cdp::tests::field_str_reports_the_missing_key ... ok
+test keys::tests::key_names_are_case_insensitive ... ok
+test keys::tests::modifier_mask_matches_the_cdp_bit_layout ... ok
+test cdp::tests::field_str_extracts_present_values ... ok
+test keys::tests::single_characters_are_derived_not_table_driven ... ok
+test keys::tests::unknown_multi_character_names_are_rejected ... ok
+test launch::tests::background_throttling_is_always_disabled ... ok
+test launch::tests::headless_mode_never_asks_for_a_window_position ... ok
+test launch::tests::headless_mode_composites_in_software_and_only_headless_does ... ok
+test launch::tests::launch_mode_parses_common_spellings ... ok
+test launch::tests::command_line_quoting_round_trips_spaces_and_quotes ... ok
+test launch::tests::malformed_port_file_yields_none_rather_than_a_bogus_port ... ok
+test launch::tests::port_file_first_line_is_the_port ... ok
+test launch::tests::port_is_always_delegated_to_chrome_to_avoid_cross_process_races ... ok
+test launch::tests::profile_dir_is_per_process ... ok
+test launch::tests::windowed_mode_starts_off_the_visible_desktop ... ok
+test keys::tests::enter_carries_key_code_and_text ... ok
+test tab::tests::js_string_neutralizes_expression_injection ... ok
+test tab::tests::tab_info_serializes_for_the_mcp_layer ... ok
+test tab::tests::js_string_escapes_newlines_and_backslashes ... ok
+test launch::tests::windowed_on_a_hidden_desktop_keeps_ordinary_window_coordinates ... ok
+test launch::tests::a_job_member_dies_when_the_job_closes ... ok
+test browser::tests::attaching_to_a_dead_port_fails_fast ... ok
+test cdp::tests::connect_to_a_dead_endpoint_is_a_transport_error ... ok
+
+test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.03s
+
+     Running unittests src\lib.rs (target-improve\debug\deps\ghost_cache-41e9a78a7746efb6.exe)
+
+running 15 tests
+test locator_cache::tests::cache_hit_skips_walk_simulation ... ok
+test locator_cache::tests::invalidate_causes_subsequent_miss ... ok
+test locator_cache::tests::upsert_then_lookup_returns_hit ... ok
+test locator_cache::tests::miss_on_empty_cache ... ok
+test locator_cache::tests::stale_rect_invalidation_falls_back_to_miss ... ok
+test uia_mirror::tests::snapshot_returns_noop_delta_when_seq_matches ... ok
+test locator_cache::tests::upsert_updates_existing_rect ... ok
+test uia_mirror::tests::snapshot_delta_uses_history_after_mutation ... ok
+test uia_mirror::tests::cache_applies_mutation_and_bumps_seq ... ok
+test uia_mirror::tests::diff_detects_added_and_removed ... ok
+test uia_mirror::tests::diff_detects_updates_by_runtime_id_when_props_change ... ok
+test uia_mirror::tests::bump_seq_advances_seq_without_clearing_nodes ... ok
+test uia_mirror::tests::diff_empty_snapshots_is_empty_delta ... ok
+test uia_mirror::tests::bump_seq_advances_cache_seq_for_wait_until ... ok
+test locator_cache::tests::upsert_is_bounded_at_max_entries ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
+     Running unittests src\main.rs (target-improve\debug\deps\ghost-ffa654f28c033f01.exe)
+
+running 46 tests
+test doctor::tests::dpi_unaware_at_scaling_is_fatal_but_harmless_at_100_percent ... ok
+test doctor::tests::no_open_windows_warns_rather_than_fails ... ok
+test doctor::tests::only_a_fail_is_fatal ... ok
+test tests::locate_mode_instant_only ... ok
+test doctor::tests::render_reports_failure_count ... ok
+test doctor::tests::render_lists_every_check_and_summarises ... ok
+test tests::locate_mode_default_is_instant ... ok
+test tests::locate_mode_deliberate ... ok
+test doctor::tests::windows_build_floor_is_19041 ... ok
+test doctor::tests::only_fail_is_fatal ... ok
+test tests::target_description_third ... ok
+test tests::target_none_is_err ... ok
+test tests::target_name_wins_over_role ... ok
+test tests::target_role_when_no_name ... ok
+test tests::target_text_last ... ok
+test verify::tests::a_change_the_human_made_passes ... ok
+test verify::tests::a_ghost_caused_change_fails_even_when_the_foreground_returns_to_where_it_started ... ok
+test verify::tests::a_ghost_window_taking_the_foreground_while_the_human_typed_fails_even_when_it_ended_where_it_started ... ok
+test verify::tests::a_launched_window_in_the_foreground_at_the_end_fails_even_while_the_human_typed ... ok
+test verify::tests::a_launched_window_in_the_foreground_at_the_end_fails_without_an_audit_too ... ok
+test verify::tests::a_launched_window_taking_the_foreground_fails_with_nothing_in_flight ... ok
+test verify::tests::a_synthetic_change_by_another_program_passes_with_a_note ... ok
+test verify::tests::unchanged_with_nothing_recorded_passes ... ok
+test verify::tests::audit_incidents_before_the_run_are_ignored_and_an_off_audit_is_none ... ok
+test verify::tests::an_unreadable_starting_foreground_never_passes ... ok
+test tests::parse_list_windows ... ok
+test tests::parse_window_list ... ok
+test verify::tests::without_an_audit_only_an_unchanged_handle_passes ... ok
+test verify::tests::during_input_incidents_are_read_from_the_audit ... ok
+test tests::parse_window_default_op_is_list ... ok
+test tests::parse_key_down ... ok
+test tests::parse_serve ... ok
+test tests::serve_rejects_addr_flag ... ok
+test tests::parse_snapshot_no_out ... ok
+test tests::parse_click_name ... ok
+test tests::parse_see_full_mode ... ok
+test tests::parse_query_fields ... ok
+test tests::parse_click_at ... ok
+test tests::parse_find_by_name ... ok
+test tests::parse_screenshot_default_out ... ok
+test tests::parse_key_combo ... ok
+test tests::parse_key_single ... ok
+test tests::parse_see_default_mode ... ok
+test tests::parse_act_click ... ok
+test tests::parse_find_by_role ... ok
+test tests::parse_press ... ok
+
+test result: ok. 46 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src\lib.rs (target-improve\debug\deps\ghost_core-0e0f6a9d9b12b14f.exe)
+
+running 157 tests
+test capture::idle::tests::idle_detector_returns_stable_on_static_desktop ... ignored
+test capture::idle::tests::different_raw_buffers_hash_differently ... ok
+test capture::idle::tests::changed_detection_logic_on_alternating_frames ... ok
+test capture::idle::tests::stable_detection_logic_on_identical_frames ... ok
+test capture::screen::tests::bgra_to_rgba_output_size_matches_dimensions ... ok
+test capture::idle::tests::hash_of_identical_buffers_matches ... ok
+test capture::screen::tests::dxgi_error_constants_have_correct_values ... ok
+test capture::idle::tests::hash_differs_when_pixels_differ ... ok
+test capture::screen::tests::is_frame_black_empty_returns_false ... ok
+test capture::screen::tests::is_frame_black_single_white_pixel ... ok
+test capture::screen::tests::repeated_captures_reuse_duplication_session ... ignored
+test capture::screen::tests::bgra_to_rgba_2x1_with_pitch ... ok
+test capture::marks::tests::multi_digit_label_wider_than_single ... ok
+test capture::screen::tests::bgra_to_rgba_region_matches_full_then_crop ... ok
+test capture::idle::tests::downsample_averages_uniform_buffer ... ok
+test capture::marks::tests::draw_marks_clamps_offscreen_position ... ok
+test capture::screen::tests::dxgi_always_black_flag_starts_false_and_toggles ... ok
+test capture::screen::tests::bgra_to_rgba_with_row_padding ... ok
+test capture::screen::tests::bgra_to_rgba_alpha_always_255 ... ok
+test capture::idle::tests::identical_raw_buffers_hash_the_same ... ok
+test capture::screen::tests::encode_png_rgba_roundtrip_dimensions ... ok
+test capture::screen::tests::encode_png_rgba_produces_valid_png_header ... ok
+test capture::screen::tests::is_frame_black_all_zero_returns_true ... ok
+test capture::marks::tests::draw_marks_changes_pixels_at_mark ... ok
+test capture::screen::tests::is_frame_black_only_alpha_nonzero_returns_true ... ok
+test capture::screen::tests::is_frame_black_single_nonzero_r_returns_false ... ok
+test capture::screen::tests::rect_within_basic ... ok
+test capture::screen::tests::rect_within_rejects_inverted_rects ... ok
+test capture::screen::tests::rect_within_negative_origin_bounds ... ok
+test capture::verify::tests::capture_noise_within_tolerance_is_ignored ... ok
+test capture::screen::tests::bgra_to_rgba_swaps_channels ... ok
+test capture::screen::tests::encode_png_rgba_size_mismatch_returns_error ... ok
+test capture::screen::tests::virtual_bounds_contains_primary ... ok
+test capture::verify::tests::delta_score_is_bounded ... ok
+test capture::verify::tests::foreground_ok_is_passed_through ... ok
+test capture::verify::tests::verification_serializes_to_json ... ok
+test capture::verify::tests::small_change_in_uniform_frame_is_detected ... ok
+test capture::verify::tests::identical_frames_produce_zero_delta ... ok
+test capture::verify::tests::different_frames_produce_nonzero_delta ... ok
+test desktop::tests::desktop_names_are_sanitized_and_bounded ... ok
+test focus::tests::lock_env_values ... ok
+test input::keyboard::tests::key_down_event_has_correct_vk ... ok
+test input::hotkey::tests::registration_is_idempotent ... ok
+test input::keyboard::tests::empty_text_produces_no_inputs ... ok
+test input::hotkey::tests::stop_flag_round_trips_and_broadcasts ... ok
+test input::keyboard::tests::name_to_vk_all_f_keys ... ok
+test input::keyboard::tests::name_to_vk_arrow_aliases_work ... ok
+test input::keyboard::tests::name_to_vk_alpha_and_digits ... ok
+test input::keyboard::tests::key_up_event_has_keyup_flag ... ok
+test input::keyboard::tests::name_to_vk_enter_maps_to_return ... ok
+test input::keyboard::tests::name_to_vk_f5_maps_correctly ... ok
+test input::keyboard::tests::name_to_vk_is_case_insensitive ... ok
+test input::keyboard::tests::name_to_vk_navigation_keys ... ok
+test input::keyboard::tests::name_to_vk_modifiers ... ok
+test input::keyboard::tests::name_to_vk_return_alias ... ok
+test input::keyboard::tests::text_to_inputs_produces_pairs ... ok
+test input::keyboard::tests::name_to_vk_unknown_returns_none ... ok
+test input::mouse::tests::click_up_uses_leftup_flag ... ok
+test input::mouse::tests::click_down_uses_leftdown_flag ... ok
+test desktop::tests::a_fresh_desktop_has_no_application_windows ... ok
+test input::mouse::tests::right_click_event_down_uses_rightdown_flag ... ok
+test input::mouse::tests::right_click_event_up_uses_rightup_flag ... ok
+test input::mouse::tests::scroll_event_horizontal_uses_hwheel_flag ... ok
+test input::mouse::tests::scroll_event_vertical_uses_wheel_flag ... ok
+test input::mouse::tests::to_absolute_clamps_out_of_range_rather_than_wrapping ... ok
+test input::mouse::tests::to_absolute_handles_monitor_left_of_primary_negative_origin ... ok
+test input::mouse::tests::to_absolute_degenerate_bounds_do_not_panic ... ok
+test desktop::tests::creating_a_desktop_binds_a_worker_and_exempts_it_from_the_focus_policy ... ok
+test focus::tests::locked_process_refuses_to_leave_background ... ok
+test input::mouse::tests::to_absolute_maps_far_corner_to_full_scale ... ok
+test focus::tests::policy_parsing_and_gating ... ok
+test input::mouse::tests::to_absolute_handles_monitor_right_of_primary ... ok
+test input::mouse::tests::to_absolute_maps_origin_of_virtual_desktop_to_zero ... ok
+test input::mouse::tests::move_event_targets_the_whole_virtual_desktop ... ok
+test input::mouse::tests::move_event_uses_absolute_flag ... ok
+test input::postmessage::tests::click_returns_error_when_hwnd_is_zero ... ok
+test input::postmessage::tests::click_screen_returns_error_when_hwnd_is_zero ... ok
+test input::postmessage::tests::button_click_returns_error_when_hwnd_is_zero ... ok
+test desktop::tests::exec_propagates_values_and_runs_off_the_calling_thread ... ok
+test input::postmessage::tests::hover_screen_returns_error_when_hwnd_is_zero ... ok
+test input::postmessage::tests::double_click_screen_returns_error_when_hwnd_is_zero ... ok
+test input::postmessage::tests::edit_command_maps_ctrl_shortcuts ... ok
+test input::postmessage::tests::edit_command_returns_error_when_hwnd_is_zero ... ok
+test input::postmessage::tests::focused_control_of_zero_hwnd_returns_zero ... ok
+test input::postmessage::tests::send_char_returns_error_when_hwnd_is_zero ... ok
+test input::postmessage::tests::send_key_returns_error_when_hwnd_is_zero ... ok
+test input::postmessage::tests::set_text_returns_error_when_hwnd_is_zero ... ok
+test process::cmdline::tests::a_dead_pid_reads_as_none ... ok
+test system::clipboard::tests::utf16_empty_string_has_only_null ... ok
+test process::cmdline::tests::parses_explicit_port_and_quoted_user_data_dir ... ok
+test process::manager::tests::app_paths_lookup_ignores_explicit_paths ... ok
+test process::manager::tests::quote_if_needed_does_not_double_quote ... ok
+test process::manager::tests::app_paths_lookup_returns_none_for_unknown_program ... ok
+test process::manager::tests::quote_if_needed_leaves_clean_paths_alone ... ok
+test process::manager::tests::app_paths_lookup_finds_a_browser_when_one_is_installed ... ok
+test process::orphans::tests::orphan_rule ... ok
+test input::postmessage::tests::right_click_screen_returns_error_when_hwnd_is_zero ... ok
+test system::clipboard::tests::utf16_byte_len_is_double_code_units ... ok
+test desktop::tests::two_desktops_get_distinct_names ... ok
+test system::clipboard::tests::utf16_encoding_includes_null_terminator ... ok
+test system::lease::tests::with_foreground_lease_returns_inner_value ... ok
+test system::clipboard::tests::utf16_roundtrip_is_lossless ... ok
+test process::cmdline::tests::reads_our_own_command_line ... ok
+test system::lease::tests::lease_is_reentrant_across_sequential_acquires ... ok
+test process::manager::tests::quote_if_needed_wraps_paths_containing_spaces ... ok
+test system::observer::tests::a_foreground_change_is_reported_with_both_titles ... ok
+test process::cmdline::tests::no_switches_means_no_port ... ok
+test system::dpi::tests::ensure_is_idempotent_and_makes_the_process_aware ... ok
+test system::observer::tests::a_snapshot_compared_to_itself_is_undisturbed ... ok
+test system::observer::tests::a_cursor_jump_is_reported_even_when_focus_is_untouched ... ok
+test process::cmdline::tests::port_zero_needs_the_active_port_file ... ok
+test system::clipboard::tests::null_scan_cap_constant ... ok
+test system::observer::tests::window_title_of_a_null_handle_is_empty_not_a_panic ... ok
+test uia::cached_walker::tests::cached_walker_returns_some_elements ... ignored
+test system::window::tests::a_zero_handle_has_no_rectangle ... ok
+test uia::deadline_tests::timeout_parsing_defaults_floors_and_accepts_overrides ... ok
+test uia::element::tests::bounding_rect_center_is_correct ... ok
+test uia::element::tests::interactive_roles_include_button_and_edit ... ok
+test uia::element::tests::interactive_roles_include_new_types ... ok
+test uia::element::tests::role_button_is_50000 ... ok
+test uia::element::tests::role_checkbox_is_50002 ... ok
+test uia::element::tests::role_document_is_50030 ... ok
+test uia::element::tests::role_edit_is_50004 ... ok
+test uia::element::tests::role_legacy_50_is_unknown ... ok
+test uia::element::tests::role_radiobutton_is_50013 ... ok
+test uia::element::tests::role_window_is_50032 ... ok
+test uia::element::tests::unknown_role_returns_unknown ... ok
+test uia::event_bus::tests::event_bus_singleton_returns_same_instance ... ok
+test uia::element::tests::role_tabitem_is_50019 ... ok
+test uia::element::tests::role_combobox_is_50003 ... ok
+test uia::tree::tests::document_role_does_not_reverse_match_edit ... ok
+test uia::tree::tests::ensure_foreground_current_fg_returns_ok_true ... ignored
+test uia::event_bus::tests::wait_returns_immediately_when_seq_advanced ... ok
+test uia::tree::tests::background_window_state_commands_never_activate ... ok
+test uia::tree::tests::existing_role_aliases_still_hold ... ok
+test uia::tree::tests::focus_window_under_point_is_gated_by_the_policy ... ok
+test uia::tree::tests::interactive_roles_cover_winui_command_bar_controls ... ok
+test uia::tree::tests::role_alias_list_matches_listitem ... ok
+test uia::tree::tests::role_alias_tab_matches_tabitem ... ok
+test uia::tree::tests::truncate_at_char_boundary_never_splits_utf8 ... ok
+test uia::tree::tests::edit_role_aliases_winui_document_surface ... ok
+test uia::tree::tests::window_state_from_str_parses_all_variants ... ok
+test uia::tree::tests::focus_window_under_point_off_screen_coord_returns_ok_when_allowed ... ok
+test uia::tree::tests::focus_window_name_not_found_returns_process_not_found ... ok
+test process::cmdline::tests::reads_another_process_command_line_exactly ... ok
+test uia::deadline_tests::automation_objects_carry_deadlines ... ok
+test process::tests::nonexistent_process_returns_none ... ok
+test process::orphans::tests::the_snapshot_lists_this_process_under_its_parent ... ok
+test uia::sta_pool::tests::pool_runs_closure_on_worker ... ok
+test uia::sta_pool::tests::pool_recovers_from_worker_panic ... ok
+test uia::sta_pool::tests::pool_circuit_breaker_trips_after_three_panics_in_60s ... ok
+test process::tests::find_pid_case_insensitive ... ok
+test system::lease::tests::second_acquire_from_another_thread_times_out_while_held ... ok
+test uia::event_bus::tests::wait_times_out_when_no_events ... ok
+error: test failed, to rerun pass `-p ghost-core --lib`
+
+Caused by:
+  process didn't exit successfully: `C:\Users\Krist\projects\active\ghost\target-improve\debug\deps\ghost_core-0e0f6a9d9b12b14f.exe` (exit code: 1)
+note: test exited abnormally; to see the full output pass --no-capture to the harness.
+exit=1
