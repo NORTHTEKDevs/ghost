@@ -97,6 +97,84 @@ pub(crate) fn cover_allowed(cover: &Cover) -> bool {
         || cover.launched_by_ghost
 }
 
+/// Whether a coordinate click falls back to UIA Invoke: only when no child
+/// control was under the point to post to (windowless content) and the posted
+/// click showed no effect. Invoking after a delivered click pressed it twice.
+pub(crate) fn invoke_fallback_due(windowless: bool, verified: Option<bool>) -> bool {
+    windowless && verified != Some(true)
+}
+
+/// The top-level window containing `hwnd` (itself when it is one).
+#[cfg(windows)]
+fn root_window(hwnd: isize) -> isize {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{GetAncestor, GA_ROOT};
+    let r = unsafe { GetAncestor(HWND(hwnd as *mut _), GA_ROOT).0 as isize };
+    if r == 0 { hwnd } else { r }
+}
+
+/// The deepest visible child window of `root` under screen point (x, y), or
+/// `root` when there is none (windowless content).
+#[cfg(windows)]
+fn deepest_child_at(root: isize, x: i32, y: i32) -> isize {
+    use windows::Win32::Foundation::{HWND, POINT};
+    use windows::Win32::Graphics::Gdi::ScreenToClient;
+    use windows::Win32::UI::WindowsAndMessaging::{ChildWindowFromPointEx, CWP_SKIPINVISIBLE, CWP_SKIPTRANSPARENT};
+    let mut cur = root;
+    for _ in 0..16 {
+        let mut pt = POINT { x, y };
+        let child = unsafe {
+            if !ScreenToClient(HWND(cur as *mut _), &mut pt).as_bool() {
+                break;
+            }
+            ChildWindowFromPointEx(HWND(cur as *mut _), pt, CWP_SKIPINVISIBLE | CWP_SKIPTRANSPARENT).0 as isize
+        };
+        if child == 0 || child == cur {
+            break;
+        }
+        cur = child;
+    }
+    cur
+}
+
+/// The titles a coordinate click's effect can show in: the clicked top-level
+/// window's and its owner's. A popup, dropdown or dialog usually acts on its
+/// owner - the testbed popup's "Ping" read verified 1/20 while watching only
+/// the popup itself.
+#[cfg(windows)]
+fn titles_of(root: isize) -> (String, String) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{GetWindow, GW_OWNER};
+    let owner = unsafe { GetWindow(HWND(root as *mut _), GW_OWNER) }
+        .map(|o| o.0 as isize)
+        .unwrap_or(0);
+    (window_title_of(root), if owner != 0 { window_title_of(owner) } else { String::new() })
+}
+
+/// A coordinate click's effect on its top-level window, polled like an
+/// element click (see `click_verify`): the window's and its owner's titles on
+/// every poll, whole-window persisting pixels at 80 ms. There is no element,
+/// so no UIA state signal.
+#[cfg(windows)]
+async fn poll_point_effect(
+    root: isize,
+    before: &Option<(Vec<u8>, usize, usize)>,
+    title_before: &(String, String),
+) -> (Option<bool>, Option<crate::click_verify::Signal>) {
+    let mut outcome = (None, None);
+    let dispatched = tokio::time::Instant::now();
+    for (i, at) in crate::click_verify::POLL_AT_MS.into_iter().enumerate() {
+        tokio::time::sleep_until(dispatched + Duration::from_millis(at)).await;
+        let slow = crate::click_verify::slow_signals_due(i);
+        let pixels = if slow { crate::click_verify::pixel_effect_async(root, before).await } else { None };
+        outcome = crate::click_verify::decide(&titles_of(root) != title_before, false, pixels);
+        if outcome.0 == Some(true) {
+            break;
+        }
+    }
+    outcome
+}
+
 /// The [`Cover`] facts for the window at a click point.
 #[cfg(windows)]
 fn cover_at(at: isize, target: isize) -> Cover {
@@ -1190,45 +1268,38 @@ impl GhostSession {
                 "click_at background: no window at ({x},{y})"
             )));
         }
+        // Post to the deepest child window under the point inside the target's
+        // top-level window. Posting to the top-level window (as a pinned hwnd
+        // did) never reaches a child control: every pinned click fell through
+        // to UIA Invoke, 337-360 ms, and Invoke activates the window
+        // (docs/benches/2026-11-25-final, e1_click_at).
+        let t_start = std::time::Instant::now();
+        let root = root_window(hwnd);
+        let dispatch = deepest_child_at(root, x, y);
+        let windowless = dispatch == root;
         let fg_before = crate::engine::system::foreground_window();
         let cur_before = crate::engine::system::cursor_pos();
-        let before = crate::engine::capture::capture_window_printwindow(hwnd).ok();
-        // ROI: a small patch centred on the point, window-relative.
-        let (wl, wt) = crate::engine::system::window_rect(hwnd)
-            .map(|(l, t, _, _)| (l, t))
-            .unwrap_or((0, 0));
-        crate::engine::input::BackgroundClicker::click_screen(hwnd, x, y)
+        let before = crate::engine::capture::capture_window_printwindow(root).ok();
+        let title_before = titles_of(root);
+        let t_prepare = t_start.elapsed().as_millis() as u64;
+        crate::engine::input::BackgroundClicker::click_screen(dispatch, x, y)
             .map_err(GhostError::Core)?;
-        tokio::time::sleep(Duration::from_millis(80)).await;
-        let after = crate::engine::capture::capture_window_printwindow(hwnd).ok();
-        let mut verified: Option<bool> = match (&before, &after) {
-            (Some((b, bw, bh)), Some((a, aw, ah))) if bw == aw && bh == ah && !b.is_empty() => {
-                let rl = ((x - wl - 24).max(0)) as usize;
-                let rt = ((y - wt - 24).max(0)) as usize;
-                let rw = 48usize.min(bw.saturating_sub(rl));
-                let rh = 48usize.min(bh.saturating_sub(rt));
-                if rw == 0 || rh == 0 {
-                    Some(compute_verification(b, a, *bw, *bh, true).changed)
-                } else {
-                    let bc = crate::engine::capture::screen::crop_rgba(b, *bw, rl, rt, rw, rh);
-                    let ac = crate::engine::capture::screen::crop_rgba(a, *aw, rl, rt, rw, rh);
-                    Some(compute_verification(&bc, &ac, rw, rh, true).changed)
-                }
-            }
-            _ => None,
-        };
-        // Posted messages had no observable effect: resolve the element under
-        // the point and invoke it. When the target window is pinned (hwnd
-        // override), hit-testing MUST stay inside that window's subtree -
-        // screen-space ElementFromPoint returns the TOPMOST element at the
-        // point, which for an occluded window is the covering app, not the
-        // target. Walk the pinned subtree and take the smallest element whose
-        // rect contains the point (deepest match). Honest fallback - the
-        // response says which path won and whether focus survived it.
+        let t_posted = std::time::Instant::now();
+        let (mut verified, mut verified_by) = poll_point_effect(root, &before, &title_before).await;
+        let t_verify = t_posted.elapsed().as_millis() as u64;
+        // UIA Invoke only when nothing posted could reach a control (windowless
+        // content: WinUI, Chromium) AND nothing changed. A click posted to a
+        // real child control was delivered; invoking after it pressed the
+        // button a second time - 39 activations in 20 calls (stage-7 c1-before).
+        // When the target window is pinned (hwnd override), hit-testing MUST
+        // stay inside that window's subtree - screen-space ElementFromPoint
+        // returns the TOPMOST element at the point, which for an occluded window
+        // is the covering app, not the target. Walk the pinned subtree and take
+        // the smallest element whose rect contains the point (deepest match).
         let mut note: Option<String> = None;
-        if verified != Some(true) {
+        if invoke_fallback_due(windowless, verified) {
             let hit = if hwnd_override.is_some() {
-                let els = self.tree.collect_in_hwnd(hwnd, 200).unwrap_or_default();
+                let els = self.tree.collect_in_hwnd(root, 200).unwrap_or_default();
                 let mut best: Option<crate::engine::uia::element::UiaElement> = None;
                 let mut best_area = i64::MAX;
                 for el in els {
@@ -1249,23 +1320,19 @@ impl GhostSession {
             if let Some(el) = hit {
                 match crate::engine::uia::patterns::invoke_ex(&el, false) {
                     Ok(()) => {
-                        tokio::time::sleep(Duration::from_millis(60)).await;
-                        let after2 = crate::engine::capture::capture_window_printwindow(hwnd).ok();
-                        verified = match (&after, &after2) {
-                            (Some((b, bw, bh)), Some((a, aw, ah))) if bw == aw && bh == ah => {
-                                Some(compute_verification(b, a, *bw, *bh, true).changed)
-                            }
-                            _ => verified,
-                        };
+                        let after_post = crate::engine::capture::capture_window_printwindow(root).ok();
+                        (verified, verified_by) = poll_point_effect(root, &after_post, &titles_of(root)).await;
                         note = Some("posted messages had no effect; clicked via UIA Invoke (windowless control) - the window may have activated".into());
                     }
                     Err(_) => {
-                        note = Some("posted messages had no pixel effect and the element under the point exposes no Invoke pattern - read state to confirm".into());
+                        note = Some("posted messages had no effect and the element under the point exposes no Invoke pattern - read state to confirm".into());
                     }
                 }
             } else {
-                note = Some("posted messages had no pixel effect and no element resolved under the point - read state to confirm".into());
+                note = Some("posted messages had no effect and no element resolved under the point - read state to confirm".into());
             }
+        } else if verified == Some(false) {
+            note = Some("click posted to the control under the point; within 80 ms neither the window title nor its pixels changed - read state to confirm".into());
         }
         let focus_preserved = fg_before == crate::engine::system::foreground_window();
         let cursor_preserved = cursor_unchanged(cur_before, crate::engine::system::cursor_pos());
@@ -1280,6 +1347,16 @@ impl GhostSession {
         });
         if let (Some(obj), Some(n)) = (out.as_object_mut(), note) {
             obj.insert("note".into(), serde_json::Value::String(n));
+        }
+        if let (Some(obj), Some(by)) = (out.as_object_mut(), verified_by) {
+            obj.insert("verified_by".into(), serde_json::Value::String(by.as_str().into()));
+        }
+        if let Some(obj) = out.as_object_mut() {
+            // Where the time went: hit-test + pre-click capture, the poll after
+            // posting, and the whole call (which includes any fallback).
+            obj.insert("timing_ms".into(), serde_json::json!({
+                "prepare": t_prepare, "verify": t_verify, "total": t_start.elapsed().as_millis() as u64,
+            }));
         }
         Ok(out)
     }
@@ -3251,5 +3328,28 @@ mod cover_tests {
         let mut c = cover(20, 0, &[]);
         c.target_pid = 0;
         assert!(!cover_allowed(&c));
+    }
+}
+
+#[cfg(test)]
+mod invoke_fallback_tests {
+    use super::invoke_fallback_due;
+
+    #[test]
+    fn a_click_delivered_to_a_child_control_is_never_invoked_again() {
+        assert!(!invoke_fallback_due(false, Some(false)));
+        assert!(!invoke_fallback_due(false, None));
+        assert!(!invoke_fallback_due(false, Some(true)));
+    }
+
+    #[test]
+    fn windowless_content_with_no_observed_effect_falls_back_to_invoke() {
+        assert!(invoke_fallback_due(true, Some(false)));
+        assert!(invoke_fallback_due(true, None));
+    }
+
+    #[test]
+    fn an_observed_effect_is_never_followed_by_invoke() {
+        assert!(!invoke_fallback_due(true, Some(true)));
     }
 }

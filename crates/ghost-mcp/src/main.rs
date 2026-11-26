@@ -787,8 +787,13 @@ fn dispatch_tool_inner<'a>(
         let result = match (guard, result) {
             (Some((hwnd, pid, fg_before)), Ok(mut v)) => {
                 // Posting verbs are acted on by the target's thread after the
-                // verb returns; give those a short settle before deciding.
+                // verb returns; give those a short settle before deciding. A
+                // click_at whose effect was observed (verified) has already been
+                // handled by that thread, so there is nothing left to wait for:
+                // the fixed 100 ms was most of a pinned click_at's 157 ms.
+                let observed = v.get("verified") == Some(&json!(true));
                 let settle = match name {
+                    "ghost_click_at" if observed => 0,
                     "ghost_click_at" | "ghost_scroll" | "ghost_key" => 100,
                     _ => 0,
                 };

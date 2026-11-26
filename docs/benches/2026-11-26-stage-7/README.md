@@ -51,3 +51,49 @@ sending (4 sent, 16 skipped). So these runs briefly took the human's foreground;
 no input reached any window the probe did not create. C4 (post to the right
 child, verify, never invoke after an observed effect) is the fix and re-measures
 both rows.
+
+## C4 - a coordinate click is posted to the control under the point, verified, and never invoked twice
+
+**Defects** (both measured on the old path).
+- Pinned (`hwnd` given): the click was posted to the top-level window, which a
+  child control never sees; every call fell through to the UIA Invoke fallback,
+  337-360 ms, and Invoke activates the window (round 1, `final/review-run1`).
+- Not pinned: `WindowFromPoint` reached the child, the posted click landed, the
+  48-px pixel patch around it saw no change, and the fallback pressed the
+  control a second time - 39 activations in 20 calls (`c1-before`). That
+  activation took the human's foreground, and the guard's circuit-breaker then
+  pushed the testbed to `HWND_BOTTOM`.
+
+**Change** (`crates/ghost-session/src/session.rs`, `click_at_background`).
+- The click is posted to the deepest visible child window under the point
+  inside the target's top-level window (`deepest_child_at`, a
+  `ChildWindowFromPointEx` walk) - pinned or not.
+- Verified like an element click (`poll_point_effect`): the top-level window's
+  and its owner's titles on every poll (a popup or dropdown usually acts on its
+  owner), whole-window persisting pixels at 80 ms; `verified_by` added.
+- UIA Invoke only when there is no child control under the point (windowless
+  content) AND nothing changed: a pure `invoke_fallback_due`.
+- `timing_ms {prepare, verify, total}` in the response.
+- `crates/ghost-mcp/src/main.rs`: the foreground guard's fixed 100 ms settle after
+  `ghost_click_at` is skipped when the response is `verified: true` (the target's
+  thread has already handled the click - the stage 2 argument for `ghost_act`);
+  it was 125 ms of a 157 ms pinned click. Unverified clicks keep the 100 ms;
+  `ghost_scroll` and `ghost_key` are unchanged.
+
+| Criterion | Target | Before | After run 1 / run 2 |
+|---|---|---|---|
+| Pinned click on Increment lands exactly once (`c4-after-run*`) | 20/20 | 20/20 via the fallback (round 1) | **20/20 / 20/20** |
+| ... without the UIA Invoke fallback note | 20/20 | 0/20 | 20/20 / 20/20 |
+| ... verified | 20/20 | 6/10 (round 1) | 20/20 / 20/20 (`title`) |
+| ... median / p95 | <= 60 ms | 337-360 ms | **23.7 / 39.2 ms, 24.0 / 33.4 ms** |
+| ... foreground changed during the call | 0 | (fallback activates) | 0/20 / 0/20 |
+| Pinned click on the static label (no effect): verified=false (`c4-label-run*`) | >= 19/20 | - | 20/20 / 20/20, no fallback, foreground unchanged |
+| Uncovered, not pinned: lands once and verified (`c4-cover-run*`) | 20/20 | 39 activations in 20 calls | 20/20 once, 20/20 verified, both runs |
+| Owned popup: lands once and verified | 20/20 | 39 pings in 20 calls, verified 1/20 | 20 pings in 20, verified 20/20, both runs |
+| Covered by another process: still refused (C1) | 20/20 | - | 20/20 / 20/20 |
+| Unit: fallback only for windowless content with no observed effect | as stated | 2 of 3 red on a stub | 3/3 green |
+| `cargo test --workspace` | 0 failed | 601 / 0 / 27 | 604 / 0 / 27, both runs |
+| clippy, vibecode lint | 0 / 0 HIGH | - | 0 / 0 findings |
+
+A no-effect `click_at` takes ~230 ms (the full 80 ms poll plus the guard's
+100 ms settle, kept because nothing was observed), against ~340 ms before.
