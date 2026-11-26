@@ -1,0 +1,37 @@
+   Compiling ring v0.17.14
+   Compiling zbus_names v4.3.4
+    Checking tinystr v0.8.3
+    Checking potential_utf v0.1.5
+    Checking tungstenite v0.24.0
+    Checking axum v0.7.9
+    Checking icu_collections v2.2.0
+    Checking icu_locale_core v2.2.0
+   Compiling zbus_xml v5.2.1
+    Checking tokio-tungstenite v0.24.0
+   Compiling zbus_macros v5.18.0
+    Checking icu_provider v2.2.0
+    Checking zbus-lockstep v0.5.2
+    Checking icu_normalizer v2.2.0
+    Checking icu_properties v2.2.0
+   Compiling zbus-lockstep-macros v0.5.2
+    Checking idna_adapter v1.2.1
+    Checking idna v1.1.0
+    Checking url v2.5.8
+    Checking zbus v5.18.0
+    Checking atspi-common v0.14.0
+    Checking ashpd v0.13.13
+    Checking atspi-proxies v0.14.0
+    Checking atspi-connection v0.14.0
+    Checking atspi v0.30.0
+    Checking ghost-linux v0.24.0 (C:\Users\Krist\projects\active\ghost\crates\ghost-linux)
+   Compiling rustls v0.23.46
+    Checking rustls-webpki v0.103.17
+    Checking tokio-rustls v0.26.4
+    Checking hyper-rustls v0.27.9
+    Checking reqwest v0.12.28
+    Checking ghost-browser v0.24.0 (C:\Users\Krist\projects\active\ghost\crates\ghost-browser)
+    Checking ghost-session v0.24.0 (C:\Users\Krist\projects\active\ghost\crates\ghost-session)
+    Checking ghost-cli v0.24.0 (C:\Users\Krist\projects\active\ghost\crates\ghost-cli)
+    Checking ghost-mcp v0.24.0 (C:\Users\Krist\projects\active\ghost\crates\ghost-mcp)
+    Checking ghost-http v0.24.0 (C:\Users\Krist\projects\active\ghost\crates\ghost-http)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 27.71s

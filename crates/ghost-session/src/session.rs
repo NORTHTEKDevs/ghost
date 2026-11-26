@@ -70,6 +70,7 @@ fn read_scope(window: Option<&str>, hint: Option<isize>, handle_reads: bool) -> 
 
 /// What `click_at_background` knows about the window at a click point, for
 /// deciding whether a coordinate click may be posted to it.
+#[cfg_attr(not(windows), allow(dead_code))] // used by the Windows click_at path; tested everywhere
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Cover {
     /// Top-level window at the point.
@@ -90,6 +91,7 @@ pub(crate) struct Cover {
 /// or a process Ghost launched. Anything else is someone else's window lying
 /// over the target: the review probe delivered 10 clicks to the terminal
 /// hosting the session that way (docs/benches/2026-11-25-final).
+#[cfg_attr(not(windows), allow(dead_code))] // used by the Windows click_at path; tested everywhere
 pub(crate) fn cover_allowed(cover: &Cover) -> bool {
     cover.hwnd == cover.target
         || (cover.pid != 0 && cover.pid == cover.target_pid)
@@ -100,6 +102,7 @@ pub(crate) fn cover_allowed(cover: &Cover) -> bool {
 /// Whether a coordinate click falls back to UIA Invoke: only when no child
 /// control was under the point to post to (windowless content) and the posted
 /// click showed no effect. Invoking after a delivered click pressed it twice.
+#[cfg_attr(not(windows), allow(dead_code))] // used by the Windows click_at path; tested everywhere
 pub(crate) fn invoke_fallback_due(windowless: bool, verified: Option<bool>) -> bool {
     windowless && verified != Some(true)
 }
@@ -178,6 +181,7 @@ async fn poll_point_effect(
 /// The refusal for a coordinate click whose point is covered by another
 /// process's window: "element not interactable" (code -32002, whose hint
 /// already says "disabled or covered"), not a vision error.
+#[cfg_attr(not(windows), allow(dead_code))] // used by the Windows click_at path; tested everywhere
 fn cover_refusal(x: i32, y: i32, cover_title: &str, cover_pid: u32, target_title: &str) -> GhostError {
     GhostError::ElementNotInteractable {
         element: format!("the point ({x},{y}) in '{target_title}'"),

@@ -81,7 +81,10 @@ pub fn changed_cells(before: &[u8], after: &[u8], width: usize, height: usize) -
     if width == 0 || height == 0 {
         return cells;
     }
-    for (i, (b, a)) in before.chunks_exact(4).zip(after.chunks_exact(4)).enumerate() {
+    // Whole RGBA pixels only; a trailing partial pixel is ignored, as before.
+    let (before, _) = before.as_chunks::<4>();
+    let (after, _) = after.as_chunks::<4>();
+    for (i, (b, a)) in before.iter().zip(after).enumerate() {
         if b.iter().zip(a).any(|(b, a)| b.abs_diff(*a) > PIXEL_TOLERANCE) {
             let (x, y) = (i % width, i / width);
             if y < height {
