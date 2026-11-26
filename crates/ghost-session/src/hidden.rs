@@ -242,6 +242,34 @@ fn pixels_changed(hwnd: isize, before: Option<(Vec<u8>, usize, usize)>) -> Optio
     Some(compute_verification(&b, &a, bw, bh, true).changed)
 }
 
+/// [`crate::session`]'s `poll_click_effect` for the hidden desktop's worker
+/// thread: the same signals and schedule, blocking. Nothing here can reach the
+/// human's foreground, so it always returns at the first signal that moved.
+fn poll_click_effect(
+    hwnd: isize,
+    el: &UiaElement,
+    before: &Option<(Vec<u8>, usize, usize)>,
+    title_before: &str,
+    state_before: &(String, String),
+) -> (Option<bool>, Option<crate::click_verify::Signal>) {
+    let mut outcome = (None, None);
+    let dispatched = Instant::now();
+    for (i, at) in crate::click_verify::POLL_AT_MS.into_iter().enumerate() {
+        let due = dispatched + Duration::from_millis(at);
+        std::thread::sleep(due.saturating_duration_since(Instant::now()));
+        let slow = crate::click_verify::slow_signals_due(i);
+        outcome = crate::click_verify::decide(
+            title_of(hwnd) != title_before,
+            slow && &(el.name(), el.get_text()) != state_before,
+            if slow { crate::click_verify::pixel_effect(hwnd, before) } else { None },
+        );
+        if outcome.0 == Some(true) {
+            break;
+        }
+    }
+    outcome
+}
+
 fn title_of(hwnd: isize) -> String {
     ghost_core::system::observer::window_title(windows::Win32::Foundation::HWND(hwnd as *mut _))
 }
@@ -525,26 +553,8 @@ impl GhostSession {
                         std::thread::sleep(Duration::from_millis(80));
                         (None, Some(skipped_note))
                     } else {
-                        // Polled, first change wins (see click_verify). Nothing
-                        // here can reach the human's foreground, so an early
-                        // return has no guard to wait for.
-                        let mut changed = None;
-                        let dispatched = Instant::now();
-                        for (i, at) in crate::click_verify::POLL_AT_MS.into_iter().enumerate() {
-                            let due = dispatched + Duration::from_millis(at);
-                            std::thread::sleep(due.saturating_duration_since(Instant::now()));
-                            let slow = crate::click_verify::slow_signals_due(i);
-                            let (v, by) = crate::click_verify::decide(
-                                title_of(hwnd) != title_before,
-                                slow && (el.name(), el.get_text()) != state_before,
-                                if slow { crate::click_verify::pixel_effect(hwnd, &before) } else { None },
-                            );
-                            changed = v;
-                            verified_by = by;
-                            if v == Some(true) {
-                                break;
-                            }
-                        }
+                        let (changed, by) = poll_click_effect(hwnd, &el, &before, &title_before, &state_before);
+                        verified_by = by;
                         let note = match changed {
                             None => Some("click dispatched; the window surface could not be compared - read state to confirm"),
                             Some(false) => Some("click dispatched; within 80 ms neither the window title, the element's name/value nor the window's pixels changed - read state to confirm"),
@@ -596,13 +606,24 @@ impl GhostSession {
                 }
                 "double_click" => {
                     let before = snapshot(true);
+                    let title_before = title_of(hwnd);
+                    let state_before = (el.name(), el.get_text());
                     let target = if info.ctrl != 0 { info.ctrl } else { hwnd };
                     core(BackgroundClicker::double_click_screen(target, cx, cy))?;
-                    std::thread::sleep(Duration::from_millis(80));
                     if composited {
+                        std::thread::sleep(Duration::from_millis(80));
                         (None, Some(skipped_note))
                     } else {
-                        (pixels_changed(hwnd, before), None)
+                        // Verified like a click; one whole-window diff after a
+                        // fixed 80 ms caught 5/20 real double-clicks.
+                        let (changed, by) = poll_click_effect(hwnd, &el, &before, &title_before, &state_before);
+                        verified_by = by;
+                        let note = match changed {
+                            None => Some("double_click dispatched; the window surface could not be compared - read state to confirm"),
+                            Some(false) => Some("double_click dispatched; within 80 ms neither the window title, the element's name/value nor the window's pixels changed - read state to confirm"),
+                            Some(true) => None,
+                        };
+                        (changed, note)
                     }
                 }
                 "right_click" => {

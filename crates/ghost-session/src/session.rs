@@ -78,6 +78,40 @@ fn pick_window<'a>(windows: &'a [WindowInfo], title: &str, hint: Option<isize>) 
     windows.iter().find(|w| w.name.to_lowercase().contains(&ql) && w.state != "minimized")
 }
 
+/// Poll a posted click's effect on a user-desktop window (see `click_verify`):
+/// the title on every poll, the element's UIA name/value and the whole window's
+/// pixels (persisting across a second capture) at 80 ms. Returns at the first
+/// signal that moved unless `full_settle`, which waits the whole 80 ms - a UIA
+/// Invoke fallback can activate the window late, and the foreground guard that
+/// follows must not look before that. The element is taken by value and handed
+/// back: it is not `Sync`, so a reference to it cannot live across an await in
+/// a future that must be `Send`.
+async fn poll_click_effect(
+    hwnd: isize,
+    el: crate::GhostElement,
+    before: &Option<(Vec<u8>, usize, usize)>,
+    title_before: &str,
+    state_before: &(String, String),
+    full_settle: bool,
+) -> ((Option<bool>, Option<crate::click_verify::Signal>), crate::GhostElement) {
+    let mut outcome = (None, None);
+    let dispatched = tokio::time::Instant::now();
+    for (i, at) in crate::click_verify::POLL_AT_MS.into_iter().enumerate() {
+        tokio::time::sleep_until(dispatched + Duration::from_millis(at)).await;
+        let slow = crate::click_verify::slow_signals_due(i);
+        let pixels = if slow { crate::click_verify::pixel_effect_async(hwnd, before).await } else { None };
+        outcome = crate::click_verify::decide(
+            window_title_of(hwnd) != title_before,
+            slow && &(el.name(), el.get_text()) != state_before,
+            pixels,
+        );
+        if outcome.0 == Some(true) && !full_settle {
+            break;
+        }
+    }
+    (outcome, el)
+}
+
 fn cursor_unchanged(before: Option<(i32, i32)>, after: Option<(i32, i32)>) -> bool {
     match (before, after) {
         (Some(a), Some(b)) => a == b,
@@ -2302,40 +2336,6 @@ impl GhostSession {
         let ctrl_hwnd = el.native_window_handle();
         const UIA_BUTTON: u32 = 50000;
 
-        // Window screen origin - used to convert the element's screen rect into the
-        // window-relative ROI for scoped click verification.
-        let win_origin = crate::engine::system::window_rect(hwnd).map(|(l, t, _, _)| (l, t));
-
-        // Verify a pixel effect by an occlusion-proof PrintWindow before/after
-        // delta, SCOPED to the element's own rect so an unrelated redraw elsewhere
-        // (caret blink, clock) can't false-positive. Captures the 'after' itself.
-        // Returns None when it can't verify (no capture / all-black surface).
-        let verify_pixels = |before: Option<(Vec<u8>, usize, usize)>| -> Option<bool> {
-            let after = crate::engine::capture::capture_window_printwindow(hwnd_raw).ok();
-            let (b, bw, bh) = before?;
-            let (a, aw, ah) = after?;
-            if bw != aw || bh != ah || b.is_empty() { return None; }
-            if a.iter().all(|&p| p == 0) || b.iter().all(|&p| p == 0) { return None; }
-            let roi = match (win_origin, rect) {
-                (Some((wl, wt)), Some((l, t, r, bo))) => {
-                    let rl = (l - wl).max(0) as usize;
-                    let rt = (t - wt).max(0) as usize;
-                    let rr = ((r - wl).max(0) as usize).min(bw);
-                    let rb = ((bo - wt).max(0) as usize).min(bh);
-                    if rr > rl && rb > rt { Some((rl, rt, rr, rb)) } else { None }
-                }
-                _ => None,
-            };
-            match roi {
-                Some((rl, rt, rr, rb)) => {
-                    let (cw, ch) = (rr - rl, rb - rt);
-                    let bc = crate::engine::capture::screen::crop_rgba(&b, bw, rl, rt, cw, ch);
-                    let ac = crate::engine::capture::screen::crop_rgba(&a, bw, rl, rt, cw, ch);
-                    Some(compute_verification(&bc, &ac, cw, ch, true).changed)
-                }
-                None => Some(compute_verification(&b, &a, bw, bh, true).changed),
-            }
-        };
         // Element screen centre (for message-posted mouse actions).
         let screen_center = rect.map(|(l, t, r, b)| ((l + r) / 2, (t + b) / 2)).unwrap_or((0, 0));
         // Guard: mouse actions other than click need a windowed control (no
@@ -2466,23 +2466,9 @@ impl GhostSession {
                 // window, not the control's rect: a click's effect is often a
                 // status line or pane elsewhere (the reason the rect-scoped
                 // check missed every testbed click).
-                let mut changed = None;
-                let dispatched = tokio::time::Instant::now();
-                for (i, at) in crate::click_verify::POLL_AT_MS.into_iter().enumerate() {
-                    tokio::time::sleep_until(dispatched + Duration::from_millis(at)).await;
-                    let slow = crate::click_verify::slow_signals_due(i);
-                    let pixels = if slow { crate::click_verify::pixel_effect_async(hwnd_raw, &before).await } else { None };
-                    let (v, by) = crate::click_verify::decide(
-                        window_title_of(hwnd_raw) != title_before,
-                        slow && (el.name(), el.get_text()) != state_before,
-                        pixels,
-                    );
-                    changed = v;
-                    verified_by = by;
-                    if v == Some(true) && !fallback_uia {
-                        break;
-                    }
-                }
+                let ((changed, by), _el) =
+                    poll_click_effect(hwnd_raw, el, &before, &title_before, &state_before, fallback_uia).await;
+                verified_by = by;
                 focus_guard = self.foreground_guard_end(hwnd_raw, win.pid, fg_before).await;
                 let note = if fallback_uia {
                     Some("clicked via UIA Invoke (windowless control) — the window may have activated; check focus_preserved")
@@ -2496,13 +2482,20 @@ impl GhostSession {
             "double_click" => {
                 needs_hwnd("double_click")?;
                 let before = crate::engine::capture::capture_window_printwindow(hwnd_raw).ok();
+                let title_before = window_title_of(hwnd_raw);
+                let state_before = (el.name(), el.get_text());
                 let (sx, sy) = screen_center;
                 crate::engine::input::BackgroundClicker::double_click_screen(ctrl_hwnd, sx, sy).map_err(GhostError::Core)?;
-                tokio::time::sleep(Duration::from_millis(80)).await;
-                let changed = verify_pixels(before);
-                let note = if changed == Some(false) || changed.is_none() {
-                    Some("background double_click posted (focus preserved); effect may be outside the element rect — read state to confirm")
-                } else { None };
+                // Verified like a click: the control's own rect, which this
+                // compared before, missed 20/20 real double-clicks.
+                let ((changed, by), _el) =
+                    poll_click_effect(hwnd_raw, el, &before, &title_before, &state_before, false).await;
+                verified_by = by;
+                let note = match changed {
+                    None => Some("background double_click posted (focus preserved); PrintWindow couldn't verify the effect — read state to confirm"),
+                    Some(false) => Some("background double_click posted (focus preserved); within 80 ms neither the window title, the element's name/value nor the window's pixels changed — read state to confirm"),
+                    Some(true) => None,
+                };
                 (changed, note)
             }
             "right_click" => {

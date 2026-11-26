@@ -123,6 +123,8 @@ def main():
     # effect is a label far from the button. disabled / label: negative controls
     # whose click must change nothing. caret-label: the label control right after
     # a click into the edit, so the edit owns focus (and a caret) during it.
+    ap.add_argument("--action", choices=["click", "double_click"], default="click",
+                    help="double_click: a real one must raise the counter by exactly 2")
     ap.add_argument("--control", choices=["increment", "distant", "disabled", "label", "caret-label"],
                     default="increment")
     a = ap.parse_args()
@@ -204,15 +206,15 @@ def main():
             time.sleep(0.1)
         t0 = window_title(c)
         n0 = notes() if a.control == "distant" else 0
-        env, err, dt = c.call("ghost_act", {"action": "click", "window": TITLE, **targets[a.control]})
+        env, err, dt = c.call("ghost_act", {"action": a.action, "window": TITLE, **targets[a.control]})
         time.sleep(0.05)
         t1 = window_title(c)
         before, after = clicks(t0), clicks(t1)
         d = data_of(env)
         if a.control == "increment":
-            ok = after == before + 1
+            ok = after == before + (2 if a.action == "double_click" else 1)
         elif a.control == "distant":
-            ok = notes() == n0 + 1 and t1 == t0
+            ok = notes() == n0 + (2 if a.action == "double_click" else 1) and t1 == t0
         else:
             ok = t1 == t0
         return {"ms": dt, "is_error": err, "correct": ok, "before": before, "after": after,
@@ -236,7 +238,7 @@ def main():
         run("see_text", see_text)
         run("see_full", see_full)
         run("find", find)
-    run(f"act_click[{a.control}]", act_click)
+    run(f"act_{a.action}[{a.control}]", act_click)
     if a.control == "increment":
         run("act_type", act_type)
 
