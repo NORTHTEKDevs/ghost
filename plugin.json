@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "ghost",
-  "version": "0.23.4",
+  "version": "0.24.0",
   "description": "Verified control of the whole desktop for agents on Windows and Linux: apps with no API, windows, shell, browser.",
   "author": {
     "name": "Northtek",

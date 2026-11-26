@@ -1,5 +1,83 @@
 # Changelog
 
+## [0.24.0] - the right window, and proof it landed
+
+Reliability and safety work, measured before and after on a shared desktop
+(`docs/plans/2026-11-26-convergence-round2.md`, raw output under
+`docs/benches/2026-11-2[56]-*`). Every probe sent input only to windows it
+launched itself. Workspace tests 550 -> 623 passing, clippy clean.
+
+- **Background clicks are verified for real.** A click that landed used to
+  come back `verified: true` 0/20 times on the user desktop and 10/20 on a
+  hidden one: verification diffed only the control's own rectangle after a
+  fixed 80 ms sleep. It now watches the window title, the element's UIA
+  state, and whole-window pixels that persist across two captures, and says
+  which signal it used in a new `verified_by` field. Landed clicks verified
+  **20/20 on both desktops** (including an effect that shows only in a
+  distant label), in 43 / 39 ms instead of 123 / 113 ms; clicks with no
+  effect reported verified 0/40. `double_click` gets the same check (0/20 and
+  5/20 -> 20/20).
+- **Headless tab screenshots take 32 ms, not a second.** Headless Chrome on
+  Windows only produced a new GPU-composited frame about once a second, and
+  every capture waited for it. Headless launches now composite in software
+  (`--disable-gpu-compositing`; WebGL still works). Median 1007 -> 31.6 ms,
+  first capture 1807 -> 42 ms; `ghost verify` 8.0 -> 4.8 s.
+- **Keys and reads go to the window that was resolved, not one with a
+  similar title.** `ghost_key`, the background edit commands and
+  `ghost_see` (text, full and snapshot) re-matched the window by title
+  substring, so a window whose title merely contained the target's, sitting
+  in front, got the key or was read instead (key into the target 0/20, reads
+  0/10). They now use the handle the target resolver chose: 20/20 and 10/10.
+  If that window has gone, the call refuses instead of falling back to a
+  title match.
+- **`ghost_key` in the background is a third faster.** It waited out two
+  back-to-back 60 ms + 100 ms watches for the same focus theft; median
+  190.6 -> 126.6 ms, with a theft still handed back.
+- **Coordinate clicks hit the control under the point, once.** A pinned
+  `click_at` posted to the top-level window, missed the child control and
+  fell back to UIA Invoke (337-360 ms); unpinned, it could fire twice (39
+  activations in 20 calls). It now posts to the deepest child under the point
+  and verifies like `act`: lands exactly once 20/20, 24 ms. On a hidden
+  desktop `click_at` never reached the control at all (0/20); now 20/20.
+- **`ghost_see mode=delta` reports changes.** It diffed a global cache that
+  nothing filled and ignored the window, so it always answered "nothing
+  changed" (0/10 after a real change). Each window now keeps its own last
+  snapshot: real change reported 10/10, no change empty 10/10, a change in
+  another window not reported 10/10. The first read, or a stale `since_seq`,
+  returns the whole tree with `baseline: true`.
+- **`ghost verify` stops blaming others for the foreground.** Its foreground
+  claim now reads both servers' interference audits: it fails on a change
+  Ghost caused (a synthetic change during a call, a Ghost-launched window in
+  front at the end, or a Ghost window taking the foreground while the human
+  types - newly recorded as `during_input_incidents`) and passes, with a note,
+  on changes made by others. 2 of 4 runs passed on a shared desktop before
+  (false FAILs); 3 of 3 and every run since now.
+- **Refusals carry the right error kind.** A covered point or a disabled
+  control is `ElementNotInteractable`, not a "Vision error"; a missing
+  process is `ProcessNotFound`.
+- **`process::kill` exits the process with code 0xDEAD** (was 1), so a
+  process Ghost ended can be told apart from one that failed on its own.
+
+### Behaviour changes an agent may notice
+
+- **A closed anchor is sticky and refuses.** When the anchored window
+  closes, verbs without `window=` refuse and name it (20/20) instead of
+  silently driving whatever window is in front. Pass `window=`, re-anchor, or
+  `ghost_window op=anchor clear=true` to move on.
+- **A covered `click_at` refuses.** Without a pinned `hwnd`, a coordinate
+  click whose point is covered by another process's window refuses
+  (20/20, 0 clicks into the cover; before, the click landed in the cover).
+  The target's own and owned popups are still clickable.
+- **Background combos other than Ctrl+C/X/V/A/Z are refused.** Posting
+  cannot set modifier state, so `Ctrl+S` used to type an "S" (40/40). Those five
+  map to copy / cut / paste / select_all / undo; any other combo refuses with
+  "was not sent" and needs the foreground.
+- **Disabled controls are refused on every path.** The user-desktop
+  background `act` path answered `ok: true` on a disabled button; it now
+  refuses before dispatch like the hidden and foreground paths (20/20). Only
+  an element that reports itself disabled is refused; one whose state cannot
+  be read is still tried.
+
 ## [0.23.4] - a signing policy, and a privacy answer
 
 Documentation only; no behaviour changes.
