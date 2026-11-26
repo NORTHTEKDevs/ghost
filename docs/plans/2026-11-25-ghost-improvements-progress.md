@@ -40,3 +40,11 @@ while the human is typing would be classed as real input and pass verify -> also
 foreground window's pid is a Ghost-launched pid; (b) UIElement::is_enabled maps a UIA error to false, so a
 flaky provider gets refused on all three paths -> refuse only on a definite false.
 
+## Stage 5 - review follow-ups: (a) verify fails if a Ghost-launched window holds the foreground at the end (334d085); (b) act refuses only a definite is_enabled false (8679c06) - GATES VERIFIED
+Grok Bot (12:32 AM AKST): cargo test 580 / 0 / 27; clippy 0; lint 0 findings on 7 changed files; verify 3/3.
+Probe re-check CONTAMINATED: my probes overlapped Claude's final-matrix probes (12:31-12:33 AM), giving
+label false positives (user 8/20) and a 919 ms p95. Claude told to discard/re-run its overlapping output;
+I re-run mine only once the session is idle. Lesson: never run probes while the driven session is probing.
+Not tested: Linux/macOS edits (no C cross-compiler for ring here; CI would compile them).
+Next: convergence round 1 (docs/benches/2026-11-25-final/, docs/plans/2026-11-25-convergence-round1.md).
+

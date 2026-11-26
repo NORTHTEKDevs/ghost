@@ -1,0 +1,230 @@
+{
+ "e1_click_at": {
+  "with_hwnd": [
+   {
+    "delta": 1,
+    "verified": true,
+    "note": "posted messages had no effect; clicked via UIA Invoke (windowless control) - the window may have activated",
+    "is_error": false,
+    "ms": 356.2
+   },
+   {
+    "delta": 1,
+    "verified": true,
+    "note": "posted messages had no effect; clicked via UIA Invoke (windowless control) - the window may have activated",
+    "is_error": false,
+    "ms": 336.6
+   },
+   {
+    "delta": 1,
+    "verified": false,
+    "note": "posted messages had no effect; clicked via UIA Invoke (windowless control) - the window may have activated",
+    "is_error": false,
+    "ms": 353.7
+   },
+   {
+    "delta": 1,
+    "verified": false,
+    "note": "posted messages had no effect; clicked via UIA Invoke (windowless control) - the window may have activated",
+    "is_error": false,
+    "ms": 336.8
+   },
+   {
+    "delta": 1,
+    "verified": false,
+    "note": "posted messages had no effect; clicked via UIA Invoke (windowless control) - the window may have activated",
+    "is_error": false,
+    "ms": 337.1
+   },
+   {
+    "delta": 1,
+    "verified": true,
+    "note": "posted messages had no effect; clicked via UIA Invoke (windowless control) - the window may have activated",
+    "is_error": false,
+    "ms": 223.3
+   },
+   {
+    "delta": 1,
+    "verified": true,
+    "note": "posted messages had no effect; clicked via UIA Invoke (windowless control) - the window may have activated",
+    "is_error": false,
+    "ms": 359.7
+   },
+   {
+    "delta": 1,
+    "verified": true,
+    "note": "posted messages had no effect; clicked via UIA Invoke (windowless control) - the window may have activated",
+    "is_error": false,
+    "ms": 340.5
+   },
+   {
+    "delta": 1,
+    "verified": false,
+    "note": "posted messages had no effect; clicked via UIA Invoke (windowless control) - the window may have activated",
+    "is_error": false,
+    "ms": 341.5
+   },
+   {
+    "delta": 1,
+    "verified": true,
+    "note": "posted messages had no effect; clicked via UIA Invoke (windowless control) - the window may have activated",
+    "is_error": false,
+    "ms": 337.4
+   }
+  ],
+  "without_hwnd": [
+   {
+    "delta": 0,
+    "verified": false,
+    "note": "posted messages had no pixel effect and the element under the point exposes no Invoke pattern - read state to confirm",
+    "is_error": false,
+    "ms": 242.8
+   },
+   {
+    "delta": 0,
+    "verified": false,
+    "note": "posted messages had no pixel effect and the element under the point exposes no Invoke pattern - read state to confirm",
+    "is_error": false,
+    "ms": 245.2
+   },
+   {
+    "delta": 0,
+    "verified": false,
+    "note": "posted messages had no pixel effect and the element under the point exposes no Invoke pattern - read state to confirm",
+    "is_error": false,
+    "ms": 243.9
+   },
+   {
+    "delta": 0,
+    "verified": false,
+    "note": "posted messages had no pixel effect and the element under the point exposes no Invoke pattern - read state to confirm",
+    "is_error": false,
+    "ms": 241.3
+   },
+   {
+    "delta": 0,
+    "verified": false,
+    "note": "posted messages had no pixel effect and the element under the point exposes no Invoke pattern - read state to confirm",
+    "is_error": false,
+    "ms": 244.8
+   },
+   {
+    "delta": 0,
+    "verified": false,
+    "note": "posted messages had no pixel effect and the element under the point exposes no Invoke pattern - read state to confirm",
+    "is_error": false,
+    "ms": 245.0
+   },
+   {
+    "delta": 0,
+    "verified": false,
+    "note": "posted messages had no pixel effect and the element under the point exposes no Invoke pattern - read state to confirm",
+    "is_error": false,
+    "ms": 247.2
+   },
+   {
+    "delta": 0,
+    "verified": false,
+    "note": "posted messages had no pixel effect and the element under the point exposes no Invoke pattern - read state to confirm",
+    "is_error": false,
+    "ms": 245.2
+   },
+   {
+    "delta": 0,
+    "verified": false,
+    "note": "posted messages had no pixel effect and the element under the point exposes no Invoke pattern - read state to confirm",
+    "is_error": false,
+    "ms": 243.6
+   },
+   {
+    "delta": 0,
+    "verified": true,
+    "note": null,
+    "is_error": false,
+    "ms": 227.0
+   }
+  ]
+ },
+ "e2_key_routing": {
+  "target": false,
+  "other": false,
+  "key_response": {
+   "data": null,
+   "error": "ghost_key: missing 'keys' param",
+   "error_code": -32000,
+   "foreground": {
+    "hwnd": 50072408,
+    "title": "ghost-improve"
+   },
+   "ms": 0,
+   "ok": false
+  },
+  "is_error": true,
+  "window_order": [
+   "Ghost Key Bed",
+   "Ghost Key Bed 2"
+  ]
+ },
+ "e3_double_click": [
+  {
+   "delta": 2,
+   "verified": true,
+   "is_error": false,
+   "ms": 136.5
+  },
+  {
+   "delta": 2,
+   "verified": false,
+   "is_error": false,
+   "ms": 142.2
+  },
+  {
+   "delta": 2,
+   "verified": false,
+   "is_error": false,
+   "ms": 133.2
+  },
+  {
+   "delta": 2,
+   "verified": false,
+   "is_error": false,
+   "ms": 133.1
+  },
+  {
+   "delta": 2,
+   "verified": false,
+   "is_error": false,
+   "ms": 132.7
+  },
+  {
+   "delta": 2,
+   "verified": false,
+   "is_error": false,
+   "ms": 118.6
+  },
+  {
+   "delta": 2,
+   "verified": false,
+   "is_error": false,
+   "ms": 132.9
+  },
+  {
+   "delta": 2,
+   "verified": false,
+   "is_error": false,
+   "ms": 118.5
+  },
+  {
+   "delta": 2,
+   "verified": false,
+   "is_error": false,
+   "ms": 133.7
+  },
+  {
+   "delta": 2,
+   "verified": false,
+   "is_error": false,
+   "ms": 132.5
+  }
+ ]
+}

@@ -1,0 +1,266 @@
+{
+ "exe": "C:\\Users\\Krist\\projects\\active\\ghost\\target-improve\\release\\ghost-mcp.exe",
+ "n": 20,
+ "ops": [
+  {
+   "op": "act_click[label]",
+   "n": 20,
+   "median_ms": 123.3,
+   "p95_ms": 139.0,
+   "min_ms": 117.0,
+   "max_ms": 139.0,
+   "correct": 20,
+   "accuracy": 1.0,
+   "errors": 0,
+   "verified_true": 0,
+   "verified_null": 0,
+   "verified_false": 20
+  }
+ ],
+ "raw": {
+  "act_click[label]": [
+   {
+    "ms": 138.1619000021601,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 137
+   },
+   {
+    "ms": 123.04180000137421,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 122
+   },
+   {
+    "ms": 123.43700000201352,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 123
+   },
+   {
+    "ms": 117.02529999820399,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 116
+   },
+   {
+    "ms": 123.48570000176551,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 123
+   },
+   {
+    "ms": 123.36890000005951,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 123
+   },
+   {
+    "ms": 123.32319999768515,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 123
+   },
+   {
+    "ms": 122.6557000009052,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 122
+   },
+   {
+    "ms": 122.62429999827873,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 122
+   },
+   {
+    "ms": 122.91949999780627,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 122
+   },
+   {
+    "ms": 118.04250000204775,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 117
+   },
+   {
+    "ms": 123.67860000085784,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 123
+   },
+   {
+    "ms": 128.53929999982938,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 128
+   },
+   {
+    "ms": 137.74350000312552,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 137
+   },
+   {
+    "ms": 138.9567000005627,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 138
+   },
+   {
+    "ms": 123.21719999818015,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 122
+   },
+   {
+    "ms": 124.37520000094082,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 124
+   },
+   {
+    "ms": 122.53499999860651,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 122
+   },
+   {
+    "ms": 123.13910000011674,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 122
+   },
+   {
+    "ms": 117.61609999666689,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 117
+   }
+  ]
+ },
+ "cold_start": {
+  "n": 10,
+  "median_ms": 19.0,
+  "p95_ms": 21.3,
+  "raw": [
+   21.3,
+   18.8,
+   19.2,
+   19.2,
+   18.7,
+   18.7,
+   20.3,
+   18.7,
+   19.4,
+   18.8
+  ]
+ },
+ "tools_list": {
+  "bytes": 32094,
+  "tools": 54
+ },
+ "surface": "user"
+}

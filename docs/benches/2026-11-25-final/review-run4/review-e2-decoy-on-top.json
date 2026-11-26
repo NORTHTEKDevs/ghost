@@ -1,0 +1,28 @@
+{
+ "target": false,
+ "other": false,
+ "key_response": {
+  "cursor_preserved": true,
+  "focus_guard": null,
+  "focus_preserved": true,
+  "focused_control": false,
+  "key": "q",
+  "mode": "background",
+  "note": "no control held keyboard focus in the background window, so the key went to the top-level frame and likely had no effect \u2014 background-click a control first to focus it, then read state",
+  "ok": true,
+  "target": {
+   "hwnd": 70386866,
+   "pid": 36944,
+   "source": "explicit",
+   "surface": "user",
+   "title": "Ghost Key Bed"
+  },
+  "verified": null,
+  "window": "Ghost Key Bed 2"
+ },
+ "is_error": false,
+ "window_order": [
+  "Ghost Key Bed 2",
+  "Ghost Key Bed"
+ ]
+}

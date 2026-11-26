@@ -1,0 +1,3 @@
+<stdin>:6: SyntaxWarning: "\g" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\g"? A raw string is also an option.
+<stdin>:7: SyntaxWarning: "\g" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\g"? A raw string is also an option.
+button centre (288,238); window at that point: child class='CASCADIA_HOSTING_WINDOW_CLASS', top-level title='ghost-improve', pid=6404

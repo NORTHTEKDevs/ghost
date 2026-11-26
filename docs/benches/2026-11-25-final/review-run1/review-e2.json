@@ -1,0 +1,28 @@
+{
+ "target": true,
+ "other": false,
+ "key_response": {
+  "cursor_preserved": true,
+  "focus_guard": null,
+  "focus_preserved": true,
+  "focused_control": true,
+  "key": "q",
+  "mode": "background",
+  "note": "key posted to the background window's focused control; read state to confirm effect",
+  "ok": true,
+  "target": {
+   "hwnd": 107415896,
+   "pid": 19356,
+   "source": "explicit",
+   "surface": "user",
+   "title": "Ghost Key Bed"
+  },
+  "verified": null,
+  "window": "Ghost Key Bed"
+ },
+ "is_error": false,
+ "window_order": [
+  "Ghost Key Bed",
+  "Ghost Key Bed 2"
+ ]
+}

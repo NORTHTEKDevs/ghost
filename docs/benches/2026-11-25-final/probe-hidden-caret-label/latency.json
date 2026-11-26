@@ -1,0 +1,297 @@
+{
+ "exe": "C:\\Users\\Krist\\projects\\active\\ghost\\target-improve\\release\\ghost-mcp.exe",
+ "n": 20,
+ "ops": [
+  {
+   "op": "act_click[caret-label]",
+   "n": 20,
+   "median_ms": 123.0,
+   "p95_ms": 130.0,
+   "min_ms": 113.0,
+   "max_ms": 130.0,
+   "correct": 20,
+   "accuracy": 1.0,
+   "errors": 0,
+   "verified_true": 0,
+   "verified_null": 0,
+   "verified_false": 20
+  }
+ ],
+ "raw": {
+  "act_click[caret-label]": [
+   {
+    "ms": 117.23999999958323,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 117
+   },
+   {
+    "ms": 118.67960000017774,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 118
+   },
+   {
+    "ms": 118.24390000037965,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 118
+   },
+   {
+    "ms": 128.48070000109146,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 128
+   },
+   {
+    "ms": 129.20369999847026,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 128
+   },
+   {
+    "ms": 124.32510000144248,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 124
+   },
+   {
+    "ms": 123.02659999841126,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 122
+   },
+   {
+    "ms": 129.30930000220542,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 129
+   },
+   {
+    "ms": 124.63599999682629,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 124
+   },
+   {
+    "ms": 122.64130000039586,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 122
+   },
+   {
+    "ms": 113.52889999761828,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 113
+   },
+   {
+    "ms": 130.0215000010212,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 129
+   },
+   {
+    "ms": 123.5951999988174,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 123
+   },
+   {
+    "ms": 118.73799999739276,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 118
+   },
+   {
+    "ms": 112.95299999983399,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 112
+   },
+   {
+    "ms": 117.86169999686535,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 117
+   },
+   {
+    "ms": 122.9057999989891,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 122
+   },
+   {
+    "ms": 127.4836000011419,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 127
+   },
+   {
+    "ms": 117.81129999872064,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 117
+   },
+   {
+    "ms": 124.35290000212262,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": false,
+    "verified_by": null,
+    "error": null,
+    "server_ms": 124
+   }
+  ]
+ },
+ "cold_start": {
+  "n": 10,
+  "median_ms": 19.2,
+  "p95_ms": 51.0,
+  "raw": [
+   23.6,
+   17.0,
+   18.2,
+   18.8,
+   17.2,
+   17.8,
+   19.9,
+   19.6,
+   51.0,
+   19.8
+  ]
+ },
+ "tools_list": {
+  "bytes": 32094,
+  "tools": 54
+ },
+ "surface": "hidden",
+ "launch": {
+  "ms": 111.9,
+  "is_error": false,
+  "resp": {
+   "data": {
+    "desktop": "auto",
+    "note": "started on a hidden desktop (never on your screen) and anchored: ghost_see / ghost_act / ghost_key now target it by default. Drive it by title like any other window; ghost_desktop_close id=auto ends it.",
+    "pid": 18476,
+    "surface": "hidden",
+    "target": {
+     "desktop": "auto",
+     "hwnd": 53937682,
+     "pid": 18476,
+     "source": "anchor",
+     "surface": "hidden",
+     "title": "Ghost Probe Bed"
+    },
+    "window": {
+     "hwnd": 53937682,
+     "pid": 18476,
+     "title": "Ghost Probe Bed"
+    }
+   },
+   "foreground": {
+    "hwnd": 50072408,
+    "title": "ghost-improve"
+   },
+   "ms": 111,
+   "ok": true
+  }
+ }
+}
