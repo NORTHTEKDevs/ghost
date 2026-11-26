@@ -58,4 +58,9 @@ pub enum CoreError {
 
     #[error("desktop error: {0}")]
     Desktop(String),
+
+    /// The emergency stop is active (Ctrl+Alt+G or `ghost_stop`, in this or
+    /// any other Ghost process). Nothing that changes state runs until reset.
+    #[error("emergency stop active: Ghost is stopped and refuses actions until ghost_reset")]
+    Stopped,
 }

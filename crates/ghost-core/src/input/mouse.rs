@@ -81,7 +81,7 @@ pub fn click_event(up: bool) -> INPUT {
 /// Move mouse to pixel coordinates (x, y) and left-click.
 pub fn click(x: i32, y: i32) -> Result<(), CoreError> {
     if is_stopped() {
-        return Err(CoreError::Win32 { code: 0, context: "stopped" });
+        return Err(CoreError::Stopped);
     }
     focus::require_foreground_allowed("click")?;
     let inputs = [move_event(x, y), click_event(false), click_event(true)];
@@ -97,7 +97,7 @@ pub fn click(x: i32, y: i32) -> Result<(), CoreError> {
 /// Move mouse to pixel coordinates without clicking.
 pub fn move_to(x: i32, y: i32) -> Result<(), CoreError> {
     if is_stopped() {
-        return Err(CoreError::Win32 { code: 0, context: "stopped" });
+        return Err(CoreError::Stopped);
     }
     focus::require_foreground_allowed("move_to")?;
     let inputs = [move_event(x, y)];
@@ -138,7 +138,7 @@ pub fn scroll_event(delta: i32, horizontal: bool) -> INPUT {
 /// Move mouse to coordinates without clicking. Triggers hover states and dropdown menus.
 pub fn hover(x: i32, y: i32) -> Result<(), CoreError> {
     if is_stopped() {
-        return Err(CoreError::Win32 { code: 0, context: "stopped" });
+        return Err(CoreError::Stopped);
     }
     focus::require_foreground_allowed("hover")?;
     let inputs = [move_event(x, y)];
@@ -154,7 +154,7 @@ pub fn hover(x: i32, y: i32) -> Result<(), CoreError> {
 /// Right-click at pixel coordinates.
 pub fn right_click(x: i32, y: i32) -> Result<(), CoreError> {
     if is_stopped() {
-        return Err(CoreError::Win32 { code: 0, context: "stopped" });
+        return Err(CoreError::Stopped);
     }
     focus::require_foreground_allowed("right_click")?;
     let inputs = [move_event(x, y), right_click_event(false), right_click_event(true)];
@@ -170,7 +170,7 @@ pub fn right_click(x: i32, y: i32) -> Result<(), CoreError> {
 /// Double-click at pixel coordinates.
 pub fn double_click(x: i32, y: i32) -> Result<(), CoreError> {
     if is_stopped() {
-        return Err(CoreError::Win32 { code: 0, context: "stopped" });
+        return Err(CoreError::Stopped);
     }
     focus::require_foreground_allowed("double_click")?;
     let inputs = [
@@ -190,7 +190,7 @@ pub fn double_click(x: i32, y: i32) -> Result<(), CoreError> {
 /// Click-hold at from, move to to, release. Used for drag-and-drop and selections.
 pub fn drag(from_x: i32, from_y: i32, to_x: i32, to_y: i32) -> Result<(), CoreError> {
     if is_stopped() {
-        return Err(CoreError::Win32 { code: 0, context: "stopped" });
+        return Err(CoreError::Stopped);
     }
     focus::require_foreground_allowed("drag")?;
     let inputs = [
@@ -211,7 +211,7 @@ pub fn drag(from_x: i32, from_y: i32, to_x: i32, to_y: i32) -> Result<(), CoreEr
 /// Scroll wheel at (x, y). direction: "up"/"down"/"left"/"right". amount = notches (1 notch = 120 units).
 pub fn scroll(x: i32, y: i32, direction: &str, amount: i32) -> Result<(), CoreError> {
     if is_stopped() {
-        return Err(CoreError::Win32 { code: 0, context: "stopped" });
+        return Err(CoreError::Stopped);
     }
     focus::require_foreground_allowed("scroll")?;
     let delta = match direction {

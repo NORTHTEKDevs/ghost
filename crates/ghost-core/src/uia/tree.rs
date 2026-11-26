@@ -976,6 +976,7 @@ pub fn ensure_foreground(hwnd_raw: isize, timeout_ms: u64) -> Result<bool, CoreE
 /// # Safety
 /// Calls Win32 functions that require no special thread affinity.
 pub fn focus_window_under_point(x: i32, y: i32) -> Result<bool, CoreError> {
+    crate::stop::ensure_not_stopped()?;
     // Raising whatever window sits under a point takes the user's foreground
     // exactly like `focus_window` does; the gate sits here so no caller can
     // reach `ensure_foreground` under the background policy by this route.
@@ -1056,6 +1057,7 @@ pub fn send_to_back(hwnd_raw: isize) -> bool {
 }
 
 pub fn focus_window(name: &str) -> Result<(), CoreError> {
+    crate::stop::ensure_not_stopped()?;
     // Bringing a window to the foreground is by definition a screen-stealing action.
     focus::require_foreground_allowed("focus_window")?;
     let name_lower = name.to_lowercase();
@@ -1168,6 +1170,7 @@ fn apply_window_state(hwnd: HWND, state: WindowState, vanished: bool) {
 }
 
 pub fn set_window_state(name: &str, state: WindowState) -> Result<(), CoreError> {
+    crate::stop::ensure_not_stopped()?;
     let name_lower = name.to_lowercase();
     let windows = list_windows()?;
     let matches_name = |w: &&WindowInfo| w.name.to_lowercase().contains(&name_lower);

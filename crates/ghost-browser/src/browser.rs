@@ -93,6 +93,7 @@ impl Browser {
     /// means several ghost processes can each open tabs without fighting over which
     /// one is in front.
     pub async fn new_tab(&self, url: &str) -> Result<Tab> {
+        crate::error::ensure_not_stopped()?;
         let r = self
             .cdp
             .call(
@@ -106,6 +107,7 @@ impl Browser {
     }
 
     pub async fn close_tab(&self, target_id: &str) -> Result<()> {
+        crate::error::ensure_not_stopped()?;
         self.cdp
             .call("Target.closeTarget", json!({ "targetId": target_id }), None)
             .await?;

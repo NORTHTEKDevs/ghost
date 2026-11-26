@@ -33,6 +33,9 @@ pub enum BrowserError {
     #[error("browser connection is closed")]
     Closed,
 
+    #[error("emergency stop active: Ghost is stopped and refuses actions until ghost_reset")]
+    Stopped,
+
     #[error(transparent)]
     Json(#[from] serde_json::Error),
 
@@ -41,3 +44,23 @@ pub enum BrowserError {
 }
 
 pub type Result<T> = std::result::Result<T, BrowserError>;
+
+/// Where this crate asks whether Ghost's emergency stop is active. The crate
+/// cannot read the stop itself (it is platform-neutral and the stop lives in
+/// the platform engines), so the session installs the check at start-up.
+static STOP_CHECK: std::sync::OnceLock<fn() -> bool> = std::sync::OnceLock::new();
+
+/// Install the emergency-stop check. The first call wins.
+pub fn set_stop_check(check: fn() -> bool) {
+    let _ = STOP_CHECK.set(check);
+}
+
+/// `Err(BrowserError::Stopped)` while the installed check says stopped. Every
+/// page-changing call runs this first; reads (title, text, describe, the
+/// `eval` they are built on) do not.
+pub(crate) fn ensure_not_stopped() -> Result<()> {
+    match STOP_CHECK.get() {
+        Some(stopped) if stopped() => Err(BrowserError::Stopped),
+        _ => Ok(()),
+    }
+}

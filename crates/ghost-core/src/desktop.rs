@@ -162,6 +162,19 @@ impl DesktopSession {
             .map_err(|_| CoreError::Desktop("desktop worker dropped the job".into()))
     }
 
+    /// `exec` for a job that changes state: refused while the emergency stop is
+    /// active, checked when the job is queued and again on the worker
+    /// immediately before it runs (a stop raised while the job waited in the
+    /// queue still holds it back). Reads keep using `exec`.
+    pub fn exec_action<T, F>(&self, f: F) -> Result<T, CoreError>
+    where
+        T: Send + 'static,
+        F: FnOnce() -> T + Send + 'static,
+    {
+        crate::stop::ensure_not_stopped()?;
+        self.exec(move || crate::stop::ensure_not_stopped().map(|()| f()))?
+    }
+
     /// Launch a process onto this desktop. Returns its PID.
     ///
     /// The desktop is chosen at creation time via `STARTUPINFO.lpDesktop`; there is no
@@ -170,7 +183,7 @@ impl DesktopSession {
     pub fn launch(&self, command: &str) -> Result<u32, CoreError> {
         let cmd = command.to_string();
         let name = self.name.clone();
-        self.exec(move || launch_on_desktop(&cmd, &name))?
+        self.exec_action(move || launch_on_desktop(&cmd, &name))?
     }
 
     /// Every visible top-level window on this desktop.
@@ -226,19 +239,19 @@ impl DesktopSession {
     /// Left click at a point in a window's client area, via that window's message
     /// queue. This is the input path that works on a non-displayed desktop.
     pub fn click(&self, hwnd: isize, x: i32, y: i32) -> Result<(), CoreError> {
-        self.exec(move || crate::input::BackgroundClicker::click(hwnd, (x, y)))?
+        self.exec_action(move || crate::input::BackgroundClicker::click(hwnd, (x, y)))?
     }
 
     pub fn right_click(&self, hwnd: isize, x: i32, y: i32) -> Result<(), CoreError> {
-        self.exec(move || crate::input::BackgroundClicker::right_click_screen(hwnd, x, y))?
+        self.exec_action(move || crate::input::BackgroundClicker::right_click_screen(hwnd, x, y))?
     }
 
     pub fn double_click(&self, hwnd: isize, x: i32, y: i32) -> Result<(), CoreError> {
-        self.exec(move || crate::input::BackgroundClicker::double_click_screen(hwnd, x, y))?
+        self.exec_action(move || crate::input::BackgroundClicker::double_click_screen(hwnd, x, y))?
     }
 
     pub fn hover(&self, hwnd: isize, x: i32, y: i32) -> Result<(), CoreError> {
-        self.exec(move || crate::input::BackgroundClicker::hover_screen(hwnd, x, y))?
+        self.exec_action(move || crate::input::BackgroundClicker::hover_screen(hwnd, x, y))?
     }
 
     pub fn scroll(
@@ -249,7 +262,7 @@ impl DesktopSession {
         notches: i32,
         horizontal: bool,
     ) -> Result<(), CoreError> {
-        self.exec(move || scroll_window(hwnd, notches, horizontal))?
+        self.exec_action(move || scroll_window(hwnd, notches, horizontal))?
     }
 
     /// Read the text of the input target inside `hwnd`, via WM_GETTEXT.
@@ -280,7 +293,7 @@ impl DesktopSession {
     /// of claiming success.
     pub fn type_text(&self, hwnd: isize, text: &str) -> Result<(), CoreError> {
         let t = text.to_string();
-        self.exec(move || {
+        self.exec_action(move || {
             let target = match crate::input::BackgroundClicker::text_target(hwnd) {
                 Some(t) => t,
                 // No message-postable control (WinUI/UWP apps like Windows 11
@@ -361,7 +374,7 @@ impl DesktopSession {
 
     pub fn press(&self, hwnd: isize, key: &str) -> Result<(), CoreError> {
         let k = key.to_string();
-        self.exec(move || match crate::input::keyboard::name_to_vk(&k) {
+        self.exec_action(move || match crate::input::keyboard::name_to_vk(&k) {
             Some(vk) => {
                 let target = crate::input::BackgroundClicker::text_target(hwnd).unwrap_or(hwnd);
                 crate::input::BackgroundClicker::send_key(target, vk.0)
@@ -392,7 +405,7 @@ impl DesktopSession {
                 code: 0,
                 context: "unsupported shortcut",
             })?;
-        self.exec(move || {
+        self.exec_action(move || {
             let target = crate::input::BackgroundClicker::text_target(hwnd)
                 .ok_or(CoreError::NoTextControl)?;
             crate::input::BackgroundClicker::edit_command(target, cmd)
@@ -423,6 +436,17 @@ impl DesktopSession {
         })?
     }
 
+    /// `with_uia` for a job that changes state: the stop is checked when the job
+    /// is queued and again on the worker immediately before `f` runs.
+    pub fn with_uia_action<T, F>(&self, f: F) -> Result<T, CoreError>
+    where
+        T: Send + 'static,
+        F: FnOnce(&crate::uia::tree::UiaTree) -> T + Send + 'static,
+    {
+        crate::stop::ensure_not_stopped()?;
+        self.with_uia(move |tree| crate::stop::ensure_not_stopped().map(|()| f(tree)))?
+    }
+
     /// PNG of one window on this desktop. `client_only` is accepted for API parity;
     /// PrintWindow captures the whole window.
     pub fn capture(&self, hwnd: isize, _client_only: bool) -> Result<Vec<u8>, CoreError> {
@@ -437,7 +461,7 @@ impl DesktopSession {
     /// Safe under any focus policy: "foreground" here means foreground *of the
     /// isolated desktop*, which is not displayed and has its own input queue.
     pub fn focus_window(&self, hwnd: isize) -> Result<(), CoreError> {
-        self.exec(move || unsafe {
+        self.exec_action(move || unsafe {
             use windows::Win32::UI::Input::KeyboardAndMouse::SetActiveWindow;
             use windows::Win32::UI::WindowsAndMessaging::{
                 SetForegroundWindow, ShowWindow, SW_SHOW,
@@ -597,6 +621,7 @@ fn as_hwnd(h: isize) -> HWND {
 /// Post a mouse-wheel message to `hwnd` without moving the real pointer. Shared
 /// by the hidden-desktop scroll and the user-desktop background scroll.
 pub fn scroll_window(hwnd: isize, notches: i32, horizontal: bool) -> Result<(), CoreError> {
+    crate::stop::ensure_not_stopped()?;
     use windows::Win32::Foundation::{LPARAM, WPARAM};
     use windows::Win32::UI::WindowsAndMessaging::{IsWindow, PostMessageW};
     const WM_MOUSEWHEEL: u32 = 0x020A;
