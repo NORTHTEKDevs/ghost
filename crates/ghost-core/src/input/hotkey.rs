@@ -34,6 +34,20 @@ pub static STOP_FLAG: AtomicBool = AtomicBool::new(false);
 /// waiting process wakes, not just one.
 const STOP_EVENT_NAME: &str = r"Local\ghost-emergency-stop-event";
 
+/// The event this process uses: the shared one, except in this crate's own
+/// unit tests, which use a per-process name. `trigger_stop` there used to
+/// raise the shared event, so every `cargo test` briefly stopped every Ghost
+/// process on the machine, other sessions' servers included.
+#[cfg(not(test))]
+fn stop_event_name() -> String {
+    STOP_EVENT_NAME.to_string()
+}
+
+#[cfg(test)]
+fn stop_event_name() -> String {
+    format!("{STOP_EVENT_NAME}-test-{}", std::process::id())
+}
+
 static REGISTERED: AtomicBool = AtomicBool::new(false);
 
 /// Whether the emergency stop is active - raised here, or by any other Ghost
@@ -99,7 +113,7 @@ static STOP_EVENT: std::sync::OnceLock<Option<EventHandle>> = std::sync::OnceLoc
 fn open_stop_event() -> Option<&'static EventHandle> {
     STOP_EVENT
         .get_or_init(|| unsafe {
-            CreateEventW(None, true, false, &HSTRING::from(STOP_EVENT_NAME))
+            CreateEventW(None, true, false, &HSTRING::from(stop_event_name()))
                 .ok()
                 .map(EventHandle)
         })
@@ -205,11 +219,19 @@ mod tests {
     // they run as one test to avoid interference from parallel test threads.
     #[test]
     fn stop_flag_round_trips_and_broadcasts() {
+        // The shared event every running Ghost watches must be left alone: the
+        // tests use their own per-process event.
+        assert_ne!(stop_event_name(), STOP_EVENT_NAME);
+        let shared = unsafe { CreateEventW(None, true, false, &HSTRING::from(STOP_EVENT_NAME)) }.expect("shared");
+        let shared_raised = || unsafe { WaitForSingleObject(shared, 0) == WAIT_OBJECT_0 };
+        let shared_before = shared_raised();
+
         reset_stop();
         assert!(!is_stopped());
 
         trigger_stop();
         assert!(is_stopped());
+        assert_eq!(shared_raised(), shared_before, "trigger_stop in a test raised the shared event");
         // The broadcast side: the named event must now be signaled, because that is
         // what other ghost processes actually observe.
         let ev = open_stop_event().expect("event");
@@ -217,7 +239,7 @@ mod tests {
             assert_eq!(
                 WaitForSingleObject(ev.0, 0),
                 WAIT_OBJECT_0,
-                "trigger_stop must raise the shared event"
+                "trigger_stop must raise this process's stop event"
             );
         }
 
@@ -227,8 +249,9 @@ mod tests {
             assert_ne!(
                 WaitForSingleObject(ev.0, 0),
                 WAIT_OBJECT_0,
-                "reset_stop must lower the shared event"
+                "reset_stop must lower this process's stop event"
             );
+            let _ = CloseHandle(shared);
         }
     }
 
