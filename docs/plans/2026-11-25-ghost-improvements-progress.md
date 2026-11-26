@@ -22,3 +22,11 @@ static label (no effect) 0/20 verified both surfaces (no false positives). Claud
 0 false positives in 240 no-effect clicks. Follow-up found: user-desktop background path posts BM_CLICK
 to a DISABLED control and returns ok:true (hidden + foreground paths refuse) -> queued as item 4.
 
+## Stage 3 - headless tab screenshot latency (item 2) - DONE (commit a095122)
+Change: `--disable-gpu-compositing` for headless launches only (crates/ghost-browser/src/launch.rs) + unit test.
+Grok Bot re-ran on target-improve (12:10 AM AKST): cargo test 567 / 0 / 27; clippy 0; lint 0 findings;
+tab_shot_probe n=20: first 36.6 ms, median 31.3 ms, p95 50 ms, valid PNG 20/20, page centre pixel 20/20
+(baseline median ~1005 ms, first ~1850 ms). ghost verify 2/2 ALL CLAIMS HOLD, screenshot claim 42 / 39 ms
+(baseline 1705-1795 ms), whole run 4.7-4.8 s (was ~8 s). Cost: ~3.7% of one core per idle headless Chrome.
+Not tested: WebGL-heavy pages under the new flag; attached-browser path (unchanged code).
+
