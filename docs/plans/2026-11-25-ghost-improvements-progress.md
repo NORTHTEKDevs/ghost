@@ -118,3 +118,13 @@ clippy 0; lint 0 on crates changed since 757222c; ghost verify 2/2 ALL CLAIMS HO
 Decision (Grok Bot): fixing delta to honour its documented contract is in scope, not a contract change ->
 STAGE 9. Then convergence round 2.
 
+## Stage 9 - mode=delta per window (1a8c5cc) - VERIFIED; Convergence round 2 (f4e031e)
+Grok Bot (2:35 AM AKST): cargo test 619 / 0 / 27 x2; clippy 0; lint 0 on crates changed since 88fd892;
+ghost verify ALL CLAIMS HOLD. delta_routing_probe n=10, explicit and anchored: no change -> empty 10/10,
+target change reported 10/10 (was 0/10), decoy change not reported 10/10. Key routing re-check 20/20 / 0.
+Round 2 (docs/plans/2026-11-26-convergence-round2.md): no accuracy or safety defect with evidence left.
+Remaining: R2-1 ghost_key waits two back-to-back guard settles (median 190.6 ms; drop inner 60 ms ->
+~130 ms), R2-2 diagnostic exit code for a once-in-~40-runs ghost-core test exit, R2-3 port bench/soak to the
+hidden-desktop testbed (tooling, not Ghost - deferred).
+Decision: STAGE 10 = R2-1 (+ R2-2, tiny), then declare convergence unless it surfaces something new.
+

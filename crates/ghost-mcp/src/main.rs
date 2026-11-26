@@ -2733,7 +2733,17 @@ async fn key_in_background(
 ) -> std::result::Result<Value, String> {
     let (mods, key) = parse_key_combo(keys)?;
     match background_key_plan(&mods, &key) {
-        BackgroundKey::Key => session.key_background(window, &key, hint).await.map_err(|e| e.to_string()),
+        BackgroundKey::Key => {
+            // With a resolved handle and the background policy, the post-call
+            // guard in `run` watches the target for 100 ms right after this
+            // returns; the key path then only hands back a theft already
+            // visible instead of first waiting 60 ms of its own (R2-1: 190.6 ms
+            // per key). background=true under the foreground policy gets no
+            // post-call guard, so it keeps the key path's own 60 ms watch.
+            let guarded_after = hint.is_some() && session.is_background_only();
+            let settle_ms = if guarded_after { 0 } else { 60 };
+            session.key_background(window, &key, hint, settle_ms).await.map_err(|e| e.to_string())
+        }
         BackgroundKey::EditCommand(cmd) => {
             let cmd_name = match cmd {
                 ghost_session::EditCommand::Copy => "copy",

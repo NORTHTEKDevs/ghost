@@ -1,0 +1,4 @@
+window order: ['Ghost Key Bed 2', 'Ghost Key Bed']
+ghost_key q x20: q in target edit 20, q in decoy edit 0, response window = target 20/20, errors 0
+Ctrl+A (edit command) x20: response window = target 20/20, errors 0
+ghost_key q latency: median 126.7 ms, min 125.3, max 132.1; focus_preserved 20/20, focus_guard fired 0/20
