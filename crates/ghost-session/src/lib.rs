@@ -6,6 +6,7 @@ pub mod reflection;
 pub mod session;
 pub mod target;
 pub mod cdp_route;
+pub mod click_verify;
 pub mod suggest;
 pub mod orphans;
 #[cfg(windows)]

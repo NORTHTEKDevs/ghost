@@ -10,7 +10,12 @@
 //!   edit after the label, so `role=edit` and `name=Field` both resolve);
 //! - a BUTTON "Increment" that appends ` [clicks=N]` to the window title, so a
 //!   click is verifiable from outside through the title alone;
-//! - a BUTTON "Quit" that closes the window and ends the process.
+//! - a BUTTON "Quit" that closes the window and ends the process;
+//! - a DISABLED BUTTON "Locked": a click on it must have no effect, the negative
+//!   control for action verification;
+//! - a BUTTON "Note" whose only effect is rewriting the distant STATIC "Status"
+//!   label (not the title, not the button): a click whose effect is elsewhere in
+//!   the window, which verification must still see.
 //!
 //! `ghost-testbed [--title <text>]`. Exits when the window closes.
 
@@ -31,8 +36,12 @@ mod bed {
     /// `index` disambiguation can be proven: it records `[alt=N]`, not
     /// `[clicks=N]`, so the title says which of the two was pressed.
     const ID_INCREMENT_ALT: i32 = 104;
+    const ID_LOCKED: i32 = 105;
+    const ID_NOTE: i32 = 106;
+    const ID_STATUS: i32 = 107;
 
     static CLICKS: AtomicU32 = AtomicU32::new(0);
+    static NOTES: AtomicU32 = AtomicU32::new(0);
     static BASE_TITLE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
     fn wide(s: &str) -> Vec<u16> {
@@ -59,6 +68,13 @@ mod bed {
                         let base = BASE_TITLE.get().cloned().unwrap_or_default();
                         let title = wide(&format!("{base} [alt={n}]"));
                         let _ = SetWindowTextW(hwnd, PCWSTR(title.as_ptr()));
+                    }
+                    ID_NOTE => {
+                        let n = NOTES.fetch_add(1, Ordering::SeqCst) + 1;
+                        let text = wide(&format!("Status: noted {n}"));
+                        if let Ok(status) = GetDlgItem(hwnd, ID_STATUS) {
+                            let _ = SetWindowTextW(status, PCWSTR(text.as_ptr()));
+                        }
                     }
                     ID_QUIT => {
                         // PostMessage, not DestroyWindow: BM_CLICK arrives as a
@@ -183,6 +199,19 @@ mod bed {
                 34,
                 ID_INCREMENT_ALT,
             );
+            let _locked = child(
+                w!("BUTTON"),
+                w!("Locked"),
+                BS_PUSHBUTTON as u32 | WS_DISABLED.0,
+                250,
+                114,
+                100,
+                34,
+                ID_LOCKED,
+            );
+            // Top right and bottom left: as far apart as the window allows.
+            let _note = child(w!("BUTTON"), w!("Note"), BS_PUSHBUTTON as u32, 370, 70, 110, 34, ID_NOTE);
+            let _status = child(w!("STATIC"), w!("Status: idle"), 0, 20, 180, 200, 22, ID_STATUS);
             let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
             let mut msg = MSG::default();
             while GetMessageW(&mut msg, None, 0, 0).into() {

@@ -241,6 +241,10 @@ fn pixels_changed(hwnd: isize, before: Option<(Vec<u8>, usize, usize)>) -> Optio
     Some(compute_verification(&b, &a, bw, bh, true).changed)
 }
 
+fn title_of(hwnd: isize) -> String {
+    ghost_core::system::observer::window_title(windows::Win32::Foundation::HWND(hwnd as *mut _))
+}
+
 /// Make `hwnd` the active window OF THE HIDDEN DESKTOP. Runs on the desktop's
 /// bound worker, so this touches only that desktop's (undisplayed) input queue;
 /// the human's foreground cannot change. Some providers (Chromium) service
@@ -495,9 +499,12 @@ impl GhostSession {
                 activate_here(hwnd);
             }
             let mut t_dispatch: u64 = 0;
+            let mut verified_by: Option<crate::click_verify::Signal> = None;
             let (verified, note): (Option<bool>, Option<&str>) = match action.as_str() {
                 "click" => {
                     let before = snapshot(true);
+                    let title_before = title_of(hwnd);
+                    let state_before = (el.name(), el.get_text());
                     let t0 = Instant::now();
                     if composited {
                         // Measured: UIA Invoke/SetValue against Chromium on a
@@ -513,14 +520,33 @@ impl GhostSession {
                         core(BackgroundClicker::click_screen(hwnd, cx, cy))?;
                     }
                     t_dispatch = t0.elapsed().as_millis() as u64;
-                    std::thread::sleep(Duration::from_millis(80));
                     if composited {
+                        std::thread::sleep(Duration::from_millis(80));
                         (None, Some(skipped_note))
                     } else {
-                        let changed = pixels_changed(hwnd, before);
+                        // Polled, first change wins (see click_verify). Nothing
+                        // here can reach the human's foreground, so an early
+                        // return has no guard to wait for.
+                        let mut changed = None;
+                        let dispatched = Instant::now();
+                        for (i, at) in crate::click_verify::POLL_AT_MS.into_iter().enumerate() {
+                            let due = dispatched + Duration::from_millis(at);
+                            std::thread::sleep(due.saturating_duration_since(Instant::now()));
+                            let slow = crate::click_verify::slow_signals_due(i);
+                            let (v, by) = crate::click_verify::decide(
+                                title_of(hwnd) != title_before,
+                                slow && (el.name(), el.get_text()) != state_before,
+                                if slow { crate::click_verify::pixel_effect(hwnd, &before) } else { None },
+                            );
+                            changed = v;
+                            verified_by = by;
+                            if v == Some(true) {
+                                break;
+                            }
+                        }
                         let note = match changed {
                             None => Some("click dispatched; the window surface could not be compared - read state to confirm"),
-                            Some(false) => Some("click dispatched; the window's pixels did not change - a click's effect is often elsewhere, read state to confirm"),
+                            Some(false) => Some("click dispatched; within 80 ms neither the window title, the element's name/value nor the window's pixels changed - read state to confirm"),
                             Some(true) => None,
                         };
                         (changed, note)
@@ -610,6 +636,9 @@ impl GhostSession {
             });
             if let Some(n) = note {
                 out["note"] = Value::String(n.into());
+            }
+            if let Some(by) = verified_by {
+                out["verified_by"] = Value::String(by.as_str().into());
             }
             Ok(out)
         }))?;

@@ -1,0 +1,5 @@
+<stdin>:6: SyntaxWarning: "\g" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\g"? A raw string is also an option.
+<stdin>:7: SyntaxWarning: "\g" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\g"? A raw string is also an option.
+frames 800 span_ms 8159 interval_ms 10.2
+blips 1
+at_ms 4364 frames 1 ~dur_ms 25 bbox (28, 101, 488, 224)

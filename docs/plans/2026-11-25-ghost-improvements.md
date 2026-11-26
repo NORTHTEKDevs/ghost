@@ -118,6 +118,13 @@ the response (`verified_by: "title" | "uia" | "pixels"`). It stays `false` only 
 nothing changed by 80 ms. Add a `Noop` button to the testbed (changes nothing) as the
 negative control, and a `--noop` op to `latency_probe.py`.
 
+**Amended in review (2026-11-25), and how it was done:** pixels stay whole-window
+on both surfaces (a click's effect is often elsewhere); noise is filtered by
+requiring a change to persist in a second capture 20 ms later; a testbed `Note`
+button that changes only a distant label must verify 20/20; a disabled button is
+the negative control (>= 19/20 false); `verified` stays a bool and `verified_by` is
+additive. Results: `docs/benches/2026-11-25-stage-2/README.md`.
+
 **Acceptance** (`P = python docs/benches/2026-11-25-baseline/latency_probe.py --exe <target-improve ghost-mcp.exe> --testbed <target-improve ghost-testbed.exe> --n 20 --out <dir>`):
 1. `P --surface user` and `P --surface hidden`: act_click `correct 20/20` **and**
    `verified=true 20/20` in each (baseline 0/20 and 10/20).

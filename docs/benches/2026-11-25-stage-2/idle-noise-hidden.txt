@@ -1,0 +1,6 @@
+<stdin>:6: SyntaxWarning: "\g" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\g"? A raw string is also an option.
+<stdin>:7: SyntaxWarning: "\g" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\g"? A raw string is also an option.
+frames 150 mean interval ms 10.5
+distinct states 2
+seq 000100000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+state 1 vs 0 bbox (286, 156, 330, 166)
