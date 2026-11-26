@@ -1,0 +1,14 @@
+
+running 1 test
+[ghost-session] built-in vision tier: on (NVIDIA_API_KEY set; GHOST_VISION_PROVIDER=auto)
+path                refused  unchanged  after reset  error
+hidden act click       true       true         true  emergency stop active (Ctrl+Alt+G or ghost_stop): Ghost is stopped and refuses actions until ghost_reset
+hidden act type        true       true         true  emergency stop active (Ctrl+Alt+G or ghost_stop): Ghost is stopped and refuses actions until ghost_reset
+hidden key             true       true         true  emergency stop active (Ctrl+Alt+G or ghost_stop): Ghost is stopped and refuses actions until ghost_reset
+hidden click_at        true       true         true  emergency stop active (Ctrl+Alt+G or ghost_stop): Ghost is stopped and refuses actions until ghost_reset
+hidden scroll          true       true         true  emergency stop active (Ctrl+Alt+G or ghost_stop): Ghost is stopped and refuses actions until ghost_reset
+launch (hidden)        true       true         true  emergency stop active (Ctrl+Alt+G or ghost_stop): Ghost is stopped and refuses actions until ghost_reset
+CDP tab click          true       true         true  emergency stop active: Ghost is stopped and refuses actions until ghost_reset
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.21s
+

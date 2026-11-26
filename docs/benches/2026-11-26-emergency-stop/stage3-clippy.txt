@@ -1,0 +1,1 @@
+clippy exit 0
