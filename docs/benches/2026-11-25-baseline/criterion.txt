@@ -1,0 +1,258 @@
+   Compiling crossbeam-utils v0.8.21
+   Compiling serde_core v1.0.228
+   Compiling serde v1.0.228
+   Compiling serde_json v1.0.149
+   Compiling memchr v2.8.0
+   Compiling zerocopy v0.8.48
+   Compiling smallvec v1.15.1
+   Compiling either v1.15.0
+   Compiling rayon-core v1.13.0
+   Compiling regex-syntax v0.8.10
+   Compiling ciborium-io v0.2.2
+   Compiling windows-sys v0.61.2
+   Compiling tracing-core v0.1.36
+   Compiling plotters-backend v0.3.7
+   Compiling cast v0.3.0
+   Compiling clap_builder v4.6.0
+   Compiling anes v0.1.6
+   Compiling oorandom v11.1.5
+   Compiling syn v2.0.117
+   Compiling itertools v0.10.5
+   Compiling parking_lot_core v0.9.12
+   Compiling plotters-svg v0.3.7
+   Compiling parking_lot v0.12.5
+   Compiling regex-automata v0.4.14
+   Compiling criterion-plot v0.5.0
+   Compiling clap v4.6.1
+   Compiling mio v1.2.0
+   Compiling socket2 v0.6.3
+   Compiling winapi-util v0.1.11
+   Compiling is-terminal v0.4.17
+   Compiling plotters v0.3.7
+   Compiling serde_derive v1.0.228
+   Compiling tracing-attributes v0.1.31
+   Compiling zerocopy-derive v0.8.48
+   Compiling thiserror-impl v1.0.69
+   Compiling windows-implement v0.58.0
+   Compiling tokio-macros v2.7.0
+   Compiling windows-interface v0.58.0
+   Compiling async-trait v0.1.89
+   Compiling same-file v1.0.6
+   Compiling walkdir v2.5.0
+   Compiling crossbeam-epoch v0.9.18
+   Compiling crossbeam-channel v0.5.15
+   Compiling tokio v1.52.1
+   Compiling windows-core v0.58.0
+   Compiling crossbeam-deque v0.8.6
+   Compiling tracing v0.1.44
+   Compiling thiserror v1.0.69
+   Compiling windows v0.58.0
+   Compiling rayon v1.12.0
+   Compiling regex v1.12.3
+   Compiling tinytemplate v1.2.1
+   Compiling ghost-ground v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-ground)
+   Compiling half v2.7.1
+   Compiling ciborium-ll v0.2.2
+   Compiling ciborium v0.2.2
+   Compiling criterion v0.5.1
+   Compiling ghost-cache v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-cache)
+   Compiling ghost-core v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-core)
+   Compiling ghost-intent v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-intent)
+    Finished `bench` profile [optimized] target(s) in 28.38s
+     Running benches\convert.rs (target-improve\release\deps\convert-75f16f52cdcf3522.exe)
+Gnuplot not found, using plotters backend
+Benchmarking bgra_to_rgba_1080p/full_frame
+Benchmarking bgra_to_rgba_1080p/full_frame: Warming up for 3.0000 s
+Benchmarking bgra_to_rgba_1080p/full_frame: Collecting 100 samples in estimated 5.2388 s (1500 iterations)
+Benchmarking bgra_to_rgba_1080p/full_frame: Analyzing
+bgra_to_rgba_1080p/full_frame
+                        time:   [3.5299 ms 3.5834 ms 3.6395 ms]
+Found 9 outliers among 100 measurements (9.00%)
+  3 (3.00%) high mild
+  6 (6.00%) high severe
+Benchmarking bgra_to_rgba_1080p/region_400x300
+Benchmarking bgra_to_rgba_1080p/region_400x300: Warming up for 3.0000 s
+Benchmarking bgra_to_rgba_1080p/region_400x300: Collecting 100 samples in estimated 5.2468 s (30k iterations)
+Benchmarking bgra_to_rgba_1080p/region_400x300: Analyzing
+bgra_to_rgba_1080p/region_400x300
+                        time:   [166.65 µs 169.28 µs 172.59 µs]
+Found 14 outliers among 100 measurements (14.00%)
+  7 (7.00%) high mild
+  7 (7.00%) high severe
+
+     Running benches\grounding_hot_paths.rs (target-improve\release\deps\grounding_hot_paths-e34336c2f18bfedb.exe)
+Gnuplot not found, using plotters backend
+Benchmarking coord_math/norm_to_px_1920
+Benchmarking coord_math/norm_to_px_1920: Warming up for 3.0000 s
+Benchmarking coord_math/norm_to_px_1920: Collecting 100 samples in estimated 5.0001 s (102M iterations)
+Benchmarking coord_math/norm_to_px_1920: Analyzing
+coord_math/norm_to_px_1920
+                        time:   [48.446 ns 48.817 ns 49.194 ns]
+Found 6 outliers among 100 measurements (6.00%)
+  4 (4.00%) low mild
+  2 (2.00%) high mild
+Benchmarking coord_math/px_to_norm_1920
+Benchmarking coord_math/px_to_norm_1920: Warming up for 3.0000 s
+Benchmarking coord_math/px_to_norm_1920: Collecting 100 samples in estimated 5.0002 s (106M iterations)
+Benchmarking coord_math/px_to_norm_1920: Analyzing
+coord_math/px_to_norm_1920
+                        time:   [46.751 ns 47.127 ns 47.534 ns]
+Found 3 outliers among 100 measurements (3.00%)
+  1 (1.00%) low mild
+  2 (2.00%) high mild
+Benchmarking coord_math/coord_norm_clamped
+Benchmarking coord_math/coord_norm_clamped: Warming up for 3.0000 s
+Benchmarking coord_math/coord_norm_clamped: Collecting 100 samples in estimated 5.0000 s (1.9B iterations)
+Benchmarking coord_math/coord_norm_clamped: Analyzing
+coord_math/coord_norm_clamped
+                        time:   [2.5852 ns 2.7446 ns 2.9319 ns]
+Found 19 outliers among 100 measurements (19.00%)
+  9 (9.00%) low severe
+  5 (5.00%) low mild
+  5 (5.00%) high severe
+Benchmarking coord_math/grounded_from_rect
+Benchmarking coord_math/grounded_from_rect: Warming up for 3.0000 s
+Benchmarking coord_math/grounded_from_rect: Collecting 100 samples in estimated 5.0000 s (1.3B iterations)
+Benchmarking coord_math/grounded_from_rect: Analyzing
+coord_math/grounded_from_rect
+                        time:   [3.5839 ns 3.6261 ns 3.6706 ns]
+Found 4 outliers among 100 measurements (4.00%)
+  1 (1.00%) low mild
+  3 (3.00%) high mild
+Benchmarking coord_math/grounded_from_point
+Benchmarking coord_math/grounded_from_point: Warming up for 3.0000 s
+Benchmarking coord_math/grounded_from_point: Collecting 100 samples in estimated 5.0000 s (1.6B iterations)
+Benchmarking coord_math/grounded_from_point: Analyzing
+coord_math/grounded_from_point
+                        time:   [3.2073 ns 3.2799 ns 3.3598 ns]
+Found 5 outliers among 100 measurements (5.00%)
+  2 (2.00%) high mild
+  3 (3.00%) high severe
+
+Benchmarking vlm_parser/parse/bare_json
+Benchmarking vlm_parser/parse/bare_json: Warming up for 3.0000 s
+Benchmarking vlm_parser/parse/bare_json: Collecting 100 samples in estimated 5.0002 s (54M iterations)
+Benchmarking vlm_parser/parse/bare_json: Analyzing
+vlm_parser/parse/bare_json
+                        time:   [96.859 ns 98.884 ns 100.97 ns]
+Found 2 outliers among 100 measurements (2.00%)
+  1 (1.00%) high mild
+  1 (1.00%) high severe
+Benchmarking vlm_parser/parse/fenced_json
+Benchmarking vlm_parser/parse/fenced_json: Warming up for 3.0000 s
+Benchmarking vlm_parser/parse/fenced_json: Collecting 100 samples in estimated 5.0002 s (47M iterations)
+Benchmarking vlm_parser/parse/fenced_json: Analyzing
+vlm_parser/parse/fenced_json
+                        time:   [107.31 ns 109.79 ns 112.88 ns]
+Found 4 outliers among 100 measurements (4.00%)
+  1 (1.00%) high mild
+  3 (3.00%) high severe
+Benchmarking vlm_parser/parse/prose_json
+Benchmarking vlm_parser/parse/prose_json: Warming up for 3.0000 s
+Benchmarking vlm_parser/parse/prose_json: Collecting 100 samples in estimated 5.0004 s (48M iterations)
+Benchmarking vlm_parser/parse/prose_json: Analyzing
+vlm_parser/parse/prose_json
+                        time:   [104.84 ns 109.94 ns 116.84 ns]
+Found 8 outliers among 100 measurements (8.00%)
+  3 (3.00%) high mild
+  5 (5.00%) high severe
+Benchmarking vlm_parser/parse/uitars_click
+Benchmarking vlm_parser/parse/uitars_click: Warming up for 3.0000 s
+Benchmarking vlm_parser/parse/uitars_click: Collecting 100 samples in estimated 5.0009 s (26M iterations)
+Benchmarking vlm_parser/parse/uitars_click: Analyzing
+vlm_parser/parse/uitars_click
+                        time:   [171.75 ns 173.73 ns 176.26 ns]
+Found 4 outliers among 100 measurements (4.00%)
+  2 (2.00%) high mild
+  2 (2.00%) high severe
+Benchmarking vlm_parser/parse/uitars_type
+Benchmarking vlm_parser/parse/uitars_type: Warming up for 3.0000 s
+Benchmarking vlm_parser/parse/uitars_type: Collecting 100 samples in estimated 5.0006 s (19M iterations)
+Benchmarking vlm_parser/parse/uitars_type: Analyzing
+vlm_parser/parse/uitars_type
+                        time:   [274.43 ns 278.43 ns 282.81 ns]
+Found 14 outliers among 100 measurements (14.00%)
+  14 (14.00%) high severe
+Benchmarking vlm_parser/parse/uitars_scroll
+Benchmarking vlm_parser/parse/uitars_scroll: Warming up for 3.0000 s
+Benchmarking vlm_parser/parse/uitars_scroll: Collecting 100 samples in estimated 5.0002 s (12M iterations)
+Benchmarking vlm_parser/parse/uitars_scroll: Analyzing
+vlm_parser/parse/uitars_scroll
+                        time:   [395.81 ns 398.84 ns 402.05 ns]
+Benchmarking vlm_parser/parse/bare_tuple
+Benchmarking vlm_parser/parse/bare_tuple: Warming up for 3.0000 s
+Benchmarking vlm_parser/parse/bare_tuple: Collecting 100 samples in estimated 5.0002 s (74M iterations)
+Benchmarking vlm_parser/parse/bare_tuple: Analyzing
+vlm_parser/parse/bare_tuple
+                        time:   [67.374 ns 69.903 ns 73.135 ns]
+Found 11 outliers among 100 measurements (11.00%)
+  1 (1.00%) high mild
+  10 (10.00%) high severe
+Benchmarking vlm_parser/parse/not_found
+Benchmarking vlm_parser/parse/not_found: Warming up for 3.0000 s
+Benchmarking vlm_parser/parse/not_found: Collecting 100 samples in estimated 5.0004 s (52M iterations)
+Benchmarking vlm_parser/parse/not_found: Analyzing
+vlm_parser/parse/not_found
+                        time:   [95.181 ns 96.454 ns 97.852 ns]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking vlm_parser/parse/not_visible
+Benchmarking vlm_parser/parse/not_visible: Warming up for 3.0000 s
+Benchmarking vlm_parser/parse/not_visible: Collecting 100 samples in estimated 5.0004 s (53M iterations)
+Benchmarking vlm_parser/parse/not_visible: Analyzing
+vlm_parser/parse/not_visible
+                        time:   [97.257 ns 98.804 ns 100.32 ns]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+
+Benchmarking engine/cache_hit_first_tier
+Benchmarking engine/cache_hit_first_tier: Warming up for 3.0000 s
+Benchmarking engine/cache_hit_first_tier: Collecting 100 samples in estimated 5.0016 s (15M iterations)
+Benchmarking engine/cache_hit_first_tier: Analyzing
+engine/cache_hit_first_tier
+                        time:   [322.30 ns 326.64 ns 331.70 ns]
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high mild
+Benchmarking engine/all_instant_miss_no_vlm
+Benchmarking engine/all_instant_miss_no_vlm: Warming up for 3.0000 s
+Benchmarking engine/all_instant_miss_no_vlm: Collecting 100 samples in estimated 5.0023 s (8.0M iterations)
+Benchmarking engine/all_instant_miss_no_vlm: Analyzing
+engine/all_instant_miss_no_vlm
+                        time:   [631.12 ns 640.06 ns 650.54 ns]
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high mild
+Benchmarking engine/tier_ordering_skip_na_then_hit
+Benchmarking engine/tier_ordering_skip_na_then_hit: Warming up for 3.0000 s
+Benchmarking engine/tier_ordering_skip_na_then_hit: Collecting 100 samples in estimated 5.0029 s (8.7M iterations)
+Benchmarking engine/tier_ordering_skip_na_then_hit: Analyzing
+engine/tier_ordering_skip_na_then_hit
+                        time:   [549.81 ns 557.26 ns 566.19 ns]
+Found 6 outliers among 100 measurements (6.00%)
+  6 (6.00%) high mild
+Benchmarking engine/coords_bypass
+Benchmarking engine/coords_bypass: Warming up for 3.0000 s
+Benchmarking engine/coords_bypass: Collecting 100 samples in estimated 5.0007 s (27M iterations)
+Benchmarking engine/coords_bypass: Analyzing
+engine/coords_bypass    time:   [171.02 ns 172.33 ns 173.85 ns]
+
+     Running benches\hot_paths.rs (target-improve\release\deps\hot_paths-4236155dabb43e93.exe)
+Gnuplot not found, using plotters backend
+Benchmarking jsonlogic_eq_var
+Benchmarking jsonlogic_eq_var: Warming up for 3.0000 s
+Benchmarking jsonlogic_eq_var: Collecting 100 samples in estimated 5.0000 s (148M iterations)
+Benchmarking jsonlogic_eq_var: Analyzing
+jsonlogic_eq_var        time:   [34.701 ns 36.362 ns 38.222 ns]
+Found 6 outliers among 100 measurements (6.00%)
+  2 (2.00%) high mild
+  4 (4.00%) high severe
+
+Benchmarking intent_compile_3_ops
+Benchmarking intent_compile_3_ops: Warming up for 3.0000 s
+Benchmarking intent_compile_3_ops: Collecting 100 samples in estimated 5.0053 s (2.9M iterations)
+Benchmarking intent_compile_3_ops: Analyzing
+intent_compile_3_ops    time:   [1.6311 µs 1.6768 µs 1.7300 µs]
+Found 13 outliers among 100 measurements (13.00%)
+  6 (6.00%) high mild
+  7 (7.00%) high severe
+
+exit=0 wall_s=239

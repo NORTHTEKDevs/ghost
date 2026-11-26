@@ -1,0 +1,16 @@
+<stdin>:4: SyntaxWarning: "\g" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\g"? A raw string is also an option.
+launch 259 False {"data": {"browser": "default", "dies_with_server": true, "id": "p", "mode": "headless", "pid": 40704, "port": 64585}, "foreground": {"hwnd": 50072408, "title": "ghost-improve"}, "ms": 258, "ok": true
+open 62 False {"data": {"background": true, "tab": "3C53C244C744D640F010C83D665D54F9"}, "foreground": {"hwnd": 50072408, "title": "ghost-improve"}, "ms": 61, "ok": true}
+shot 0 1901 False 9176
+shot 1 193 False 9175
+shot 2 257 False 9175
+shot 3 747 False 9175
+shot 4 1014 False 9176
+shot 5 1015 False 9176
+shot 6 1016 False 9176
+shot 7 1013 False 9176
+shot 8 1013 False 9176
+shot 9 999 False 9175
+text 0 1 False
+text 1 0 False
+text 2 0 False

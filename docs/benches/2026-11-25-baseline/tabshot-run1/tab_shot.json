@@ -1,0 +1,109 @@
+{
+ "n": 20,
+ "first_ms": 1807.1,
+ "median_ms": 1007.3,
+ "p95_ms": 1807.1,
+ "valid_png": 20,
+ "raw": [
+  {
+   "ms": 1807.1,
+   "ok": true,
+   "bytes": 9076
+  },
+  {
+   "ms": 270.8,
+   "ok": true,
+   "bytes": 9076
+  },
+  {
+   "ms": 925.5,
+   "ok": true,
+   "bytes": 9076
+  },
+  {
+   "ms": 83.3,
+   "ok": true,
+   "bytes": 9076
+  },
+  {
+   "ms": 1014.3,
+   "ok": true,
+   "bytes": 9076
+  },
+  {
+   "ms": 1015.8,
+   "ok": true,
+   "bytes": 9076
+  },
+  {
+   "ms": 1003.1,
+   "ok": true,
+   "bytes": 9076
+  },
+  {
+   "ms": 1012.7,
+   "ok": true,
+   "bytes": 9076
+  },
+  {
+   "ms": 1006.3,
+   "ok": true,
+   "bytes": 9076
+  },
+  {
+   "ms": 1013.4,
+   "ok": true,
+   "bytes": 9076
+  },
+  {
+   "ms": 1015.0,
+   "ok": true,
+   "bytes": 9076
+  },
+  {
+   "ms": 1007.9,
+   "ok": true,
+   "bytes": 9076
+  },
+  {
+   "ms": 998.4,
+   "ok": true,
+   "bytes": 9076
+  },
+  {
+   "ms": 1002.6,
+   "ok": true,
+   "bytes": 9076
+  },
+  {
+   "ms": 1001.5,
+   "ok": true,
+   "bytes": 9076
+  },
+  {
+   "ms": 1000.2,
+   "ok": true,
+   "bytes": 9076
+  },
+  {
+   "ms": 1006.8,
+   "ok": true,
+   "bytes": 9076
+  },
+  {
+   "ms": 1011.2,
+   "ok": true,
+   "bytes": 9076
+  },
+  {
+   "ms": 1009.7,
+   "ok": true,
+   "bytes": 9076
+  },
+  {
+   "ms": 1016.0,
+   "ok": true,
+   "bytes": 9076
+  }
+ ]
+}

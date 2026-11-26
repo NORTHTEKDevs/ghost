@@ -1,0 +1,17 @@
+ghost verify - proving the product claims on this machine
+
+  [PASS] server starts and answers initialize           20ms
+  [PASS] default focus policy is 'background'           Some("background")
+  [PASS] isolated browser launches (budget 10s)         241ms
+  [PASS] 3 tabs typed+clicked, no cross-talk (5s)       120ms for all three
+  [PASS] background click latency (150ms each)          2.6ms/click
+  [PASS] background tab screenshot (2s)                 1795ms
+  [PASS] fast call completes while slow call in flight (500ms) 0.6ms with a 2s call running
+  [PASS] second ghost server ran its own browser (20s)  0.4s alongside the first
+  [PASS] emergency stop blocks; reset resumes           reset restored service
+  [FAIL] foreground window never changed                hwnd Some(22022736) -> Some(1116950)
+  [note] cursor moved during the run - that is you, unless --strict-cursor fails
+
+1 of 10 claims FAILED:
+  - foreground window never changed
+exit=1
