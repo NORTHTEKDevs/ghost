@@ -1,0 +1,29 @@
+    Checking ghost-session v0.24.0 (C:\Users\Krist\projects\active\ghost\crates\ghost-session)
+error: struct `Cover` is never constructed
+  --> crates\ghost-session\src\session.rs:74:19
+   |
+74 | pub(crate) struct Cover {
+   |                   ^^^^^
+   |
+   = note: `-D dead-code` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[expect(dead_code)]` or `#[allow(dead_code)]`
+
+error: function `cover_allowed` is never used
+  --> crates\ghost-session\src\session.rs:93:15
+   |
+93 | pub(crate) fn cover_allowed(cover: &Cover) -> bool {
+   |               ^^^^^^^^^^^^^
+
+error: function `invoke_fallback_due` is never used
+   --> crates\ghost-session\src\session.rs:103:15
+    |
+103 | pub(crate) fn invoke_fallback_due(windowless: bool, verified: Option<bool>) -> bool {
+    |               ^^^^^^^^^^^^^^^^^^^
+
+error: function `cover_refusal` is never used
+   --> crates\ghost-session\src\session.rs:181:4
+    |
+181 | fn cover_refusal(x: i32, y: i32, cover_title: &str, cover_pid: u32, target_title: &str) -> GhostError {
+    |    ^^^^^^^^^^^^^
+
+error: could not compile `ghost-session` (lib) due to 4 previous errors
