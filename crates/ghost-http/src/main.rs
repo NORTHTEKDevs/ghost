@@ -343,3 +343,24 @@ async fn main() {
     eprintln!("  curl http://{}/tools  for endpoint docs", cli.addr);
     axum::serve(listener, app).await.expect("serve failed");
 }
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::refuse_if_stopped;
+    use axum::http::StatusCode;
+    use ghost_core::input::STOP_FLAG;
+    use std::sync::atomic::Ordering;
+
+    /// Only the process-local flag: the shared event would stop every Ghost
+    /// process on the machine.
+    #[test]
+    fn action_routes_answer_409_while_stopped() {
+        STOP_FLAG.store(true, Ordering::Release);
+        let r = refuse_if_stopped();
+        STOP_FLAG.store(false, Ordering::Release);
+        let (code, body) = r.expect_err("must refuse while stopped");
+        assert_eq!(code, StatusCode::CONFLICT);
+        assert!(body.0["error"].as_str().unwrap().contains("ghost_reset"));
+        assert!(refuse_if_stopped().is_ok());
+    }
+}

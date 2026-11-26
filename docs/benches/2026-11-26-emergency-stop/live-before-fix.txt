@@ -1,0 +1,25 @@
+
+running 1 test
+[ghost-session] built-in vision tier: on (NVIDIA_API_KEY set; GHOST_VISION_PROVIDER=auto)
+path                refused  unchanged  after reset  error
+hidden act click      false      false         true  
+hidden act type       false      false         true  
+hidden key            false      false         true  
+hidden click_at       false      false         true  
+hidden scroll         false       true         true  
+launch (hidden)       false      false         true  
+CDP tab click         false      false         true  
+
+thread 'every_action_path_refuses_while_stopped_and_works_after_reset' (9996) panicked at crates\ghost-session\tests\emergency_stop_live.rs:272:5:
+paths not gated by the emergency stop: ["hidden act click", "hidden act type", "hidden key", "hidden click_at", "hidden scroll", "launch (hidden)", "CDP tab click"]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+every_action_path_refuses_while_stopped_and_works_after_reset --- FAILED
+
+failures:
+
+failures:
+    every_action_path_refuses_while_stopped_and_works_after_reset
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.93s
+
+error: test failed, to rerun pass `-p ghost-session --test emergency_stop_live`

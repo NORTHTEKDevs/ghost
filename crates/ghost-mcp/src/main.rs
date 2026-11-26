@@ -3993,6 +3993,116 @@ fn base64_encode(data: &[u8]) -> String {
 }
 
 #[cfg(test)]
+mod stop_gate_tests {
+    //! The emergency-stop gate at the MCP choke point. Pure: `stop_gate` takes
+    //! the stop state as an argument, so nothing here raises the real stop.
+    use super::{legacy_tools_schema_full, stop_gate, tool_class, tools_schema, ToolClass};
+    use serde_json::{json, Value};
+    use std::collections::BTreeSet;
+
+    /// Every tool name this server can dispatch: the advertised tools, the
+    /// legacy schema, and every `"ghost_..." =>` match arm in the dispatchers
+    /// (handle_tool, the hidden and CDP routes, ext), read from the source so a
+    /// new arm cannot slip past the table.
+    fn every_dispatchable_tool() -> BTreeSet<String> {
+        let mut names = BTreeSet::new();
+        for schema in [tools_schema(), legacy_tools_schema_full()] {
+            for t in schema.as_array().unwrap() {
+                names.insert(t["name"].as_str().unwrap().to_string());
+            }
+        }
+        for src in [include_str!("main.rs"), include_str!("ext.rs")] {
+            for line in src.lines() {
+                let l = line.trim_start();
+                if !l.starts_with("\"ghost_") || !l.contains("=>") {
+                    continue;
+                }
+                let arms = l.split("=>").next().unwrap();
+                for part in arms.split('|') {
+                    let p = part.trim();
+                    if let Some(n) = p.strip_prefix('"').and_then(|r| r.split('"').next()) {
+                        if n.starts_with("ghost_") && n.len() > "ghost_".len() && !n.ends_with('_') {
+                            names.insert(n.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        names
+    }
+
+    #[test]
+    fn every_dispatchable_tool_has_an_explicit_class() {
+        let names = every_dispatchable_tool();
+        assert!(names.len() > 90, "the scan found too few tools ({}), so it is broken", names.len());
+        let unclassified: Vec<_> = names.iter().filter(|n| tool_class(n, &json!({})).is_none()).collect();
+        assert!(unclassified.is_empty(), "tools with no emergency-stop class: {unclassified:?}");
+    }
+
+    #[test]
+    fn every_act_tool_is_refused_while_stopped_and_allowed_after_reset() {
+        let mut acts = 0;
+        for n in every_dispatchable_tool() {
+            if tool_class(&n, &json!({})) == Some(ToolClass::Act) {
+                acts += 1;
+                let e = stop_gate(&n, &json!({}), true).expect_err(&n);
+                assert!(e.contains("stopped") && e.contains("ghost_reset"), "{n}: {e}");
+                assert_eq!(super::classify_error(&e).0, -32004, "{n} must carry the stopped error code");
+                assert!(stop_gate(&n, &json!({}), false).is_ok(), "{n} must run when not stopped");
+            }
+        }
+        assert!(acts > 50, "only {acts} state-changing tools found");
+    }
+
+    #[test]
+    fn reads_and_stop_controls_stay_available_while_stopped() {
+        for n in ["ghost_see", "ghost_find", "ghost_snapshot", "ghost_screenshot", "ghost_query", "ghost_assert",
+                  "ghost_tab_text", "ghost_desktop_capture", "ghost_list_windows", "ghost_stop", "ghost_reset"] {
+            assert!(stop_gate(n, &json!({}), true).is_ok(), "{n} must answer while stopped");
+        }
+    }
+
+    #[test]
+    fn the_reported_and_audited_paths_are_gated() {
+        // The report: ghost_act on a hidden-desktop target. The audit: launch,
+        // explicit desktop tools, CDP/tab input, batch and compound ops.
+        for n in ["ghost_act", "ghost_key", "ghost_click_at", "ghost_scroll", "ghost_launch", "ghost_desktop_click",
+                  "ghost_desktop_type", "ghost_desktop_launch", "ghost_tab_click", "ghost_tab_type", "ghost_tab_eval",
+                  "ghost_tab_navigate", "ghost_browser_launch", "ghost_batch_actions", "ghost_run", "ghost_fill_form",
+                  "ghost_execute_intent", "ghost_set_clipboard", "ghost_http_post", "ghost_shell"] {
+            assert!(stop_gate(n, &json!({}), true).is_err(), "{n} ran while stopped");
+        }
+    }
+
+    #[test]
+    fn arguments_decide_for_verbs_that_both_read_and_act() {
+        let cases: [(&str, Value, ToolClass); 12] = [
+            ("ghost_window", json!({}), ToolClass::Observe),
+            ("ghost_window", json!({"op": "anchor"}), ToolClass::Observe),
+            ("ghost_window", json!({"op": "focus"}), ToolClass::Act),
+            ("ghost_window", json!({"op": "launch"}), ToolClass::Act),
+            ("ghost_clipboard", json!({}), ToolClass::Observe),
+            ("ghost_clipboard", json!({"op": "set"}), ToolClass::Act),
+            ("ghost_wait", json!({"for": "element"}), ToolClass::Observe),
+            ("ghost_wait", json!({"for": "text"}), ToolClass::Act),
+            ("ghost_wait", json!({"for": "navigate"}), ToolClass::Act),
+            ("ghost_shell", json!({"op": "kill"}), ToolClass::Control),
+            ("ghost_set_focus_policy", json!({"policy": "background"}), ToolClass::Control),
+            ("ghost_set_focus_policy", json!({"policy": "foreground"}), ToolClass::Act),
+        ];
+        for (n, args, want) in cases {
+            assert_eq!(tool_class(n, &args), Some(want), "{n} {args}");
+        }
+    }
+
+    #[test]
+    fn an_unknown_tool_is_refused_while_stopped() {
+        assert_eq!(tool_class("ghost_brand_new_tool", &json!({})), None);
+        assert!(stop_gate("ghost_brand_new_tool", &json!({}), true).is_err());
+    }
+}
+
+#[cfg(test)]
 mod background_key_tests {
     use super::{background_key_plan, parse_key_combo, BackgroundKey};
     use ghost_session::EditCommand;

@@ -798,4 +798,30 @@ mod tests {
     fn locate_mode_instant_only() {
         assert!(matches!(parse_locate_mode("instant_only"), LocateMode::InstantOnly));
     }
+
+    #[test]
+    fn action_subcommands_are_gated_by_the_emergency_stop_and_reads_are_not() {
+        let acts: [&[&str]; 12] = [
+            &["click", "--name", "OK"],
+            &["click-at", "1", "2"],
+            &["type", "--name", "F", "--text", "x"],
+            &["press", "Enter"],
+            &["launch", "x.exe"],
+            &["focus-window", "x"],
+            &["window-state", "x", "minimize"],
+            &["set-clipboard", "x"],
+            &["act", "--action", "click", "--name", "OK"],
+            &["key", "Enter"],
+            &["window", "--op", "focus", "--name", "x"],
+            &["window", "--op", "launch", "--exe", "x.exe"],
+        ];
+        for a in acts {
+            let cli = parse(a).unwrap_or_else(|e| panic!("{a:?}: {e}"));
+            assert!(cli_acts(&cli.command), "{a:?} must be refused while stopped");
+        }
+        for a in [&["window"][..], &["list-windows"], &["see"], &["find", "--name", "OK"], &["get-clipboard"], &["doctor"]] {
+            let cli = parse(a).unwrap_or_else(|e| panic!("{a:?}: {e}"));
+            assert!(!cli_acts(&cli.command), "{a:?} only reads and must stay available");
+        }
+    }
 }
