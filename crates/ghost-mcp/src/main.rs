@@ -2630,6 +2630,10 @@ async fn handle_ghost_key(
     p: &Value,
 ) -> std::result::Result<Value, String> {
     let keys = p["keys"].as_str().ok_or("ghost_key: missing 'keys' param")?;
+    // The window the target resolver already chose: the background verbs drive
+    // THIS handle, not a fresh title match (which picked the first window whose
+    // title merely contains the target's).
+    let hint = p["_target_hwnd"].as_i64().map(|h| h as isize);
 
     // Background mode: post a single key to a named window's focused control
     // without taking foreground. Modifier combos are rejected - posting can't set
@@ -2653,7 +2657,7 @@ async fn handle_ghost_key(
                         ghost_session::EditCommand::Undo => "undo",
                         ghost_session::EditCommand::SelectAll => "select_all",
                     };
-                    return session.edit_command_background(window, cmd_name).await.map_err(|e| e.to_string());
+                    return session.edit_command_background(window, cmd_name, hint).await.map_err(|e| e.to_string());
                 }
             }
             return Err(format!(
@@ -2662,7 +2666,7 @@ async fn handle_ghost_key(
                  Use foreground for other combos"
             ));
         }
-        return session.key_background(window, &key).await.map_err(|e| e.to_string());
+        return session.key_background(window, &key, hint).await.map_err(|e| e.to_string());
     }
 
     // Keyboard SendInput routes to whichever window owns OS focus - which between
@@ -2676,7 +2680,7 @@ async fn handle_ghost_key(
             // background path - refuse naming the action and the unblocking
             // policy, exactly like every other foreground-only primitive.
             let (_, key_only) = parse_key_combo(keys)?;
-            return session.key_background(window, &key_only).await.map_err(|e| e.to_string());
+            return session.key_background(window, &key_only, hint).await.map_err(|e| e.to_string());
         }
         session.ensure_window_foreground(window).await.map_err(|e| {
             format!("ghost_key: could not confirm '{window}' as foreground before sending keys: {e}")

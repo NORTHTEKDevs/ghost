@@ -1,0 +1,222 @@
+{
+ "window_order": [
+  "Ghost Key Bed 2",
+  "Ghost Key Bed"
+ ],
+ "keys": {
+  "n": 20,
+  "q_in_target": 20,
+  "q_in_decoy": 0,
+  "response_window_is_target": 20,
+  "errors": 0,
+  "raw": [
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 213.5
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 191.5
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 191.6
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 222.8
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 190.9
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 188.7
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 188.8
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 190.2
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 189.7
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 189.8
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 190.1
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 189.4
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 189.4
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 190.1
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 189.9
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 189.4
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 191.1
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 188.4
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 189.4
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 188.8
+   }
+  ]
+ },
+ "edit_command": {
+  "n": 20,
+  "response_window_is_target": 20,
+  "errors": 0,
+  "raw": [
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 129.7
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 126.9
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 126.1
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 125.6
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 124.7
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 126.0
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 125.8
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 126.3
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 126.0
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 125.1
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 125.0
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 126.9
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 125.5
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 126.5
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 125.1
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 125.6
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 126.1
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 127.6
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 125.6
+   },
+   {
+    "window": "Ghost Key Bed",
+    "is_error": false,
+    "ms": 125.3
+   }
+  ]
+ }
+}

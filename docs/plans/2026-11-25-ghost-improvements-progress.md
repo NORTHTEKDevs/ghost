@@ -48,3 +48,19 @@ I re-run mine only once the session is idle. Lesson: never run probes while the 
 Not tested: Linux/macOS edits (no C cross-compiler for ring here; CI would compile them).
 Next: convergence round 1 (docs/benches/2026-11-25-final/, docs/plans/2026-11-25-convergence-round1.md).
 
+Stage 5 probes re-run clean by Grok Bot (12:42 AM AKST, Claude idle): user/hidden disabled refused 20/20;
+increment verified 20/20 (median 55.8 / 45.3 ms - the 43-vs-59 ms timer-tick clustering); label
+verified=false 20/20 both surfaces. Stage 5 VERIFIED.
+
+## Convergence round 1 (commit fa7fef6, docs/plans/2026-11-25-convergence-round1.md) - NOT CONVERGED
+Re-measure vs baseline: tests 550 -> 580; verify all-pass 2/4 -> 3/3 (+10/10, 3/3 earlier); tab screenshot
+1007 -> 31.6 ms; act click user 123 ms 0/20 verified -> 43 ms 20/20; hidden 113 ms 10/20 -> 42 ms 20/20.
+New candidates with evidence: C1 click_at without hwnd posts to whatever covers the point (during the review
+10 probe clicks went into the ghost-improve terminal tab - Claude's own session window, nothing else);
+C2 key/edit re-resolve window by substring and hit a decoy 3/3; C3 double_click verified 1/10;
+C4 pinned click_at always falls back to UIA Invoke, 337-360 ms; C5 hidden no-effect false positive 1/140;
+C6 verify blind to a Ghost raise the human then leaves; C7 hidden click_at/double_click fixed 80 ms.
+Grok Bot added C8 (timer-tick bimodal click median). Rule adopted: no probe may send input to a window it
+did not create.
+Next: STAGE 6 = C2 + C3 (sent 12:43 AM AKST); STAGE 7 = C1 + C4; STAGE 8 = C6, C7 (measure), C5, C8.
+

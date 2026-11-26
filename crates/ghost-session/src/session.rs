@@ -61,6 +61,23 @@ fn window_title_of(_hwnd: isize) -> String {
 /// control through its own toolkit and has no pointer involvement at all -- so
 /// there is nothing that could have moved it. On Windows, and on Linux under
 /// X11, both readings are real and compared exactly.
+/// The window a background verb drives: the handle the caller already resolved
+/// (the MCP layer's `_target_hwnd`) when that window is still open and not
+/// minimised, otherwise the first window whose title contains `title`.
+///
+/// `ghost_key` and the Ctrl+C/X/V/A/Z edit commands used to take only the title
+/// and re-resolve it by first substring match in z-order, so with the anchor on
+/// "Ghost Key Bed" and a window "Ghost Key Bed 2" in front, the key went to the
+/// second while the response named the first (3/3,
+/// docs/benches/2026-11-25-final/review-run2..4).
+fn pick_window<'a>(windows: &'a [WindowInfo], title: &str, hint: Option<isize>) -> Option<&'a WindowInfo> {
+    if let Some(w) = hint.and_then(|h| windows.iter().find(|w| w.hwnd == h && w.state != "minimized")) {
+        return Some(w);
+    }
+    let ql = title.to_lowercase();
+    windows.iter().find(|w| w.name.to_lowercase().contains(&ql) && w.state != "minimized")
+}
+
 fn cursor_unchanged(before: Option<(i32, i32)>, after: Option<(i32, i32)>) -> bool {
     match (before, after) {
         (Some(a), Some(b)) => a == b,
@@ -2181,13 +2198,7 @@ impl GhostSession {
         // action - a page rewriting document.title on every click did exactly
         // that), otherwise by partial name. Minimised windows are skipped.
         let windows_list = core_list_windows().map_err(GhostError::Core)?;
-        let ql = window.to_lowercase();
-        let win = hwnd_hint
-            .and_then(|h| windows_list.iter().find(|w| w.hwnd == h && w.state != "minimized"))
-            .or_else(|| {
-                windows_list.iter()
-                    .find(|w| w.name.to_lowercase().contains(&ql) && w.state != "minimized")
-            })
+        let win = pick_window(&windows_list, window, hwnd_hint)
             .ok_or_else(|| GhostError::Vision(format!(
                 "ghost_act background: no visible window matching '{window}' (minimized windows can't be driven in background)"
             )))?;
@@ -2550,13 +2561,11 @@ impl GhostSession {
     /// without foreground or cursor movement. `key` is one key name ("Enter",
     /// "Tab", "F5", "a"). Modifier combos are rejected upstream (posting can't set
     /// the modifier state apps read). Returns {focus_preserved, cursor_preserved}.
-    pub async fn key_background(&self, window: &str, key: &str) -> Result<serde_json::Value> {
+    pub async fn key_background(&self, window: &str, key: &str, hwnd_hint: Option<isize>) -> Result<serde_json::Value> {
 
         if is_stopped() { return Err(GhostError::Stopped); }
         let windows_list = core_list_windows().map_err(GhostError::Core)?;
-        let ql = window.to_lowercase();
-        let win = windows_list.iter()
-            .find(|w| w.name.to_lowercase().contains(&ql) && w.state != "minimized")
+        let win = pick_window(&windows_list, window, hwnd_hint)
             .ok_or_else(|| GhostError::Vision(format!(
                 "ghost_key background: no visible window matching '{window}'"
             )))?;
@@ -2608,7 +2617,7 @@ impl GhostSession {
     /// to a named window's focused control as a semantic message (WM_COPY etc.) - 
     /// the reliable, background-safe way to do the common Ctrl+ shortcuts without
     /// foreground/cursor change. Returns {focus_preserved, cursor_preserved}.
-    pub async fn edit_command_background(&self, window: &str, cmd: &str) -> Result<serde_json::Value> {
+    pub async fn edit_command_background(&self, window: &str, cmd: &str, hwnd_hint: Option<isize>) -> Result<serde_json::Value> {
         use crate::engine::input::EditCommand;
 
         if is_stopped() { return Err(GhostError::Stopped); }
@@ -2623,9 +2632,7 @@ impl GhostSession {
             ))),
         };
         let windows_list = core_list_windows().map_err(GhostError::Core)?;
-        let ql = window.to_lowercase();
-        let win = windows_list.iter()
-            .find(|w| w.name.to_lowercase().contains(&ql) && w.state != "minimized")
+        let win = pick_window(&windows_list, window, hwnd_hint)
             .ok_or_else(|| GhostError::Vision(format!(
                 "ghost_key background: no visible window matching '{window}'"
             )))?;
@@ -2982,3 +2989,38 @@ mod act_result_tests {
     }
 }
 
+#[cfg(test)]
+mod pick_window_tests {
+    use super::{pick_window, WindowInfo};
+
+    fn win(name: &str, hwnd: isize, state: &'static str) -> WindowInfo {
+        WindowInfo { name: name.into(), pid: 1, focused: false, hwnd, state }
+    }
+
+    #[test]
+    fn the_resolved_handle_wins_over_an_earlier_title_match() {
+        // The decoy is first in z-order and its title contains the target's.
+        let ws = [win("Ghost Key Bed 2", 20, "normal"), win("Ghost Key Bed", 10, "normal")];
+        assert_eq!(pick_window(&ws, "Ghost Key Bed", Some(10)).map(|w| w.hwnd), Some(10));
+    }
+
+    #[test]
+    fn without_a_handle_the_first_title_match_is_used_as_before() {
+        let ws = [win("Ghost Key Bed 2", 20, "normal"), win("Ghost Key Bed", 10, "normal")];
+        assert_eq!(pick_window(&ws, "Ghost Key Bed", None).map(|w| w.hwnd), Some(20));
+    }
+
+    #[test]
+    fn a_handle_that_is_gone_or_minimised_falls_back_to_the_title() {
+        let ws = [win("Notes", 10, "minimized"), win("Notes", 11, "normal")];
+        assert_eq!(pick_window(&ws, "notes", Some(10)).map(|w| w.hwnd), Some(11));
+        assert_eq!(pick_window(&ws, "notes", Some(99)).map(|w| w.hwnd), Some(11));
+    }
+
+    #[test]
+    fn nothing_matching_is_none() {
+        let ws = [win("Other", 10, "normal")];
+        assert!(pick_window(&ws, "Notes", None).is_none());
+        assert!(pick_window(&[], "Notes", Some(10)).is_none());
+    }
+}
