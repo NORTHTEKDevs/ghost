@@ -1,0 +1,15 @@
+ghost verify - proving the product claims on this machine
+
+  [PASS] server starts and answers initialize           25ms
+  [PASS] default focus policy is 'background'           Some("background")
+  [PASS] isolated browser launches (budget 10s)         247ms
+  [PASS] 3 tabs typed+clicked, no cross-talk (5s)       99ms for all three
+  [PASS] background click latency (150ms each)          3.1ms/click
+  [PASS] background tab screenshot (2s)                 61ms
+  [PASS] fast call completes while slow call in flight (500ms) 0.4ms with a 2s call running
+  [PASS] second ghost server ran its own browser (20s)  0.3s alongside the first
+  [PASS] emergency stop blocks; reset resumes           reset restored service
+  [PASS] foreground never taken by Ghost                hwnd 50072408 -> 50072408
+
+ALL CLAIMS HOLD: 10 checks passed in 4.8s. Ghost operates as advertised on this machine.
+exit=0

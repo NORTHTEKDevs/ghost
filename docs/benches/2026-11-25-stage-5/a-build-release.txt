@@ -1,0 +1,3 @@
+   Compiling ghost-cli v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-cli)
+    Finished `release` profile [optimized] target(s) in 4.88s
+exit=0 wall_s=5

@@ -166,7 +166,9 @@ fn incidents_since(stats: &Value, since_ms: u64) -> Option<Vec<FgIncident>> {
 /// A change counts against Ghost when the audit saw it with a Ghost tool call
 /// in flight, or when the new foreground belongs to a process this run
 /// launched. Either FAILS even if the foreground is back where it started by
-/// the end. A change with real input behind it, or a synthetic one by another
+/// the end. So does a Ghost-launched window holding the foreground at the end,
+/// which catches a change made while the human was typing (the audit classes
+/// those as real input and keeps no record of where they went). A change with real input behind it, or a synthetic one by another
 /// program, passes with a note. With no audit, only an unchanged handle passes.
 fn foreground_verdict(
     before: Option<i64>,
@@ -175,6 +177,16 @@ fn foreground_verdict(
     ghost_pids: &[u32],
     pid_of: impl Fn(i64) -> u32,
 ) -> (bool, String) {
+    // The audit records only SYNTHETIC changes: a window Ghost raised while the
+    // human was typing is classed as their own change and leaves no incident.
+    // Whatever the audit says, a Ghost-launched window holding the foreground
+    // at the end means Ghost has it.
+    if let Some(a) = after {
+        let pid = pid_of(a);
+        if pid != 0 && ghost_pids.contains(&pid) {
+            return (false, format!("hwnd {a} of Ghost-launched pid {pid} holds the foreground at the end"));
+        }
+    }
     let Some(incidents) = incidents else {
         // No audit to attribute with: only an unchanged handle proves anything.
         return (
@@ -569,6 +581,20 @@ mod tests {
     fn a_launched_window_taking_the_foreground_fails_with_nothing_in_flight() {
         let (ok, why) = foreground_verdict(Some(5), Some(77), Some(&[inc(77, &[])]), &[LAUNCHED], pid_of);
         assert!(!ok, "{why}");
+    }
+
+    #[test]
+    fn a_launched_window_in_the_foreground_at_the_end_fails_even_while_the_human_typed() {
+        // The audit classes a change made while the human is typing as theirs
+        // and records no incident, so only the final window can show it.
+        let (ok, why) = foreground_verdict(Some(5), Some(77), Some(&[]), &[LAUNCHED], pid_of);
+        assert!(!ok, "{why}");
+        assert!(why.contains("77"), "{why}");
+    }
+
+    #[test]
+    fn a_launched_window_in_the_foreground_at_the_end_fails_without_an_audit_too() {
+        assert!(!foreground_verdict(Some(5), Some(77), None, &[LAUNCHED], pid_of).0);
     }
 
     #[test]
