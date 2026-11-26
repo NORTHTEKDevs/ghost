@@ -37,6 +37,19 @@ use crate::{
 #[cfg(feature = "yolo")]
 use crate::tiers::YoloTier;
 
+/// A window's title, for click verification. Off Windows there is no cheap
+/// equivalent, so the title signal never fires there and the element state and
+/// pixels decide alone.
+#[cfg(windows)]
+fn window_title_of(hwnd: isize) -> String {
+    ghost_core::system::observer::window_title(windows::Win32::Foundation::HWND(hwnd as *mut _))
+}
+
+#[cfg(not(windows))]
+fn window_title_of(_hwnd: isize) -> String {
+    String::new()
+}
+
 /// Did the pointer stay put across an action?
 ///
 /// Both readings are `Option` because pointer position is not knowable on every
@@ -2316,6 +2329,7 @@ impl GhostSession {
         };
 
         let mut typed_via: &str = "";
+        let mut verified_by: Option<crate::click_verify::Signal> = None;
         // Set the moment a rung is seen to have taken the human's foreground
         // (see foreground_guard_end); the hand-back happens right there, before
         // any read-back wait, so the theft lasts milliseconds, not the call.
@@ -2375,6 +2389,8 @@ impl GhostSession {
             }
             "click" => {
                 let before = crate::engine::capture::capture_window_printwindow(hwnd_raw).ok();
+                let title_before = window_title_of(hwnd_raw);
+                let state_before = (el.name(), el.get_text());
                 let mut fallback_uia = false;
                 if ctrl_hwnd != 0 {
                     if el.control_type() == UIA_BUTTON {
@@ -2420,17 +2436,39 @@ impl GhostSession {
                         other => other?,
                     }
                 }
-                // The 80 ms the pixel check needs anyway is also the settle a
-                // posted click needs before the target's thread has acted on it.
-                tokio::time::sleep(Duration::from_millis(80)).await;
+                // A posted click is handled by the target's thread a moment
+                // later, so the effect is polled for (see click_verify). An
+                // observed effect proves that thread has run the click, which is
+                // also what the foreground guard below needs to wait for. A UIA
+                // Invoke fallback can activate the window late, so it keeps the
+                // full settle before the guard looks. Pixels are the whole
+                // window, not the control's rect: a click's effect is often a
+                // status line or pane elsewhere (the reason the rect-scoped
+                // check missed every testbed click).
+                let mut changed = None;
+                let dispatched = tokio::time::Instant::now();
+                for (i, at) in crate::click_verify::POLL_AT_MS.into_iter().enumerate() {
+                    tokio::time::sleep_until(dispatched + Duration::from_millis(at)).await;
+                    let slow = crate::click_verify::slow_signals_due(i);
+                    let pixels = if slow { crate::click_verify::pixel_effect_async(hwnd_raw, &before).await } else { None };
+                    let (v, by) = crate::click_verify::decide(
+                        window_title_of(hwnd_raw) != title_before,
+                        slow && (el.name(), el.get_text()) != state_before,
+                        pixels,
+                    );
+                    changed = v;
+                    verified_by = by;
+                    if v == Some(true) && !fallback_uia {
+                        break;
+                    }
+                }
                 focus_guard = self.foreground_guard_end(hwnd_raw, win.pid, fg_before).await;
-                let changed = verify_pixels(before);
                 let note = if fallback_uia {
                     Some("clicked via UIA Invoke (windowless control) — the window may have activated; check focus_preserved")
                 } else if changed.is_none() {
                     Some("background click posted; PrintWindow couldn't verify the effect — read state to confirm")
                 } else if changed == Some(false) {
-                    Some("background click posted (focus preserved); the control's own rect didn't change — a click's effect is often elsewhere, so read state to confirm")
+                    Some("background click posted (focus preserved); within 80 ms neither the window title, the element's name/value nor the window's pixels changed — read state to confirm")
                 } else { None };
                 (changed, note)
             }
@@ -2485,6 +2523,9 @@ impl GhostSession {
         });
         if let (Some(obj), Some(n)) = (out.as_object_mut(), note) {
             obj.insert("note".into(), serde_json::Value::String(n.into()));
+        }
+        if let (Some(obj), Some(by)) = (out.as_object_mut(), verified_by) {
+            obj.insert("verified_by".into(), serde_json::Value::String(by.as_str().into()));
         }
         if let (Some(obj), Some(i)) = (out.as_object_mut(), index) {
             obj.insert("index".into(), serde_json::json!(i));
