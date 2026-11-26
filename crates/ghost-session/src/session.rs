@@ -1944,7 +1944,7 @@ impl GhostSession {
         // Fail fast on disabled controls for ALL actions - the coordinate paths
         // (double_click/right_click/hover) previously bypassed the click/type
         // disabled guard and clicked a dead control, returning a misleading ok.
-        if !el.is_enabled() {
+        if el.is_definitely_disabled() {
             return Err(GhostError::ElementNotInteractable {
                 element: name,
                 reason: "element is disabled".into(),
@@ -2275,7 +2275,7 @@ impl GhostSession {
         // action, exactly as the foreground path (act_on_element) and the hidden
         // desktop path do. This path used to post BM_CLICK to it (or WM_SETTEXT
         // into a disabled edit) and answer ok:true.
-        if !el.is_enabled() {
+        if el.is_definitely_disabled() {
             return Err(GhostError::ElementNotInteractable {
                 element: name,
                 reason: "element is disabled".into(),

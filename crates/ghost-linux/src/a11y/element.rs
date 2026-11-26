@@ -102,6 +102,11 @@ impl A11yElement {
         self.snap.enabled
     }
 
+    /// AT-SPI's state set always answers, so the state is always definite.
+    pub fn is_enabled_checked(&self) -> Option<bool> {
+        Some(self.snap.enabled)
+    }
+
     /// Offscreen means "not currently rendered": either the toolkit says it is
     /// not showing, or it has no usable rectangle.
     pub fn is_offscreen(&self) -> bool {

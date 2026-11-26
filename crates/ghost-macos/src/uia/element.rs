@@ -53,6 +53,12 @@ impl UiaElement {
         false
     }
 
+    /// Unknown: there is no AXUIElement implementation yet, so an action is
+    /// not refused as "disabled" and reports the real `Unsupported` instead.
+    pub fn is_enabled_checked(&self) -> Option<bool> {
+        None
+    }
+
     pub fn is_offscreen(&self) -> bool {
         false
     }
