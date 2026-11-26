@@ -182,12 +182,19 @@ fn launch_raw(exe: &str) -> Result<u32, CoreError> {
     }
 }
 
-/// Kill a process by PID immediately.
+/// The exit code a process ended by `kill` reports (57005). It was 1, which
+/// any program can exit with: a test binary once died with code 1 and no
+/// failed test, and nothing could say whether Ghost had killed it (the orphan
+/// sweep follows parent-pid links that pid reuse can make stale). Nothing
+/// reads this value; it only makes such a death identify itself.
+pub const KILLED_EXIT_CODE: u32 = 0xDEAD;
+
+/// Kill a process by PID immediately; it exits with `KILLED_EXIT_CODE`.
 pub fn kill(pid: u32) -> Result<(), CoreError> {
     unsafe {
         let handle = OpenProcess(PROCESS_TERMINATE, false, pid)
             .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "OpenProcess" })?;
-        TerminateProcess(handle, 1)
+        TerminateProcess(handle, KILLED_EXIT_CODE)
             .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "TerminateProcess" })?;
         let _ = CloseHandle(handle);
         Ok(())
@@ -263,5 +270,20 @@ mod tests {
             }
             None => eprintln!("SKIP: Edge is not registered under App Paths on this machine"),
         }
+    }
+
+    #[test]
+    fn a_killed_process_exits_with_the_distinctive_code() {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let mut child = std::process::Command::new("ping")
+            .args(["-n", "30", "127.0.0.1"])
+            .stdout(std::process::Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .expect("spawn ping");
+        kill(child.id()).expect("kill");
+        let status = child.wait().expect("wait");
+        assert_eq!(status.code(), Some(KILLED_EXIT_CODE as i32));
     }
 }
