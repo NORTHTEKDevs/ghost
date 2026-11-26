@@ -130,6 +130,9 @@ struct FgIncident {
     epoch_ms: u64,
     to_hwnd: i64,
     in_flight: Vec<String>,
+    /// From `during_input_incidents`: a Ghost-driven window took the
+    /// foreground while the human typed (no click or Alt+Tab chose it).
+    during_input: bool,
 }
 
 /// The incidents a server's audit recorded at or after `since_ms`, or `None`
@@ -141,18 +144,22 @@ fn incidents_since(stats: &Value, since_ms: u64) -> Option<Vec<FgIncident>> {
         return None;
     }
     let list = audit["incidents"].as_array()?;
+    let parse = |i: &Value, during_input: bool| {
+        Some(FgIncident {
+            epoch_ms: i["epoch_ms"].as_u64()?,
+            to_hwnd: i["to_hwnd"].as_i64()?,
+            in_flight: i["in_flight"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|t| t.as_str().map(String::from)).collect())
+                .unwrap_or_default(),
+            during_input,
+        })
+    };
+    let during = audit["during_input_incidents"].as_array().map(Vec::as_slice).unwrap_or(&[]);
     Some(
         list.iter()
-            .filter_map(|i| {
-                Some(FgIncident {
-                    epoch_ms: i["epoch_ms"].as_u64()?,
-                    to_hwnd: i["to_hwnd"].as_i64()?,
-                    in_flight: i["in_flight"]
-                        .as_array()
-                        .map(|a| a.iter().filter_map(|t| t.as_str().map(String::from)).collect())
-                        .unwrap_or_default(),
-                })
-            })
+            .filter_map(|i| parse(i, false))
+            .chain(during.iter().filter_map(|i| parse(i, true)))
             .filter(|i| i.epoch_ms >= since_ms)
             .collect(),
     )
@@ -194,6 +201,16 @@ fn foreground_verdict(
             format!("hwnd {before:?} -> {after:?} (interference audit off: handles compared only)"),
         );
     };
+    if let Some(i) = incidents.iter().find(|i| i.during_input) {
+        return (
+            false,
+            format!(
+                "a window Ghost drives (hwnd {}) took the foreground while the human was typing - no click or \
+                 Alt+Tab chose it; ended {before:?} -> {after:?}",
+                i.to_hwnd
+            ),
+        );
+    }
     let ghost_caused: Vec<&FgIncident> = incidents
         .iter()
         .filter(|i| {
@@ -540,7 +557,7 @@ mod tests {
     use super::*;
 
     fn inc(to_hwnd: i64, in_flight: &[&str]) -> FgIncident {
-        FgIncident { epoch_ms: 1_000, to_hwnd, in_flight: in_flight.iter().map(|s| s.to_string()).collect() }
+        FgIncident { epoch_ms: 1_000, to_hwnd, in_flight: in_flight.iter().map(|s| s.to_string()).collect(), during_input: false }
     }
 
     const LAUNCHED: u32 = 4242;
@@ -595,6 +612,24 @@ mod tests {
     #[test]
     fn a_launched_window_in_the_foreground_at_the_end_fails_without_an_audit_too() {
         assert!(!foreground_verdict(Some(5), Some(77), None, &[LAUNCHED], pid_of).0);
+    }
+
+    #[test]
+    fn a_ghost_window_taking_the_foreground_while_the_human_typed_fails_even_when_it_ended_where_it_started() {
+        let mut i = inc(6, &[]);
+        i.during_input = true;
+        let (ok, why) = foreground_verdict(Some(5), Some(5), Some(&[i]), &[LAUNCHED], pid_of);
+        assert!(!ok, "{why}");
+        assert!(why.contains("typing"), "{why}");
+    }
+
+    #[test]
+    fn during_input_incidents_are_read_from_the_audit() {
+        let stats = json!({ "interference_audit": { "enabled": true, "incidents": [],
+            "during_input_incidents": [ { "epoch_ms": 2000, "to_hwnd": 9, "in_flight": [] } ] }});
+        let got = incidents_since(&stats, 1_000).expect("audit on");
+        assert_eq!(got.len(), 1);
+        assert!(got[0].during_input);
     }
 
     #[test]
