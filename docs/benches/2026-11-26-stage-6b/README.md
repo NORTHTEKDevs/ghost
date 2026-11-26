@@ -32,3 +32,41 @@ foreground policy.
 | Unit: single key -> post; Ctrl+A/C/V -> edit command; 7 other combos -> refuse | as stated | 2 of 3 red on a stub | 3/3 green |
 | `cargo test --workspace` | 0 failed | 585 / 0 / 27 | 588 / 0 / 27, both runs |
 | clippy, vibecode lint | 0 / 0 HIGH | - | 0 / 0 findings |
+
+## C9 - ghost_see mode=text reads the window it reports
+
+**Defect.** `GhostSession::read_text` called `tree.collect_text(window_title)`,
+which re-resolves the window by first title match and drops the handle the
+target resolver injected. With the target "Ghost Read Bed" and a decoy
+"Ghost Read Bed 2" in front, an anchored `ghost_see mode=text` reported the
+target's hwnd (10/10) and returned the decoy's text (target content 0/10,
+`c9-before`).
+
+**Change.** `read_text(window, max_chars, hwnd_hint)`: a pure `read_scope`
+picks the resolved handle when there is one and the engine can read by handle
+(Windows: `collect_text_in_hwnd`), else the title, else the foreground scope.
+A resolved window that has closed is an error naming it, not a title fallback.
+`ghost_read_text` passes `_target_hwnd`.
+
+**Probe** (`read_routing_probe.py`): both testbeds launched by the probe; the
+target's edit gets "abq" through Ghost; reads rely on the anchor. (A first
+version clicked the target's Increment, which made its title unique and hid the
+defect; it was corrected before any result was kept.)
+
+| Criterion | Target | Before (`c9-before`) | After run 1 / run 2 |
+|---|---|---|---|
+| `see mode=text` contains the target's "abq" | 10/10 | **0/10** | 10/10 / 10/10 |
+| reported hwnd is the target | 10/10 | 10/10 | 10/10 / 10/10 |
+| Unit: handle read when possible; title otherwise; foreground with neither | as stated | 2 of 3 red on a stub | 3/3 green |
+| see text / see full / find accuracy, user and hidden (`c9-regression-*`) | 20/20 | - | 20/20 each |
+| `see mode=text` median, user desktop | - | ~34 ms (stage 6) | 14.1 ms (reads by handle, no title walk) |
+| `cargo test --workspace` | 0 failed | 588 / 0 / 27 | 591 / 0 / 27, both runs |
+| clippy, vibecode lint | 0 / 0 HIGH | - | 0 / 0 findings |
+
+**Not covered - C9b.** The full-mode tree read (`describe_screen(title)`, also
+`describe_screen_delta`) has the same title-based shape, but this probe cannot
+tell the windows apart through it: a full-mode reply never contains an edit's
+value (control without a decoy: text has "abq", tree does not). The tree rows
+read 0/10 before and after for that reason, not as a measured defect. Needs a
+marker the tree exposes (for example a title change on the target only) to
+measure.

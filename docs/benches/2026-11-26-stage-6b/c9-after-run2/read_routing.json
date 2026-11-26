@@ -1,0 +1,138 @@
+{
+ "handles": {
+  "Ghost Read Bed 2": 25299940,
+  "Ghost Read Bed": 264636602
+ },
+ "titles_after_setup": [
+  "Ghost Read Bed 2",
+  "Ghost Read Bed"
+ ],
+ "truth": {
+  "target_edit": "abq",
+  "decoy_edit": ""
+ },
+ "text": [
+  {
+   "reads_target": true,
+   "reported_hwnd": 264636602,
+   "is_error": false,
+   "ms": 12.9
+  },
+  {
+   "reads_target": true,
+   "reported_hwnd": 264636602,
+   "is_error": false,
+   "ms": 9.4
+  },
+  {
+   "reads_target": true,
+   "reported_hwnd": 264636602,
+   "is_error": false,
+   "ms": 10.4
+  },
+  {
+   "reads_target": true,
+   "reported_hwnd": 264636602,
+   "is_error": false,
+   "ms": 8.3
+  },
+  {
+   "reads_target": true,
+   "reported_hwnd": 264636602,
+   "is_error": false,
+   "ms": 10.6
+  },
+  {
+   "reads_target": true,
+   "reported_hwnd": 264636602,
+   "is_error": false,
+   "ms": 12.4
+  },
+  {
+   "reads_target": true,
+   "reported_hwnd": 264636602,
+   "is_error": false,
+   "ms": 15.1
+  },
+  {
+   "reads_target": true,
+   "reported_hwnd": 264636602,
+   "is_error": false,
+   "ms": 10.0
+  },
+  {
+   "reads_target": true,
+   "reported_hwnd": 264636602,
+   "is_error": false,
+   "ms": 11.7
+  },
+  {
+   "reads_target": true,
+   "reported_hwnd": 264636602,
+   "is_error": false,
+   "ms": 8.9
+  }
+ ],
+ "tree": [
+  {
+   "reads_target": false,
+   "reported_hwnd": 264636602,
+   "is_error": false,
+   "ms": 40.1
+  },
+  {
+   "reads_target": false,
+   "reported_hwnd": 264636602,
+   "is_error": false,
+   "ms": 25.3
+  },
+  {
+   "reads_target": false,
+   "reported_hwnd": 264636602,
+   "is_error": false,
+   "ms": 27.2
+  },
+  {
+   "reads_target": false,
+   "reported_hwnd": 264636602,
+   "is_error": false,
+   "ms": 29.4
+  },
+  {
+   "reads_target": false,
+   "reported_hwnd": 264636602,
+   "is_error": false,
+   "ms": 28.0
+  },
+  {
+   "reads_target": false,
+   "reported_hwnd": 264636602,
+   "is_error": false,
+   "ms": 33.2
+  },
+  {
+   "reads_target": false,
+   "reported_hwnd": 264636602,
+   "is_error": false,
+   "ms": 31.3
+  },
+  {
+   "reads_target": false,
+   "reported_hwnd": 264636602,
+   "is_error": false,
+   "ms": 31.9
+  },
+  {
+   "reads_target": false,
+   "reported_hwnd": 264636602,
+   "is_error": false,
+   "ms": 27.4
+  },
+  {
+   "reads_target": false,
+   "reported_hwnd": 264636602,
+   "is_error": false,
+   "ms": 28.2
+  }
+ ]
+}

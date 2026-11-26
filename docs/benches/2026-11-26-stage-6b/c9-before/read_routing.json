@@ -1,0 +1,138 @@
+{
+ "handles": {
+  "Ghost Read Bed 2": 132320130,
+  "Ghost Read Bed": 283051810
+ },
+ "titles_after_setup": [
+  "Ghost Read Bed 2",
+  "Ghost Read Bed"
+ ],
+ "truth": {
+  "target_edit": "abq",
+  "decoy_edit": ""
+ },
+ "text": [
+  {
+   "reads_target": false,
+   "reported_hwnd": 283051810,
+   "is_error": false,
+   "ms": 43.2
+  },
+  {
+   "reads_target": false,
+   "reported_hwnd": 283051810,
+   "is_error": false,
+   "ms": 42.2
+  },
+  {
+   "reads_target": false,
+   "reported_hwnd": 283051810,
+   "is_error": false,
+   "ms": 34.7
+  },
+  {
+   "reads_target": false,
+   "reported_hwnd": 283051810,
+   "is_error": false,
+   "ms": 35.1
+  },
+  {
+   "reads_target": false,
+   "reported_hwnd": 283051810,
+   "is_error": false,
+   "ms": 31.6
+  },
+  {
+   "reads_target": false,
+   "reported_hwnd": 283051810,
+   "is_error": false,
+   "ms": 38.9
+  },
+  {
+   "reads_target": false,
+   "reported_hwnd": 283051810,
+   "is_error": false,
+   "ms": 35.2
+  },
+  {
+   "reads_target": false,
+   "reported_hwnd": 283051810,
+   "is_error": false,
+   "ms": 34.1
+  },
+  {
+   "reads_target": false,
+   "reported_hwnd": 283051810,
+   "is_error": false,
+   "ms": 38.3
+  },
+  {
+   "reads_target": false,
+   "reported_hwnd": 283051810,
+   "is_error": false,
+   "ms": 45.4
+  }
+ ],
+ "tree": [
+  {
+   "reads_target": false,
+   "reported_hwnd": 283051810,
+   "is_error": false,
+   "ms": 39.7
+  },
+  {
+   "reads_target": false,
+   "reported_hwnd": 283051810,
+   "is_error": false,
+   "ms": 39.0
+  },
+  {
+   "reads_target": false,
+   "reported_hwnd": 283051810,
+   "is_error": false,
+   "ms": 33.3
+  },
+  {
+   "reads_target": false,
+   "reported_hwnd": 283051810,
+   "is_error": false,
+   "ms": 43.2
+  },
+  {
+   "reads_target": false,
+   "reported_hwnd": 283051810,
+   "is_error": false,
+   "ms": 42.0
+  },
+  {
+   "reads_target": false,
+   "reported_hwnd": 283051810,
+   "is_error": false,
+   "ms": 36.1
+  },
+  {
+   "reads_target": false,
+   "reported_hwnd": 283051810,
+   "is_error": false,
+   "ms": 39.2
+  },
+  {
+   "reads_target": false,
+   "reported_hwnd": 283051810,
+   "is_error": false,
+   "ms": 39.8
+  },
+  {
+   "reads_target": false,
+   "reported_hwnd": 283051810,
+   "is_error": false,
+   "ms": 38.5
+  },
+  {
+   "reads_target": false,
+   "reported_hwnd": 283051810,
+   "is_error": false,
+   "ms": 39.8
+  }
+ ]
+}

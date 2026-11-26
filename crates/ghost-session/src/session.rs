@@ -50,6 +50,24 @@ fn window_title_of(_hwnd: isize) -> String {
     String::new()
 }
 
+/// Where a text read comes from: the resolved handle when there is one and the
+/// engine can read by handle (Windows), otherwise the title, otherwise the
+/// foreground scope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReadScope<'a> {
+    Handle(isize),
+    Title(&'a str),
+    Foreground,
+}
+
+fn read_scope(window: Option<&str>, hint: Option<isize>, handle_reads: bool) -> ReadScope<'_> {
+    match (hint, window) {
+        (Some(h), _) if handle_reads => ReadScope::Handle(h),
+        (_, Some(w)) => ReadScope::Title(w),
+        (_, None) => ReadScope::Foreground,
+    }
+}
+
 /// Why [`pick_window`] found no window to drive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PickMiss {
@@ -2018,9 +2036,28 @@ impl GhostSession {
     }
 
     /// Extract readable text from a window (or the foreground scope handled by
-    /// the caller). Cheap page/app READING without screenshots.
-    pub async fn read_text(&self, window: Option<&str>, max_chars: usize) -> Result<(String, bool)> {
-        self.tree.collect_text(window, max_chars).map_err(GhostError::Core)
+    /// the caller). Cheap page/app READING without screenshots. With the
+    /// handle the target resolver chose (`hwnd_hint`), that window is read -
+    /// not the first window whose title contains `window`, which read the
+    /// decoy's text while the response named the target (C9,
+    /// docs/benches/2026-11-26-stage-6b/c9-before).
+    pub async fn read_text(&self, window: Option<&str>, max_chars: usize, hwnd_hint: Option<isize>) -> Result<(String, bool)> {
+        match read_scope(window, hwnd_hint, cfg!(windows)) {
+            #[cfg(windows)]
+            ReadScope::Handle(h) => {
+                if crate::engine::system::window_rect(h).is_none() {
+                    return Err(GhostError::Vision(format!(
+                        "ghost_see mode=text: the window resolved for '{}' has closed; nothing was read",
+                        window.unwrap_or("the anchor")
+                    )));
+                }
+                self.tree.collect_text_in_hwnd(h, max_chars).map_err(GhostError::Core)
+            }
+            #[cfg(not(windows))]
+            ReadScope::Handle(_) => unreachable!("read_scope never picks a handle off Windows"),
+            ReadScope::Title(w) => self.tree.collect_text(Some(w), max_chars).map_err(GhostError::Core),
+            ReadScope::Foreground => self.tree.collect_text(None, max_chars).map_err(GhostError::Core),
+        }
     }
 
     /// Dispatch an action against an already-resolved element, with foreground
@@ -3054,5 +3091,28 @@ mod pick_window_tests {
         let ws = [win("Notes", 10, "minimized"), win("Notes", 11, "normal")];
         assert_eq!(pick_window(&ws, "notes", None).map(|w| w.hwnd), Ok(11));
         assert_eq!(pick_window(&[win("Other", 10, "normal")], "Notes", None).map(|w| w.hwnd), Err(PickMiss::NoTitleMatch));
+    }
+}
+
+#[cfg(test)]
+mod read_scope_tests {
+    use super::{read_scope, ReadScope};
+
+    #[test]
+    fn the_resolved_handle_is_read_when_the_engine_can() {
+        assert_eq!(read_scope(Some("Ghost Read Bed"), Some(10), true), ReadScope::Handle(10));
+        assert_eq!(read_scope(None, Some(10), true), ReadScope::Handle(10));
+    }
+
+    #[test]
+    fn without_a_handle_or_handle_reads_the_title_is_used() {
+        assert_eq!(read_scope(Some("Notes"), None, true), ReadScope::Title("Notes"));
+        assert_eq!(read_scope(Some("Notes"), Some(10), false), ReadScope::Title("Notes"));
+    }
+
+    #[test]
+    fn nothing_given_reads_the_foreground_scope() {
+        assert_eq!(read_scope(None, None, true), ReadScope::Foreground);
+        assert_eq!(read_scope(None, Some(10), false), ReadScope::Foreground);
     }
 }
