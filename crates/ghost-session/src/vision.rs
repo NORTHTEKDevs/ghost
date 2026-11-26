@@ -1,8 +1,8 @@
-//! Vision fallback for `By::Description` locators — MODEL-AGNOSTIC.
+//! Vision fallback for `By::Description` locators - MODEL-AGNOSTIC.
 //!
 //! Works with any tool-capable vision model behind two wire formats:
 //!  - **OpenAI-compatible** (default): NVIDIA Build, OpenAI, Gemini
-//!    (openai-compat), Groq, or a local vLLM / Ollama / LM Studio server — they
+//!    (openai-compat), Groq, or a local vLLM / Ollama / LM Studio server - they
 //!    all speak the same `/v1/chat/completions` format. Point
 //!    `GHOST_VISION_BASE_URL` + `GHOST_VISION_MODEL` at your endpoint and set the
 //!    key via `GHOST_VISION_API_KEY` (or `OPENAI_API_KEY` / `NVIDIA_API_KEY`).
@@ -28,7 +28,8 @@ const ANTHROPIC_DEFAULT_MODEL: &str = "claude-haiku-4-5";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 const ANTHROPIC_URL: &str = "https://api.anthropic.com/v1/messages";
 
-const NVIDIA_DEFAULT_MODEL: &str = "meta/llama-3.2-90b-vision-instruct";
+// meta/llama-3.2-90b-vision-instruct (and the 11B) were retired by NVIDIA on 2026-11-16.
+const NVIDIA_DEFAULT_MODEL: &str = "nvidia/nemotron-3.5-super-vl-120b-a12b";
 const NVIDIA_DEFAULT_URL: &str = "https://integrate.api.nvidia.com/v1/chat/completions";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,7 +51,7 @@ fn vlm_timeout() -> std::time::Duration {
 }
 
 /// Send with one bounded retry on transient failures (connect errors / 5xx).
-/// Timeouts are deliberately NOT retried — that would double worst-case latency.
+/// Timeouts are deliberately NOT retried - that would double worst-case latency.
 async fn send_with_retry(builder: reqwest::RequestBuilder, ctx: &str) -> Result<reqwest::Response> {
     let retry = builder.try_clone();
     match builder.send().await {
@@ -266,6 +267,7 @@ async fn extract_via_openai_compat(prompt: &str, image_jpeg: &[u8]) -> Result<St
         ],
         max_tokens: 512,
         temperature: 0.0,
+        reasoning_effort: reasoning_effort_for(&model),
     };
     let mut rb = http_client()
         .post(&url)
@@ -285,7 +287,7 @@ async fn extract_via_openai_compat(prompt: &str, image_jpeg: &[u8]) -> Result<St
     let parsed: OaiResp = resp.json().await
         .map_err(|e| GhostError::Vision(format!("openai-compat extract parse: {e}")))?;
     Ok(parsed.choices.first()
-        .map(|c| c.message.content.clone())
+        .and_then(|c| c.message.content.clone())
         .unwrap_or_default())
 }
 
@@ -365,14 +367,14 @@ fn pick_provider() -> Result<Provider> {
 
 /// Resolve the bearer key for the OpenAI-compatible path, provider-agnostic:
 /// GHOST_VISION_API_KEY > OPENAI_API_KEY > NVIDIA_API_KEY. Returns an empty string
-/// (keyless) when a custom GHOST_VISION_BASE_URL is set with no key — local
+/// (keyless) when a custom GHOST_VISION_BASE_URL is set with no key - local
 /// servers (vLLM/Ollama/LM Studio) typically need none.
 fn openai_compat_api_key() -> Result<String> {
     for var in ["GHOST_VISION_API_KEY", "OPENAI_API_KEY", "NVIDIA_API_KEY"] {
         if let Ok(k) = std::env::var(var) {
             let k = k.trim();
             if !k.is_empty() {
-                // Return trimmed — a trailing newline from a .env loader would
+                // Return trimmed - a trailing newline from a .env loader would
                 // corrupt the `Authorization: Bearer <key>` header.
                 return Ok(k.to_string());
             }
@@ -460,7 +462,7 @@ fn parse_coord_response(text: &str) -> Result<Option<(i32, i32)>> {
 // OaiImageUrl and OaiContent are Serialize types used as schema documentation for the
 // OpenAI-compat wire format. The actual HTTP body is built via serde_json::json! for
 // flexibility (mixed array of image_url + text parts), so the structs are not directly
-// constructed — they serve as the typed reference for the schema.
+// constructed - they serve as the typed reference for the schema.
 #[allow(dead_code)]
 #[derive(Serialize)]
 struct OaiImageUrl<'a> {
@@ -492,12 +494,30 @@ struct OaiReq<'a> {
     messages: Vec<OaiMsg<'a>>,
     max_tokens: u32,
     temperature: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_effort: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct OaiRespMsg {
     #[serde(default)]
-    content: String,
+    content: Option<String>,
+}
+
+/// Thinking models (Nemotron VL) spend the small locate budget on reasoning and return
+/// `content: null`, so thinking is off by default for them. GHOST_VISION_REASONING_EFFORT
+/// overrides it; set it to an empty string to send no field at all.
+fn resolve_reasoning_effort(model: &str, env_override: Option<String>) -> Option<String> {
+    match env_override {
+        Some(v) if v.trim().is_empty() => None,
+        Some(v) => Some(v),
+        None if model.to_ascii_lowercase().contains("nemotron") => Some("none".into()),
+        None => None,
+    }
+}
+
+fn reasoning_effort_for(model: &str) -> Option<String> {
+    resolve_reasoning_effort(model, std::env::var("GHOST_VISION_REASONING_EFFORT").ok())
 }
 
 #[derive(Deserialize)]
@@ -537,6 +557,7 @@ async fn locate_via_openai_compat(
         ],
         max_tokens: 64,
         temperature: 0.0,
+        reasoning_effort: reasoning_effort_for(&model),
     };
 
     let mut rb = http_client()
@@ -558,7 +579,7 @@ async fn locate_via_openai_compat(
     let parsed: OaiResp = resp.json().await
         .map_err(|e| GhostError::Vision(format!("openai-compat response parse: {e}")))?;
     let text = parsed.choices.first()
-        .map(|c| c.message.content.clone())
+        .and_then(|c| c.message.content.clone())
         .ok_or_else(|| GhostError::Vision("no choices in response".into()))?;
 
     tracing::debug!(model = %model, url = %url, raw_response = %text, "openai-compat VLM raw response");
@@ -706,6 +727,31 @@ fn base64_encode(data: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reasoning_effort_defaults_off_for_nemotron_only() {
+        assert_eq!(resolve_reasoning_effort("nvidia/nemotron-3.5-super-vl-120b-a12b", None), Some("none".into()));
+        assert_eq!(resolve_reasoning_effort("gpt-4o-mini", None), None);
+        assert_eq!(resolve_reasoning_effort("gpt-4o-mini", Some("low".into())), Some("low".into()));
+        // An explicitly empty override sends no field at all.
+        assert_eq!(resolve_reasoning_effort("nvidia/nemotron-3.5-super-vl-120b-a12b", Some(String::new())), None);
+    }
+
+    #[test]
+    fn oai_req_omits_reasoning_effort_when_unset() {
+        let mk = |re: Option<String>| serde_json::to_value(OaiReq {
+            model: "m", messages: vec![], max_tokens: 64, temperature: 0.0, reasoning_effort: re,
+        }).unwrap();
+        assert!(mk(None).get("reasoning_effort").is_none());
+        assert_eq!(mk(Some("none".into()))["reasoning_effort"], "none");
+    }
+
+    #[test]
+    fn oai_resp_tolerates_null_content() {
+        // Thinking models return content: null when the budget runs out in reasoning.
+        let r: OaiResp = serde_json::from_str(r#"{"choices":[{"message":{"content":null,"reasoning_content":"..."}}]}"#).unwrap();
+        assert_eq!(r.choices[0].message.content.clone().unwrap_or_default(), "");
+    }
 
     #[test]
     fn parse_mark_response_variants() {
