@@ -17,7 +17,16 @@
 //!   label (not the title, not the button): a click whose effect is elsewhere in
 //!   the window, which verification must still see.
 //!
-//! `ghost-testbed [--title <text>]`. Exits when the window closes.
+//! - a BUTTON "Popup" that opens an owned popup window of the same process,
+//!   over the main window, without activating it; the popup's BUTTON "Ping"
+//!   only appends ` [popup=N]` to the main window's title (an owned window a
+//!   coordinate click must still be allowed to reach).
+//!
+//! `ghost-testbed [--title <text>] [--label <text>] [--pos <x>,<y>] [--topmost]`.
+//! `--label` sets the Status label's starting text, so two windows can be told
+//! apart through their UI tree. `--pos` places the window and `--topmost`
+//! creates it topmost, so occlusion tests can cover one testbed with another
+//! without any other window in between. Exits when the window closes.
 
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
@@ -39,9 +48,12 @@ mod bed {
     const ID_LOCKED: i32 = 105;
     const ID_NOTE: i32 = 106;
     const ID_STATUS: i32 = 107;
+    const ID_POPUP: i32 = 108;
+    const ID_PING: i32 = 201;
 
     static CLICKS: AtomicU32 = AtomicU32::new(0);
     static NOTES: AtomicU32 = AtomicU32::new(0);
+    static PINGS: AtomicU32 = AtomicU32::new(0);
     static BASE_TITLE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
     fn wide(s: &str) -> Vec<u16> {
@@ -76,6 +88,9 @@ mod bed {
                             let _ = SetWindowTextW(status, PCWSTR(text.as_ptr()));
                         }
                     }
+                    ID_POPUP => {
+                        open_popup(hwnd);
+                    }
                     ID_QUIT => {
                         // PostMessage, not DestroyWindow: BM_CLICK arrives as a
                         // SendMessage from the automating thread, and destroying
@@ -98,16 +113,105 @@ mod bed {
         }
     }
 
+    /// The popup's window procedure: "Ping" marks the OWNER's title.
+    unsafe extern "system" fn popup_proc(
+        hwnd: HWND,
+        msg: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> LRESULT {
+        if msg == WM_COMMAND && (wparam.0 & 0xffff) as i32 == ID_PING {
+            if let Ok(owner) = GetWindow(hwnd, GW_OWNER) {
+                let n = PINGS.fetch_add(1, Ordering::SeqCst) + 1;
+                let base = BASE_TITLE.get().cloned().unwrap_or_default();
+                let title = wide(&format!("{base} [popup={n}]"));
+                let _ = SetWindowTextW(owner, PCWSTR(title.as_ptr()));
+            }
+            return LRESULT(0);
+        }
+        DefWindowProcW(hwnd, msg, wparam, lparam)
+    }
+
+    /// An owned popup of this process, over the owner's client area, shown
+    /// without activation (a menu, dropdown or tooltip stands in the same
+    /// relation to its owner).
+    unsafe fn open_popup(owner: HWND) {
+        let hinst: HINSTANCE = GetModuleHandleW(None).expect("module handle").into();
+        let class = w!("GhostTestbedPopup");
+        let wc = WNDCLASSW {
+            lpfnWndProc: Some(popup_proc),
+            hInstance: hinst,
+            lpszClassName: class,
+            hbrBackground: windows::Win32::Graphics::Gdi::HBRUSH(
+                (windows::Win32::Graphics::Gdi::COLOR_BTNFACE.0 + 1) as isize as *mut _,
+            ),
+            ..Default::default()
+        };
+        RegisterClassW(&wc);
+        let mut r = windows::Win32::Foundation::RECT::default();
+        let _ = GetWindowRect(owner, &mut r);
+        // Topmost when its owner is: a non-topmost owned window shown over a
+        // topmost owner took the owner out of the topmost band (measured).
+        let owner_ex = WINDOW_EX_STYLE(GetWindowLongPtrW(owner, GWL_EXSTYLE) as u32);
+        let Ok(popup) = CreateWindowExW(
+            WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | (owner_ex & WS_EX_TOPMOST),
+            class,
+            w!("Ghost Testbed Popup"),
+            WS_POPUP | WS_BORDER,
+            r.left + 40,
+            r.top + 120,
+            220,
+            70,
+            owner,
+            None,
+            hinst,
+            None,
+        ) else {
+            return;
+        };
+        let _ = CreateWindowExW(
+            WINDOW_EX_STYLE::default(),
+            w!("BUTTON"),
+            w!("Ping"),
+            WINDOW_STYLE(BS_PUSHBUTTON as u32) | WS_CHILD | WS_VISIBLE,
+            20,
+            15,
+            180,
+            40,
+            popup,
+            HMENU(ID_PING as isize as *mut _),
+            hinst,
+            None,
+        );
+        let _ = ShowWindow(popup, SW_SHOWNOACTIVATE);
+    }
+
     pub fn run() {
         let mut title = String::from("Ghost Testbed");
+        let mut label = String::from("Status: idle");
+        let mut pos = (120, 120);
+        let mut topmost = false;
         let mut args = std::env::args().skip(1);
         while let Some(a) = args.next() {
             if a == "--title" {
                 if let Some(t) = args.next() {
                     title = t;
                 }
+            } else if a == "--label" {
+                if let Some(t) = args.next() {
+                    label = t;
+                }
+            } else if a == "--pos" {
+                if let Some((x, y)) = args.next().as_deref().and_then(|v| v.split_once(',')) {
+                    if let (Ok(x), Ok(y)) = (x.trim().parse(), y.trim().parse()) {
+                        pos = (x, y);
+                    }
+                }
+            } else if a == "--topmost" {
+                topmost = true;
             }
         }
+        let label_w = wide(&label);
         let _ = BASE_TITLE.set(title.clone());
         let title_w = wide(&title);
         unsafe {
@@ -125,12 +229,12 @@ mod bed {
             };
             RegisterClassW(&wc);
             let hwnd = CreateWindowExW(
-                WINDOW_EX_STYLE::default(),
+                if topmost { WS_EX_TOPMOST } else { WINDOW_EX_STYLE::default() },
                 class,
                 PCWSTR(title_w.as_ptr()),
                 WS_OVERLAPPEDWINDOW,
-                120,
-                120,
+                pos.0,
+                pos.1,
                 520,
                 260,
                 None,
@@ -211,7 +315,8 @@ mod bed {
             );
             // Top right and bottom left: as far apart as the window allows.
             let _note = child(w!("BUTTON"), w!("Note"), BS_PUSHBUTTON as u32, 370, 70, 110, 34, ID_NOTE);
-            let _status = child(w!("STATIC"), w!("Status: idle"), 0, 20, 180, 200, 22, ID_STATUS);
+            let _status = child(w!("STATIC"), PCWSTR(label_w.as_ptr()), 0, 20, 180, 200, 22, ID_STATUS);
+            let _popup = child(w!("BUTTON"), w!("Popup"), BS_PUSHBUTTON as u32, 370, 114, 110, 34, ID_POPUP);
             let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
             let mut msg = MSG::default();
             while GetMessageW(&mut msg, None, 0, 0).into() {

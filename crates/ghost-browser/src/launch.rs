@@ -288,6 +288,21 @@ pub mod job {
 
     static SERVER_JOB: OnceLock<Option<Job>> = OnceLock::new();
 
+    /// Whether `pid` is in this server's job - a browser this server launched.
+    /// False when no job was ever created or the process cannot be opened.
+    pub fn is_bound_to_this_process(pid: u32) -> bool {
+        use windows::Win32::System::JobObjects::IsProcessInJob;
+        use windows::Win32::System::Threading::PROCESS_QUERY_LIMITED_INFORMATION;
+        let Some(Some(job)) = SERVER_JOB.get() else { return false };
+        unsafe {
+            let Ok(p) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else { return false };
+            let mut inside = windows::Win32::Foundation::BOOL(0);
+            let ok = IsProcessInJob(p, job.0, &mut inside).is_ok();
+            let _ = CloseHandle(p);
+            ok && inside.as_bool()
+        }
+    }
+
     /// Bind the process to this server's lifetime. An error is reported, never
     /// fatal: the next server's startup sweep ends a browser that slips through.
     pub fn bind_to_this_process(pid: u32) -> Result<(), String> {

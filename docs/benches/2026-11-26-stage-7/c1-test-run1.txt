@@ -1,0 +1,870 @@
+   Compiling ghost-testbed v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-testbed)
+   Compiling ghost-browser v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-browser)
+   Compiling ghost-session v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-session)
+   Compiling ghost-mcp v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-mcp)
+   Compiling ghost-cli v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-cli)
+   Compiling ghost-http v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-http)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 14.08s
+     Running unittests src\lib.rs (target-improve\debug\deps\ghost_browser-784c1be5f8b6ae89.exe)
+
+running 26 tests
+test keys::tests::modifier_mask_matches_the_cdp_bit_layout ... ok
+test keys::tests::enter_carries_key_code_and_text ... ok
+test keys::tests::non_printing_keys_emit_no_text ... ok
+test keys::tests::single_characters_are_derived_not_table_driven ... ok
+test launch::tests::profile_dir_is_per_process ... ok
+test keys::tests::unknown_multi_character_names_are_rejected ... ok
+test cdp::tests::field_str_extracts_present_values ... ok
+test launch::tests::background_throttling_is_always_disabled ... ok
+test launch::tests::headless_mode_never_asks_for_a_window_position ... ok
+test launch::tests::windowed_mode_starts_off_the_visible_desktop ... ok
+test launch::tests::headless_mode_composites_in_software_and_only_headless_does ... ok
+test launch::tests::command_line_quoting_round_trips_spaces_and_quotes ... ok
+test launch::tests::port_file_first_line_is_the_port ... ok
+test launch::tests::port_is_always_delegated_to_chrome_to_avoid_cross_process_races ... ok
+test launch::tests::malformed_port_file_yields_none_rather_than_a_bogus_port ... ok
+test keys::tests::key_names_are_case_insensitive ... ok
+test cdp::tests::field_str_reports_the_missing_key ... ok
+test tab::tests::js_string_escapes_embedded_quotes ... ok
+test launch::tests::windowed_on_a_hidden_desktop_keeps_ordinary_window_coordinates ... ok
+test tab::tests::js_string_escapes_newlines_and_backslashes ... ok
+test tab::tests::tab_info_serializes_for_the_mcp_layer ... ok
+test launch::tests::launch_mode_parses_common_spellings ... ok
+test tab::tests::js_string_neutralizes_expression_injection ... ok
+test launch::tests::a_job_member_dies_when_the_job_closes ... ok
+test browser::tests::attaching_to_a_dead_port_fails_fast ... ok
+test cdp::tests::connect_to_a_dead_endpoint_is_a_transport_error ... ok
+
+test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.03s
+
+     Running unittests src\lib.rs (target-improve\debug\deps\ghost_cache-41e9a78a7746efb6.exe)
+
+running 15 tests
+test locator_cache::tests::miss_on_empty_cache ... ok
+test locator_cache::tests::cache_hit_skips_walk_simulation ... ok
+test locator_cache::tests::upsert_then_lookup_returns_hit ... ok
+test uia_mirror::tests::bump_seq_advances_cache_seq_for_wait_until ... ok
+test locator_cache::tests::stale_rect_invalidation_falls_back_to_miss ... ok
+test uia_mirror::tests::diff_detects_updates_by_runtime_id_when_props_change ... ok
+test uia_mirror::tests::snapshot_delta_uses_history_after_mutation ... ok
+test uia_mirror::tests::snapshot_returns_noop_delta_when_seq_matches ... ok
+test uia_mirror::tests::cache_applies_mutation_and_bumps_seq ... ok
+test uia_mirror::tests::diff_detects_added_and_removed ... ok
+test uia_mirror::tests::bump_seq_advances_seq_without_clearing_nodes ... ok
+test locator_cache::tests::upsert_updates_existing_rect ... ok
+test locator_cache::tests::invalidate_causes_subsequent_miss ... ok
+test uia_mirror::tests::diff_empty_snapshots_is_empty_delta ... ok
+test locator_cache::tests::upsert_is_bounded_at_max_entries ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+
+     Running unittests src\main.rs (target-improve\debug\deps\ghost-ffa654f28c033f01.exe)
+
+running 44 tests
+test doctor::tests::dpi_unaware_at_scaling_is_fatal_but_harmless_at_100_percent ... ok
+test doctor::tests::no_open_windows_warns_rather_than_fails ... ok
+test doctor::tests::only_a_fail_is_fatal ... ok
+test doctor::tests::only_fail_is_fatal ... ok
+test tests::locate_mode_default_is_instant ... ok
+test doctor::tests::render_lists_every_check_and_summarises ... ok
+test doctor::tests::render_reports_failure_count ... ok
+test doctor::tests::windows_build_floor_is_19041 ... ok
+test tests::locate_mode_instant_only ... ok
+test tests::locate_mode_deliberate ... ok
+test tests::target_description_third ... ok
+test tests::target_name_wins_over_role ... ok
+test tests::target_none_is_err ... ok
+test tests::target_role_when_no_name ... ok
+test tests::target_text_last ... ok
+test verify::tests::a_change_the_human_made_passes ... ok
+test verify::tests::a_ghost_caused_change_fails_even_when_the_foreground_returns_to_where_it_started ... ok
+test verify::tests::a_launched_window_in_the_foreground_at_the_end_fails_even_while_the_human_typed ... ok
+test verify::tests::a_launched_window_taking_the_foreground_fails_with_nothing_in_flight ... ok
+test verify::tests::a_launched_window_in_the_foreground_at_the_end_fails_without_an_audit_too ... ok
+test verify::tests::an_unreadable_starting_foreground_never_passes ... ok
+test tests::parse_window_default_op_is_list ... ok
+test tests::parse_window_list ... ok
+test verify::tests::audit_incidents_before_the_run_are_ignored_and_an_off_audit_is_none ... ok
+test verify::tests::unchanged_with_nothing_recorded_passes ... ok
+test verify::tests::a_synthetic_change_by_another_program_passes_with_a_note ... ok
+test tests::parse_key_combo ... ok
+test verify::tests::without_an_audit_only_an_unchanged_handle_passes ... ok
+test tests::parse_click_name ... ok
+test tests::parse_see_default_mode ... ok
+test tests::parse_screenshot_default_out ... ok
+test tests::serve_rejects_addr_flag ... ok
+test tests::parse_see_full_mode ... ok
+test tests::parse_find_by_name ... ok
+test tests::parse_act_click ... ok
+test tests::parse_find_by_role ... ok
+test tests::parse_key_single ... ok
+test tests::parse_query_fields ... ok
+test tests::parse_serve ... ok
+test tests::parse_snapshot_no_out ... ok
+test tests::parse_list_windows ... ok
+test tests::parse_key_down ... ok
+test tests::parse_click_at ... ok
+test tests::parse_press ... ok
+
+test result: ok. 44 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src\lib.rs (target-improve\debug\deps\ghost_core-0e0f6a9d9b12b14f.exe)
+
+running 157 tests
+test capture::idle::tests::idle_detector_returns_stable_on_static_desktop ... ignored
+test capture::idle::tests::changed_detection_logic_on_alternating_frames ... ok
+test capture::idle::tests::different_raw_buffers_hash_differently ... ok
+test capture::screen::tests::dxgi_always_black_flag_starts_false_and_toggles ... ok
+test capture::idle::tests::hash_of_identical_buffers_matches ... ok
+test capture::screen::tests::is_frame_black_single_nonzero_r_returns_false ... ok
+test capture::idle::tests::stable_detection_logic_on_identical_frames ... ok
+test capture::screen::tests::repeated_captures_reuse_duplication_session ... ignored
+test capture::screen::tests::rect_within_negative_origin_bounds ... ok
+test capture::screen::tests::rect_within_rejects_inverted_rects ... ok
+test capture::screen::tests::bgra_to_rgba_output_size_matches_dimensions ... ok
+test capture::marks::tests::draw_marks_clamps_offscreen_position ... ok
+test capture::screen::tests::bgra_to_rgba_region_matches_full_then_crop ... ok
+test capture::screen::tests::bgra_to_rgba_swaps_channels ... ok
+test capture::idle::tests::hash_differs_when_pixels_differ ... ok
+test capture::screen::tests::bgra_to_rgba_with_row_padding ... ok
+test capture::screen::tests::dxgi_error_constants_have_correct_values ... ok
+test capture::screen::tests::encode_png_rgba_size_mismatch_returns_error ... ok
+test capture::screen::tests::is_frame_black_all_zero_returns_true ... ok
+test capture::screen::tests::is_frame_black_empty_returns_false ... ok
+test capture::screen::tests::is_frame_black_only_alpha_nonzero_returns_true ... ok
+test capture::screen::tests::encode_png_rgba_produces_valid_png_header ... ok
+test capture::idle::tests::downsample_averages_uniform_buffer ... ok
+test capture::idle::tests::identical_raw_buffers_hash_the_same ... ok
+test capture::screen::tests::bgra_to_rgba_2x1_with_pitch ... ok
+test capture::marks::tests::multi_digit_label_wider_than_single ... ok
+test capture::screen::tests::bgra_to_rgba_alpha_always_255 ... ok
+test capture::screen::tests::encode_png_rgba_roundtrip_dimensions ... ok
+test capture::screen::tests::is_frame_black_single_white_pixel ... ok
+test capture::marks::tests::draw_marks_changes_pixels_at_mark ... ok
+test capture::screen::tests::rect_within_basic ... ok
+test capture::verify::tests::different_frames_produce_nonzero_delta ... ok
+test capture::screen::tests::virtual_bounds_contains_primary ... ok
+test capture::verify::tests::capture_noise_within_tolerance_is_ignored ... ok
+test capture::verify::tests::delta_score_is_bounded ... ok
+test capture::verify::tests::verification_serializes_to_json ... ok
+test capture::verify::tests::foreground_ok_is_passed_through ... ok
+test desktop::tests::desktop_names_are_sanitized_and_bounded ... ok
+test capture::verify::tests::identical_frames_produce_zero_delta ... ok
+test focus::tests::lock_env_values ... ok
+test capture::verify::tests::small_change_in_uniform_frame_is_detected ... ok
+test input::hotkey::tests::registration_is_idempotent ... ok
+test input::keyboard::tests::empty_text_produces_no_inputs ... ok
+test input::hotkey::tests::stop_flag_round_trips_and_broadcasts ... ok
+test input::keyboard::tests::key_down_event_has_correct_vk ... ok
+test input::keyboard::tests::key_up_event_has_keyup_flag ... ok
+test input::keyboard::tests::name_to_vk_alpha_and_digits ... ok
+test input::keyboard::tests::name_to_vk_arrow_aliases_work ... ok
+test input::keyboard::tests::name_to_vk_enter_maps_to_return ... ok
+test input::keyboard::tests::name_to_vk_all_f_keys ... ok
+test input::keyboard::tests::name_to_vk_modifiers ... ok
+test input::keyboard::tests::name_to_vk_is_case_insensitive ... ok
+test input::keyboard::tests::name_to_vk_f5_maps_correctly ... ok
+test input::keyboard::tests::name_to_vk_navigation_keys ... ok
+test input::keyboard::tests::name_to_vk_return_alias ... ok
+test input::keyboard::tests::name_to_vk_unknown_returns_none ... ok
+test input::keyboard::tests::text_to_inputs_produces_pairs ... ok
+test input::mouse::tests::click_down_uses_leftdown_flag ... ok
+test input::mouse::tests::click_up_uses_leftup_flag ... ok
+test input::mouse::tests::right_click_event_down_uses_rightdown_flag ... ok
+test input::mouse::tests::right_click_event_up_uses_rightup_flag ... ok
+test input::mouse::tests::scroll_event_horizontal_uses_hwheel_flag ... ok
+test input::mouse::tests::scroll_event_vertical_uses_wheel_flag ... ok
+test input::mouse::tests::to_absolute_clamps_out_of_range_rather_than_wrapping ... ok
+test input::mouse::tests::to_absolute_degenerate_bounds_do_not_panic ... ok
+test input::mouse::tests::to_absolute_handles_monitor_left_of_primary_negative_origin ... ok
+test input::mouse::tests::to_absolute_handles_monitor_right_of_primary ... ok
+test input::mouse::tests::to_absolute_maps_far_corner_to_full_scale ... ok
+test input::mouse::tests::to_absolute_maps_origin_of_virtual_desktop_to_zero ... ok
+test input::postmessage::tests::button_click_returns_error_when_hwnd_is_zero ... ok
+test input::postmessage::tests::click_returns_error_when_hwnd_is_zero ... ok
+test input::postmessage::tests::click_screen_returns_error_when_hwnd_is_zero ... ok
+test desktop::tests::a_fresh_desktop_has_no_application_windows ... ok
+test input::postmessage::tests::double_click_screen_returns_error_when_hwnd_is_zero ... ok
+test input::postmessage::tests::edit_command_maps_ctrl_shortcuts ... ok
+test input::mouse::tests::move_event_targets_the_whole_virtual_desktop ... ok
+test input::mouse::tests::move_event_uses_absolute_flag ... ok
+test input::postmessage::tests::focused_control_of_zero_hwnd_returns_zero ... ok
+test input::postmessage::tests::edit_command_returns_error_when_hwnd_is_zero ... ok
+test input::postmessage::tests::right_click_screen_returns_error_when_hwnd_is_zero ... ok
+test input::postmessage::tests::hover_screen_returns_error_when_hwnd_is_zero ... ok
+test input::postmessage::tests::send_char_returns_error_when_hwnd_is_zero ... ok
+test desktop::tests::creating_a_desktop_binds_a_worker_and_exempts_it_from_the_focus_policy ... ok
+test focus::tests::policy_parsing_and_gating ... ok
+test focus::tests::locked_process_refuses_to_leave_background ... ok
+test desktop::tests::exec_propagates_values_and_runs_off_the_calling_thread ... ok
+test input::postmessage::tests::send_key_returns_error_when_hwnd_is_zero ... ok
+test process::orphans::tests::orphan_rule ... ok
+test process::cmdline::tests::no_switches_means_no_port ... ok
+test process::cmdline::tests::parses_explicit_port_and_quoted_user_data_dir ... ok
+test process::manager::tests::app_paths_lookup_ignores_explicit_paths ... ok
+test process::manager::tests::app_paths_lookup_finds_a_browser_when_one_is_installed ... ok
+test process::manager::tests::app_paths_lookup_returns_none_for_unknown_program ... ok
+test process::manager::tests::quote_if_needed_does_not_double_quote ... ok
+test process::manager::tests::quote_if_needed_leaves_clean_paths_alone ... ok
+test process::manager::tests::quote_if_needed_wraps_paths_containing_spaces ... ok
+test input::postmessage::tests::set_text_returns_error_when_hwnd_is_zero ... ok
+test process::cmdline::tests::a_dead_pid_reads_as_none ... ok
+test process::cmdline::tests::reads_our_own_command_line ... ok
+test system::clipboard::tests::null_scan_cap_constant ... ok
+test system::observer::tests::a_cursor_jump_is_reported_even_when_focus_is_untouched ... ok
+test system::clipboard::tests::utf16_byte_len_is_double_code_units ... ok
+test process::cmdline::tests::port_zero_needs_the_active_port_file ... ok
+test system::clipboard::tests::utf16_empty_string_has_only_null ... ok
+test system::clipboard::tests::utf16_encoding_includes_null_terminator ... ok
+test system::clipboard::tests::utf16_roundtrip_is_lossless ... ok
+test uia::cached_walker::tests::cached_walker_returns_some_elements ... ignored
+test system::observer::tests::a_foreground_change_is_reported_with_both_titles ... ok
+test system::dpi::tests::ensure_is_idempotent_and_makes_the_process_aware ... ok
+test uia::deadline_tests::timeout_parsing_defaults_floors_and_accepts_overrides ... ok
+test system::window::tests::a_zero_handle_has_no_rectangle ... ok
+test system::observer::tests::window_title_of_a_null_handle_is_empty_not_a_panic ... ok
+test uia::element::tests::bounding_rect_center_is_correct ... ok
+test uia::element::tests::interactive_roles_include_button_and_edit ... ok
+test uia::element::tests::role_checkbox_is_50002 ... ok
+test uia::element::tests::role_button_is_50000 ... ok
+test uia::element::tests::interactive_roles_include_new_types ... ok
+test uia::element::tests::role_combobox_is_50003 ... ok
+test uia::element::tests::role_document_is_50030 ... ok
+test uia::element::tests::role_edit_is_50004 ... ok
+test uia::element::tests::role_legacy_50_is_unknown ... ok
+test system::observer::tests::a_snapshot_compared_to_itself_is_undisturbed ... ok
+test uia::element::tests::role_tabitem_is_50019 ... ok
+test uia::element::tests::role_window_is_50032 ... ok
+test uia::element::tests::unknown_role_returns_unknown ... ok
+test uia::event_bus::tests::event_bus_singleton_returns_same_instance ... ok
+test uia::event_bus::tests::wait_returns_immediately_when_seq_advanced ... ok
+test uia::tree::tests::ensure_foreground_current_fg_returns_ok_true ... ignored
+test uia::tree::tests::edit_role_aliases_winui_document_surface ... ok
+test desktop::tests::two_desktops_get_distinct_names ... ok
+test uia::tree::tests::background_window_state_commands_never_activate ... ok
+test uia::tree::tests::document_role_does_not_reverse_match_edit ... ok
+test uia::tree::tests::existing_role_aliases_still_hold ... ok
+test uia::tree::tests::focus_window_name_not_found_returns_process_not_found ... ok
+test uia::tree::tests::interactive_roles_cover_winui_command_bar_controls ... ok
+test uia::tree::tests::role_alias_list_matches_listitem ... ok
+test uia::tree::tests::role_alias_tab_matches_tabitem ... ok
+test uia::element::tests::role_radiobutton_is_50013 ... ok
+test uia::tree::tests::truncate_at_char_boundary_never_splits_utf8 ... ok
+test uia::tree::tests::window_state_from_str_parses_all_variants ... ok
+test uia::tree::tests::focus_window_under_point_off_screen_coord_returns_ok_when_allowed ... ok
+test uia::tree::tests::focus_window_under_point_is_gated_by_the_policy ... ok
+test uia::deadline_tests::automation_objects_carry_deadlines ... ok
+test process::cmdline::tests::reads_another_process_command_line_exactly ... ok
+test process::orphans::tests::the_snapshot_lists_this_process_under_its_parent ... ok
+test process::tests::find_pid_case_insensitive ... ok
+test process::tests::nonexistent_process_returns_none ... ok
+test uia::sta_pool::tests::pool_runs_closure_on_worker ... ok
+test uia::sta_pool::tests::pool_recovers_from_worker_panic ... ok
+test uia::sta_pool::tests::pool_circuit_breaker_trips_after_three_panics_in_60s ... ok
+test system::lease::tests::second_acquire_from_another_thread_times_out_while_held ... ok
+test system::lease::tests::lease_is_reentrant_across_sequential_acquires ... ok
+test system::lease::tests::with_foreground_lease_returns_inner_value ... ok
+test uia::event_bus::tests::wait_times_out_when_no_events ... ok
+test uia::sta_pool::tests::pool_enforces_per_job_timeout ... ok
+test capture::verify::tests::typed_text_sized_change_is_detected ... ok
+test process::orphans::tests::sweep_ends_an_abandoned_marked_process_and_spares_an_owned_one ... ok
+
+test result: ok. 153 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+     Running tests\capture_latency_probe.rs (target-improve\debug\deps\capture_latency_probe-724484374dcb955f.exe)
+
+running 1 test
+test gdi_vs_dxgi_region_latency ... ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\chromium_inactive_typing.rs (target-improve\debug\deps\chromium_inactive_typing-959c490c8d086cad.exe)
+
+running 1 test
+test posted_typing_lands_in_a_blurred_chromium_window ... ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\describe_walk_bench.rs (target-improve\debug\deps\describe_walk_bench-c930b7f471fbfe36.exe)
+
+running 1 test
+test walker_vs_cached_describe_on_a_live_window ... ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\desktop_input.rs (target-improve\debug\deps\desktop_input-40595b920ef758a1.exe)
+
+running 2 tests
+test typing_into_a_window_with_no_text_control_errors_instead_of_claiming_success ... ignored
+test typing_never_reports_success_without_the_text_landing ... ignored
+
+test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\focus_enforcement.rs (target-improve\debug\deps\focus_enforcement-609f002ac3d446e1.exe)
+
+running 2 tests
+test background_policy_blocks_every_screen_stealing_primitive ... ok
+test error_messages_teach_the_route_that_needs_no_policy_change ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target-improve\debug\deps\ghost_ground-5db831809caf95b1.exe)
+
+running 82 tests
+test cv_detect::tests::undersized_image_is_safe ... ok
+test marks::tests::full_containment_gives_one ... ok
+test engine::tests::instant_only_local_hit_returns_result ... ok
+test engine::tests::instant_escalates_to_deliberate_on_full_miss ... ok
+test engine::tests::custom_threshold_accepted ... ok
+test engine::tests::all_miss_returns_none ... ok
+test engine::tests::instant_miss_escalates_vlm_only_not_full_rerun ... ok
+test engine::tests::instant_mode_local_hit_no_escalation ... ok
+test engine::tests::instant_mode_skips_vlm ... ok
+test cv_detect::tests::blank_image_yields_no_regions ... ok
+test engine::tests::telemetry_instant_vs_deliberate_counts ... ok
+test engine::tests::miss_falls_through_to_next_tier ... ok
+test marks::tests::icon_inside_ocr_is_removed ... ok
+test marks::tests::icon_outside_ocr_is_kept ... ok
+test marks::tests::no_overlap_gives_zero_fraction ... ok
+test marks::tests::negative_rect_gives_zero_area ... ok
+test engine::tests::telemetry_miss_counted ... ok
+test marks::tests::partial_overlap ... ok
+test marks::tests::non_overlapping_icons_both_kept ... ok
+test marks::tests::region_area_correct ... ok
+test marks::tests::partially_overlapping_icon_kept_if_below_threshold ... ok
+test marks::tests::region_center_correct ... ok
+test cv_detect::tests::tiny_speck_is_filtered ... ok
+test engine::tests::telemetry_records_attempts_and_hits ... ok
+test engine::tests::first_hit_tier_wins ... ok
+test cv_detect::tests::button_bbox_approximates_the_shape ... ok
+test engine::tests::low_confidence_hit_skipped_falls_to_next ... ok
+test engine::tests::instant_only_never_calls_vlm ... ok
+test engine::tests::coords_target_bypasses_all_tiers ... ok
+test marks::tests::smaller_icon_inside_larger_icon_is_removed ... ok
+test engine::tests::not_applicable_tier_not_counted ... ok
+test marks::tests::som_grounded_has_correct_center_and_source ... ok
+test marks::tests::som_id_0_returns_none ... ok
+test marks::tests::som_id_1_maps_to_first_region ... ok
+test marks::tests::som_id_2_maps_to_second_region ... ok
+test cv_detect::tests::regions_map_to_som_ids ... ok
+test marks::tests::som_id_out_of_range_returns_none ... ok
+test marks::tests::zero_area_region_gives_zero_fraction ... ok
+test parser::tests::action_call_with_double_quoted_args ... ok
+test parser::tests::bare_json_xy ... ok
+test parser::tests::bare_json_xy_pixel_space ... ok
+test parser::tests::bare_tuple ... ok
+test parser::tests::code_fenced_json ... ok
+test parser::tests::code_fenced_plain ... ok
+test parser::tests::edge_coords_max_norm ... ok
+test parser::tests::empty_string_returns_none ... ok
+test parser::tests::edge_coords_zero ... ok
+test parser::tests::json_found_false_no_coord ... ok
+test parser::tests::json_not_found_explicit ... ok
+test cv_detect::tests::detects_two_separated_buttons ... ok
+test parser::tests::malformed_json_returns_none_or_not_found ... ok
+test parser::tests::prose_element_not_visible ... ok
+test parser::tests::prose_not_found ... ok
+test parser::tests::prose_wrapped_json ... ok
+test parser::tests::random_prose_returns_none ... ok
+test parser::tests::uitars_click_start_box ... ok
+test parser::tests::uitars_double_click ... ok
+test parser::tests::uitars_no_space_in_coords ... ok
+test parser::tests::uitars_scroll ... ok
+test parser::tests::uitars_type_with_content ... ok
+test types::tests::coord_norm_clamped_above_1000_becomes_1000 ... ok
+test types::tests::coord_norm_clamped_negative_becomes_zero ... ok
+test types::tests::coord_norm_clamped_within_range ... ok
+test types::tests::grounded_from_point_has_unit_rect ... ok
+test types::tests::grounded_from_rect_computes_center ... ok
+test types::tests::grounded_has_rect_for_uia_and_cache ... ok
+test types::tests::grounded_name_field_settable ... ok
+test types::tests::grounded_no_rect_for_point_only_tiers ... ok
+test types::tests::norm_to_px_centre ... ok
+test types::tests::norm_to_px_max_is_dim_minus_one ... ok
+test types::tests::norm_to_px_round_trip_centre_1920 ... ok
+test types::tests::norm_to_px_zero_dim_returns_zero ... ok
+test types::tests::norm_to_px_zero_is_zero ... ok
+test types::tests::px_to_norm_centre ... ok
+test types::tests::px_to_norm_full_dim_gives_1000 ... ok
+test types::tests::px_to_norm_zero_dim_returns_zero ... ok
+test types::tests::px_to_norm_zero_is_zero ... ok
+test types::tests::round_trip_arbitrary ... ok
+test types::tests::round_trip_centre_1920 ... ok
+test types::tests::round_trip_small_dim ... ok
+test types::tests::target_coords_inner_str_is_none ... ok
+test types::tests::target_inner_str_returns_string_for_variants ... ok
+
+test result: ok. 82 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\grounding_accuracy.rs (target-improve\debug\deps\grounding_accuracy-5860cc6846e13413.exe)
+
+running 3 tests
+test coord_roundtrip_accuracy_for_grounding ... ok
+test fixture_format_and_hit_helper_sanity ... ok
+test vlm_parser_accuracy_on_fixtures ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\main.rs (target-improve\debug\deps\ghost_http-e893556d85cf9b96.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target-improve\debug\deps\ghost_intent-253e7cd7d227ea58.exe)
+
+running 17 tests
+test compiler::tests::max_duration_defaults_to_30s ... ok
+test compiler::tests::rejects_malformed_abort_if_at_compile_time ... ok
+test compiler::tests::parses_simple_step_list ... ok
+test jsonlogic::tests::validate_accepts_nested ... ok
+test compiler::tests::rejects_unknown_op ... ok
+test compiler::tests::parses_hotkey_with_modifiers ... ok
+test jsonlogic::tests::and_short_circuits ... ok
+test jsonlogic::tests::contains_substring ... ok
+test executor::tests::runs_all_ops_in_order_happy_path ... ok
+test jsonlogic::tests::equals_numbers ... ok
+test executor::tests::aborts_when_abort_if_becomes_true ... ok
+test jsonlogic::tests::validate_rejects_unknown_op ... ok
+test jsonlogic::tests::validate_rejects_wrong_arity ... ok
+test executor::tests::returns_failed_on_op_error_without_retry ... ok
+test jsonlogic::tests::var_reads_state ... ok
+test executor::tests::retries_on_retry_if_up_to_cap ... ok
+test executor::tests::enforces_max_duration_ms ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+
+     Running unittests src\lib.rs (target-improve\debug\deps\ghost_linux-3b75ebc4cd53bf78.exe)
+
+running 30 tests
+test a11y::handles::tests::distinct_addresses_get_distinct_handles ... ok
+test a11y::patterns::tests::editable_roles_match_the_windows_engine ... ok
+test a11y::handles::tests::round_trips_through_resolve ... ok
+test a11y::handles::tests::unknown_handle_resolves_to_none_rather_than_panicking ... ok
+test a11y::patterns::tests::leaf_actionable_covers_split_button_and_data_item ... ok
+test a11y::handles::tests::zero_and_negative_are_never_valid ... ok
+test capture::verify::tests::a_small_local_change_is_still_detected ... ok
+test a11y::roles::tests::interactive_roles_include_the_windows_additions ... ok
+test capture::verify::tests::a_malformed_buffer_degrades_instead_of_panicking ... ok
+test a11y::roles::tests::role_ids_match_the_windows_engine ... ok
+test keysym::tests::non_latin_chars_use_the_unicode_keysym_range ... ok
+test capture::verify::tests::a_fully_different_frame_scores_one ... ok
+test capture::verify::tests::foreground_flag_is_passed_through_untouched ... ok
+test capture::verify::tests::zero_sized_capture_is_handled ... ok
+test error::tests::variant_shapes_match_the_windows_engine ... ok
+test capture::verify::tests::identical_frames_report_no_change ... ok
+test keysym::tests::ascii_chars_are_their_own_keysym ... ok
+test keysym::tests::f0_and_f25_are_rejected ... ok
+test capture::verify::tests::tiny_uniform_noise_does_not_count_as_change ... ok
+test keysym::tests::function_keys_are_contiguous_from_f1 ... ok
+test a11y::roles::tests::alias_rules_match_the_windows_engine ... ok
+test keysym::tests::modifiers_are_recognised_case_insensitively ... ok
+test keysym::tests::named_keys_map_to_the_documented_keysyms ... ok
+test keysym::tests::newline_types_as_enter ... ok
+test keysym::tests::single_characters_map_to_themselves ... ok
+test keysym::tests::unknown_multi_character_names_are_rejected_not_guessed ... ok
+test session::tests::only_x11_makes_xtest_authoritative ... ok
+test error::tests::platform_helper_produces_a_readable_message ... ok
+test session::tests::session_kind_strings_are_stable ... ok
+test a11y::handles::tests::interning_is_idempotent ... ok
+
+test result: ok. 30 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\live_atspi.rs (target-improve\debug\deps\live_atspi-ef89db81e6aa0c5f.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target-improve\debug\deps\ghost_macos-c178e123690d339e.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\api_surface.rs (target-improve\debug\deps\api_surface-b4caea1661b98a93.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\main.rs (target-improve\debug\deps\ghost_mcp-dc00fd26f1079c32.exe)
+
+running 104 tests
+test audit::tests::a_driven_window_never_becomes_the_hand_back_destination ... ok
+test audit::tests::classify_attributes_by_recent_input ... ok
+test background_key_tests::a_single_key_is_posted ... ok
+test background_key_tests::ctrl_editing_shortcuts_become_semantic_edit_commands ... ok
+test background_key_tests::every_other_combo_is_refused_never_posted_as_its_bare_key ... ok
+test tests::base64_all_bytes_aligned ... ok
+test audit::tests::protection_matches_by_handle_and_by_process_and_expires ... ok
+test realinput::tests::only_a_click_or_alt_counts_as_choosing_a_window ... ok
+test tests::base64_two_bytes ... ok
+test tests::classify_error_maps_known_categories ... ok
+test audit::tests::observe_counts_and_records_in_flight_tools ... ok
+test audit::tests::hand_back_unless_the_human_chose_that_window ... ok
+test realinput::tests::readers_report_nothing_before_any_real_input ... ok
+test tests::elements_response_filters_offscreen_and_degenerate ... ok
+test tests::actions_for_role_maps_common_roles ... ok
+test tests::base64_empty ... ok
+test tests::base64_man_rfc_vector ... ok
+test tests::base64_one_byte ... ok
+test tests::base64_two_byte_padding ... ok
+test ext::tests::every_schema_has_name_and_input ... ok
+test tests::act_dispatch_ocr_tier_uses_coord_path ... ok
+test tests::elements_response_applies_limit_and_reports_truncation ... ok
+test ext::tests::ownership_covers_every_advertised_tool ... ok
+test tests::act_dispatch_vlm_tier_uses_coord_path ... ok
+test tests::address_bar_matches_what_a_browser_actually_displays ... ok
+test ext::tests::base64_matches_rfc_vectors ... ok
+test tests::ghost_act_all_five_actions_accepted ... ok
+test tests::base64_three_bytes ... ok
+test tests::act_dispatch_uia_tier_triggers_uia_path ... ok
+test tests::ghost_act_text_input_param_resolution ... ok
+test tests::ghost_key_down_prefix_parsed ... ok
+test tests::elements_response_default_caps_at_150 ... ok
+test tests::ghost_key_parses_combo_into_hotkey ... ok
+test tests::ghost_key_plus_key_parsed_correctly ... ok
+test tests::ghost_act_schema_enum_has_all_five_actions ... ok
+test tests::ghost_key_rejects_empty_modifier ... ok
+test tests::elements_response_limit_zero_is_unlimited ... ok
+test tests::ghost_key_single_is_press ... ok
+test tests::ghost_key_single_trailing_plus_is_error ... ok
+test tests::ghost_act_schema_has_mode_param ... ok
+test tests::ghost_query_all_uia_hit_no_vlm_call ... ok
+test tests::ghost_act_schema_mode_includes_instant_only ... ok
+test tests::ghost_find_schema_description_mentions_name_and_has_rect ... ok
+test tests::ghost_query_response_includes_unmatched_array ... ok
+test tests::ghost_find_schema_mode_includes_instant_only ... ok
+test tests::ghost_find_schema_has_mode_param ... ok
+test tests::ghost_query_uia_hits_vlm_fills_remainder ... ok
+test tests::ghost_run_result_ok_field_semantics ... ok
+test tests::initialize_response_has_protocol_version ... ok
+test tests::ghost_query_description_does_not_claim_vlm_fallback ... ok
+test tests::jsonrpc_error_has_integer_code ... ok
+test tests::legacy_names_are_known_to_handle_tool_routing ... ok
+test tests::mcp_response_err_omits_result_field ... ok
+test tests::mcp_response_ok_omits_error_field ... ok
+test tests::parse_by_missing_returns_error ... ok
+test tests::non_stop_requests_not_detected ... ok
+test tests::legacy_full_schema_all_have_name_and_schema ... ok
+test tests::lean_tools_list_contains_new_verbs ... ok
+test tests::parse_by_name ... ok
+test tests::lean_tools_list_does_not_contain_legacy_names ... ok
+test tests::parse_by_role ... ok
+test tests::parse_locate_mode_defaults_to_instant ... ok
+test tests::parse_locate_mode_deliberate ... ok
+test tests::parse_locate_mode_unknown_value_falls_back_to_instant ... ok
+test tests::parse_locate_mode_instant_explicit ... ok
+test tests::parse_locate_mode_instant_only ... ok
+test tests::parse_target_name ... ok
+test tests::parse_locate_mode_three_way ... ok
+test tests::parse_target_prefers_name_over_role ... ok
+test tests::parse_target_text ... ok
+test tests::parse_target_missing_returns_error ... ok
+test tests::step_ref_embedded_is_stringified ... ok
+test tests::step_ref_unresolved_left_verbatim ... ok
+test tests::tool_deadline_defaults_and_honours_explicit_timeouts ... ok
+test tests::tools_call_error_wraps_as_iserror_content_not_transport_err ... ok
+test tests::tools_call_missing_name_returns_iserror_not_transport_err ... ok
+test tests::tools_call_success_wraps_in_content_text ... ok
+test tests::parse_target_description ... ok
+test tests::progress_notification_format_is_valid_jsonrpc ... ok
+test tests::screenshot_opts_defaults_are_foreground_768_75 ... ok
+test tests::screenshot_opts_full_mode_flag_is_separate ... ok
+test tests::snapshot_response_enriches_and_ids ... ok
+test tests::parse_target_role ... ok
+test tests::snapshot_response_disabled_button_is_not_actionable ... ok
+test tests::step_ref_lookup_path ... ok
+test tests::step_ref_whole_string_preserves_type ... ok
+test tests::stop_request_detected_in_legacy_raw_form ... ok
+test tests::stop_request_detected_in_tools_call_form ... ok
+test tests::progress_emitter_noop_does_nothing ... ok
+test tests::tool_label_prefers_the_tool_name ... ok
+test tests::tools_call_failing_dispatch_yields_iserror_and_ok_false_envelope ... ok
+test tests::snapshot_response_actionable_only_filters ... ok
+test tests::guarded_turns_a_panic_into_an_error_response ... ok
+test tests::wrap_envelope_error_has_ok_false ... ok
+test tests::truly_invalid_yaml_or_json_returns_parse_error ... ok
+test tests::guarded_passes_a_normal_result_through ... ok
+test tests::wrap_envelope_foreground_has_required_fields ... ok
+test tests::yaml_fallback_accepts_json_script ... ok
+test tests::yaml_scalar_is_not_an_array ... ok
+test tests::wrap_envelope_success_has_ok_true ... ok
+test tests::yaml_script_parses_to_same_as_json ... ok
+test tests::tools_schema_all_have_name_and_schema ... ok
+test tests::tools_schema_is_lean_verbs_plus_extended_surface ... ok
+test tests::guarded_turns_an_overrun_into_a_timeout_error ... ok
+
+test result: ok. 104 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running tests\live_mcp_linux.rs (target-improve\debug\deps\live_mcp_linux-54b8140bd57ccce9.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target-improve\debug\deps\ghost_platform-e34c6244dfdedc5f.exe)
+
+running 7 tests
+test tests::current_backend_matches_host_os ... ok
+test tests::linux_claims_only_what_the_live_suite_verifies ... ok
+test tests::macos_is_still_a_scaffold ... ok
+test tests::windows_remains_the_most_capable_platform ... ok
+test tests::windows_reports_full_and_functional ... ok
+test types::tests::negative_rect_has_zero_size ... ok
+test types::tests::rect_center_and_size ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target-improve\debug\deps\ghost_session-950d295479fa9348.exe)
+
+running 117 tests
+test click_verify::tests::a_title_change_verifies_even_when_pixels_did_not_move ... ok
+test cdp_route::tests::page_element_parses_and_centres ... ok
+test cdp_route::tests::window_title_picks_the_active_tab_by_longest_prefix ... ok
+test click_verify::tests::pixels_alone_still_verify ... ok
+test locator::tests::by_name_display ... ok
+test locator::tests::by_role_stores_role ... ok
+test reflection::tests::eviction_happens_exactly_at_capacity ... ok
+test element::refuse_tests::a_definitely_disabled_element_is_refused ... ok
+test click_verify::tests::signal_names_are_the_wire_values ... ok
+test click_verify::tests::a_change_far_from_the_clicked_control_is_seen ... ok
+test element::refuse_tests::an_element_whose_provider_did_not_answer_is_not_refused ... ok
+test element::refuse_tests::an_enabled_element_is_not_refused ... ok
+test click_verify::tests::nothing_comparable_stays_unknown ... ok
+test hidden::tests::located_centre_and_rect_json ... ok
+test hidden::tests::wheel_maps_directions_to_signed_notches ... ok
+test click_verify::tests::polling_ends_at_the_old_fixed_settle_and_never_goes_back_in_time ... ok
+test locator::tests::by_role_display ... ok
+test click_verify::tests::a_real_effect_persists ... ok
+test click_verify::tests::title_outranks_the_other_signals_in_the_report ... ok
+test click_verify::tests::a_change_within_tolerance_is_noise ... ok
+test reflection::tests::buffer_starts_empty ... ok
+test reflection::tests::different_strings_give_different_hashes ... ok
+test click_verify::tests::a_uia_state_change_verifies_even_without_a_pixel_comparison ... ok
+test click_verify::tests::slow_signals_are_read_once_at_the_old_settle_point ... ok
+test click_verify::tests::nothing_moved_is_unverified_not_unknown ... ok
+test reflection::tests::hint_after_eviction_only_shows_recent_failures ... ok
+test reflection::tests::hint_is_none_when_empty ... ok
+test reflection::tests::push_fills_to_capacity ... ok
+test reflection::tests::hint_contains_failure_action_and_reason ... ok
+test locator::tests::by_name_stores_name ... ok
+test click_verify::tests::a_one_frame_blip_does_not_persist ... ok
+test click_verify::tests::identical_frames_change_no_cell ... ok
+test reflection::tests::capacity_one_always_keeps_only_last ... ok
+test reflection::tests::hint_excludes_successes_includes_only_failures ... ok
+test click_verify::tests::changes_in_different_places_do_not_add_up_to_an_effect ... ok
+test reflection::tests::hint_is_none_when_all_successes ... ok
+test reflection::tests::hint_format_is_multiline_with_header ... ok
+test reflection::tests::push_beyond_capacity_evicts_oldest ... ok
+test reflection::tests::same_string_gives_same_hash ... ok
+test registries::tests::ids_are_safe_as_directory_names ... ok
+test session::act_result_tests::missing_verification_reports_null_not_true ... ok
+test session::act_result_tests::unconfirmed_focus_carries_warning ... ok
+test session::act_result_tests::unverified_action_carries_warning_not_silent_success ... ok
+test session::act_result_tests::verified_action_has_no_warning ... ok
+test session::cover_tests::a_window_of_a_process_ghost_launched_is_allowed ... ok
+test session::cover_tests::a_window_the_target_owns_is_allowed_even_from_another_process ... ok
+test session::cover_tests::an_unknown_pid_never_matches_the_target_by_accident ... ok
+test session::cover_tests::another_window_of_the_targets_process_is_allowed ... ok
+test session::cover_tests::someone_elses_window_over_the_target_is_refused ... ok
+test session::cover_tests::the_target_itself_is_allowed ... ok
+test session::pick_window_tests::a_resolved_window_that_closed_is_an_error_not_the_decoy ... ok
+test session::pick_window_tests::a_resolved_window_that_is_minimised_is_an_error_not_another_match ... ok
+test session::pick_window_tests::the_resolved_handle_wins_over_an_earlier_title_match ... ok
+test session::pick_window_tests::without_a_handle_the_first_title_match_is_used_as_before ... ok
+test session::pick_window_tests::without_a_handle_minimised_windows_are_skipped_and_nothing_matching_is_an_error ... ok
+test session::read_scope_tests::nothing_given_reads_the_foreground_scope ... ok
+test session::read_scope_tests::the_resolved_handle_is_read_when_the_engine_can ... ok
+test session::read_scope_tests::without_a_handle_or_handle_reads_the_title_is_used ... ok
+test shell::tests::b64_matches_known_vectors ... ok
+test shell::tests::cap_output_passes_short_strings ... ok
+test shell::tests::clamp_timeout_defaults_and_caps ... ok
+test shell::tests::ps_encoded_is_utf16le_base64 ... ok
+test shell::tests::sanitize_extracts_clixml_error_text ... ok
+test shell::tests::sanitize_passes_plain_native_stderr ... ok
+test shell::tests::cap_output_truncates_long_strings ... ok
+test shell::tests::sanitize_strips_clixml_progress_to_empty ... ok
+test shell::tests::shell_off_accepts_the_spellings_a_checkbox_writes ... ok
+test shell::tests::shell_disabled_reads_env ... ok
+test shell::warm_tests::cwd_prefix_escapes_single_quotes_for_a_literal_path ... ok
+test shell::warm_tests::warm_flag_reads_env ... ok
+test suggest::tests::dedupes_case_variants_and_caps_the_list ... ok
+test suggest::tests::ranks_exact_prefix_substring_then_fuzzy ... ok
+test suggest::tests::sentence_is_absent_when_nothing_is_close ... ok
+test suggest::tests::tolerates_typos_and_drops_noise ... ok
+test target::tests::a_closed_anchor_is_closed_even_when_the_human_has_another_window ... ok
+test target::tests::a_live_anchor_is_used ... ok
+test target::tests::never_anchored_is_unset ... ok
+test target::tests::pick_keeps_list_order_on_ties ... ok
+test target::tests::target_json_reports_title_drift ... ok
+test target::tests::pick_prefers_a_window_that_is_not_minimised_within_a_rank ... ok
+test target::tests::a_stale_title_resolves_to_the_anchored_window_without_a_live_match ... ok
+test target::tests::pick_prefers_exact_then_prefix_then_substring ... ok
+test target::tests::candidate_listing_tags_surfaces_and_caps_length ... ok
+test target::tests::drift_needs_the_anchor_alive_on_the_same_surface ... ok
+test target::tests::target_json_carries_surface_and_source ... ok
+test target::tests::a_live_title_match_beats_drift_and_an_unknown_title_still_misses ... ok
+test tiers::tests::target_to_tier_affinity_description ... ok
+test tests::env_key_is_set_nonempty_returns_true ... ok
+test tests::env_key_is_set_unset_var_returns_false ... ok
+test tests::env_key_is_set_whitespace_only_returns_false ... ok
+test tiers::tests::target_to_tier_affinity_coords_bypasses_all ... ok
+test target::tests::the_same_handle_on_another_desktop_is_not_the_anchor ... ok
+test tiers::tests::target_to_tier_affinity_name ... ok
+test tests::env_key_is_set_empty_string_returns_false ... ok
+test tiers::tests::tier_display_names_match_expected ... ok
+test vision::tests::crop_to_screen_no_downscale ... ok
+test vision::tests::build_extract_prompt_includes_all_fields ... ok
+test vision::tests::parse_coord_response_with_code_fence ... ok
+test vision::tests::base64_three_bytes_known_vector ... ok
+test vision::tests::crop_to_screen_with_downscale ... ok
+test vision::tests::crop_to_screen_zero_origin ... ok
+test vision::tests::parse_extract_explicit_null_field ... ok
+test vision::tests::oai_req_omits_reasoning_effort_when_unset ... ok
+test vision::tests::oai_resp_tolerates_null_content ... ok
+test vision::tests::parse_coord_response_not_found ... ok
+test vision::tests::parse_coord_response_pure_json ... ok
+test vision::tests::parse_coord_response_with_prose ... ok
+test vision::tests::parse_extract_pure_json_all_values ... ok
+test vision::tests::parse_extract_missing_field_filled_with_null ... ok
+test vision::tests::parse_extract_with_code_fence ... ok
+test vision::tests::parse_extract_with_prose_around_json ... ok
+test vision::tests::parse_extract_no_json_returns_error ... ok
+test vision::tests::parse_mark_response_variants ... ok
+test vision::tests::pick_provider_with_explicit_override ... ok
+test vision::tests::reasoning_effort_defaults_off_for_nemotron_only ... ok
+test click_verify::tests::two_changed_pixels_in_a_large_window_are_seen ... ok
+test shell::warm_tests::a_spare_driver_serves_one_framed_command_with_its_exit_code ... ok
+
+test result: ok. 117 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.17s
+
+     Running tests\browser_flow.rs (target-improve\debug\deps\browser_flow-93bbf52106d27fb2.exe)
+
+running 3 tests
+test describe_delta_small_payload_on_dom_change ... ignored
+test execute_intent_form_login_on_edge ... ignored
+test navigate_and_wait_resolves_on_edge ... ignored
+
+test result: ok. 0 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\calculator.rs (target-improve\debug\deps\calculator-d40749e0d582d378.exe)
+
+running 1 test
+test calculator_button_clicks_in_the_background ... ignored, requires Windows display; run manually
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\chaos.rs (target-improve\debug\deps\chaos-dda0fa2b6742190a.exe)
+
+running 1 test
+test fsm_halts_on_max_duration_when_retry_if_always_true ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.18s
+
+     Running tests\cv_live_probe.rs (target-improve\debug\deps\cv_live_probe-6a88b997eb59e381.exe)
+
+running 1 test
+test detects_regions_on_real_screen ... ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\hidden_window_recovery.rs (target-improve\debug\deps\hidden_window_recovery-e7b6ba03a8ba9da8.exe)
+
+running 3 tests
+test a_window_hidden_from_outside_is_listed_and_restorable ... ignored
+test raising_a_vanished_window_brings_it_back ... ignored
+test restore_if_hidden_shows_a_hidden_window_and_leaves_everything_else_alone ... ignored
+
+test result: ok. 0 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\index_disambiguation.rs (target-improve\debug\deps\index_disambiguation-04bd13bb36ceab15.exe)
+
+running 2 tests
+test act_background_index_selects_the_nth_match ... ignored
+test act_index_selects_the_nth_match_on_the_hidden_desktop_route ... ignored
+
+test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\testbed.rs (target-improve\debug\deps\testbed-8f008600d439d84e.exe)
+
+running 6 tests
+test capture_and_ocr_read_the_hidden_window ... ignored
+test clicking_the_button_updates_the_title ... ignored
+test describe_lists_the_controls_by_name_and_role ... ignored
+test diagnose_targets ... ignored
+test quit_ends_the_process_and_the_window_goes_away ... ignored
+test typing_reads_back_from_the_edit_control ... ignored
+
+test result: ok. 0 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\text_surface_matrix.rs (target-improve\debug\deps\text_surface_matrix-fc29ff12515c9259.exe)
+
+running 2 tests
+test chromium_omnibox_prefers_exact_edit_over_enclosing_document ... ignored
+test winui_document_surface_resolves_via_alias ... ignored
+
+test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\main.rs (target-improve\debug\deps\ghost_testbed-1e24b6bbcd667426.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ghost_browser
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ghost_cache
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ghost_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ghost_ground
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ghost_intent
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ghost_linux
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ghost_macos
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ghost_platform
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ghost_session
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+exit=0

@@ -77,3 +77,15 @@ session.rs, hidden.rs.
 Queued: stage 6b = C10 (background ghost_key drops combo modifiers), C9 (ghost_see mode=text resolves by
 title), C11 (error text). Then stage 7 = C1 + C4, stage 8 = C6, C7, C5, C8.
 
+## Stage 6b - C10 combo modifiers (8ecbf09), C9 see text by handle (eb1a2ed), C11 closed anchor refuses (363cf14) - VERIFIED
+Grok Bot (1:35 AM AKST, Claude idle): cargo test 595 / 0 / 27; clippy 0; lint 0 on all crates files changed
+since d586cce. Probes n=10, all windows launched by the probes:
+- C10 combo_probe: bare key typed 0/40 (before: Claude measured 40/40 - "Ctrl+S" typed an "S"); Ctrl+A as
+  select_all 10/10; Ctrl+S, Ctrl+Shift+K, Alt+X refused 30/30 with a clear "was not sent" error.
+- C9 read_routing_probe: see mode=text reads the target 10/10 with decoy in front (before 0/10).
+  see mode=full (tree) still reads the target 0/10 by this marker -> C9b (needs a tree-visible marker).
+- C11 anchor_closed_probe: ghost_key and ghost_see after the anchor closed refuse and name it 10/10 each;
+  re-anchoring works 10/10. Behaviour change: a closed anchor is sticky until window= or anchor clear.
+- C2 key routing regression: target 10/10, decoy 0/10.
+Next: STAGE 7 = C1 + C4 + C9b (sent 1:37 AM AKST).
+
