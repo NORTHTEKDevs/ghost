@@ -50,32 +50,63 @@ fn window_title_of(_hwnd: isize) -> String {
     String::new()
 }
 
-/// Did the pointer stay put across an action?
-///
-/// Both readings are `Option` because pointer position is not knowable on every
-/// platform: under Wayland neither the RemoteDesktop portal nor uinput will
-/// report it. `None` therefore means *unknown*, not *moved*.
-///
-/// Reporting `true` when the position is unknown is correct for the case this
-/// guards. Background dispatch on Linux is an AT-SPI action, which drives the
-/// control through its own toolkit and has no pointer involvement at all -- so
-/// there is nothing that could have moved it. On Windows, and on Linux under
-/// X11, both readings are real and compared exactly.
-/// The window a background verb drives: the handle the caller already resolved
-/// (the MCP layer's `_target_hwnd`) when that window is still open and not
-/// minimised, otherwise the first window whose title contains `title`.
+/// Why [`pick_window`] found no window to drive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PickMiss {
+    /// The resolved window has closed since the target was resolved.
+    HintGone,
+    /// The resolved window is minimised; background input cannot drive it.
+    HintMinimized,
+    /// No handle came with the call and no visible window's title matches.
+    NoTitleMatch,
+}
+
+impl PickMiss {
+    fn explain(self, verb: &str, window: &str) -> GhostError {
+        GhostError::Vision(match self {
+            PickMiss::HintGone => format!(
+                "{verb} background: the window resolved for '{window}' has closed; nothing was sent \
+                 (another window with a matching title is not used in its place)"
+            ),
+            PickMiss::HintMinimized => format!(
+                "{verb} background: the window resolved for '{window}' is minimized and can't be driven \
+                 in the background; restore it with ghost_window op=state state=restore"
+            ),
+            PickMiss::NoTitleMatch => format!(
+                "{verb} background: no visible window matching '{window}' (minimized windows can't be \
+                 driven in background)"
+            ),
+        })
+    }
+}
+
+/// The window a background verb drives. With a handle the caller already
+/// resolved (the MCP layer's `_target_hwnd`), exactly that window: an error if
+/// it has closed or is minimised. Only without a handle, the first visible
+/// window whose title contains `title`.
 ///
 /// `ghost_key` and the Ctrl+C/X/V/A/Z edit commands used to take only the title
 /// and re-resolve it by first substring match in z-order, so with the anchor on
 /// "Ghost Key Bed" and a window "Ghost Key Bed 2" in front, the key went to the
 /// second while the response named the first (3/3,
 /// docs/benches/2026-11-25-final/review-run2..4).
-fn pick_window<'a>(windows: &'a [WindowInfo], title: &str, hint: Option<isize>) -> Option<&'a WindowInfo> {
-    if let Some(w) = hint.and_then(|h| windows.iter().find(|w| w.hwnd == h && w.state != "minimized")) {
-        return Some(w);
+fn pick_window<'a>(windows: &'a [WindowInfo], title: &str, hint: Option<isize>) -> std::result::Result<&'a WindowInfo, PickMiss> {
+    if let Some(h) = hint {
+        // A handle was resolved for this call: that window or nothing. Falling
+        // back to a title match here would hand the input to whichever other
+        // window's title contains the target's - the decoy bug - exactly when
+        // the target has just closed.
+        return match windows.iter().find(|w| w.hwnd == h) {
+            Some(w) if w.state == "minimized" => Err(PickMiss::HintMinimized),
+            Some(w) => Ok(w),
+            None => Err(PickMiss::HintGone),
+        };
     }
     let ql = title.to_lowercase();
-    windows.iter().find(|w| w.name.to_lowercase().contains(&ql) && w.state != "minimized")
+    windows
+        .iter()
+        .find(|w| w.name.to_lowercase().contains(&ql) && w.state != "minimized")
+        .ok_or(PickMiss::NoTitleMatch)
 }
 
 /// Poll a posted click's effect on a user-desktop window (see `click_verify`):
@@ -112,6 +143,17 @@ async fn poll_click_effect(
     (outcome, el)
 }
 
+/// Did the pointer stay put across an action?
+///
+/// Both readings are `Option` because pointer position is not knowable on every
+/// platform: under Wayland neither the RemoteDesktop portal nor uinput will
+/// report it. `None` therefore means *unknown*, not *moved*.
+///
+/// Reporting `true` when the position is unknown is correct for the case this
+/// guards. Background dispatch on Linux is an AT-SPI action, which drives the
+/// control through its own toolkit and has no pointer involvement at all -- so
+/// there is nothing that could have moved it. On Windows, and on Linux under
+/// X11, both readings are real and compared exactly.
 fn cursor_unchanged(before: Option<(i32, i32)>, after: Option<(i32, i32)>) -> bool {
     match (before, after) {
         (Some(a), Some(b)) => a == b,
@@ -2232,10 +2274,7 @@ impl GhostSession {
         // action - a page rewriting document.title on every click did exactly
         // that), otherwise by partial name. Minimised windows are skipped.
         let windows_list = core_list_windows().map_err(GhostError::Core)?;
-        let win = pick_window(&windows_list, window, hwnd_hint)
-            .ok_or_else(|| GhostError::Vision(format!(
-                "ghost_act background: no visible window matching '{window}' (minimized windows can't be driven in background)"
-            )))?;
+        let win = pick_window(&windows_list, window, hwnd_hint).map_err(|m| m.explain("ghost_act", window))?;
         let hwnd_raw = win.hwnd;
         let hwnd = win.hwnd;
 
@@ -2558,10 +2597,7 @@ impl GhostSession {
 
         if is_stopped() { return Err(GhostError::Stopped); }
         let windows_list = core_list_windows().map_err(GhostError::Core)?;
-        let win = pick_window(&windows_list, window, hwnd_hint)
-            .ok_or_else(|| GhostError::Vision(format!(
-                "ghost_key background: no visible window matching '{window}'"
-            )))?;
+        let win = pick_window(&windows_list, window, hwnd_hint).map_err(|m| m.explain("ghost_key", window))?;
         let win_hwnd = win.hwnd;
         let target = crate::engine::input::BackgroundClicker::focused_control(win_hwnd);
         // focused_control falls back to the top-level frame when nothing in the
@@ -2625,10 +2661,7 @@ impl GhostSession {
             ))),
         };
         let windows_list = core_list_windows().map_err(GhostError::Core)?;
-        let win = pick_window(&windows_list, window, hwnd_hint)
-            .ok_or_else(|| GhostError::Vision(format!(
-                "ghost_key background: no visible window matching '{window}'"
-            )))?;
+        let win = pick_window(&windows_list, window, hwnd_hint).map_err(|m| m.explain("ghost_key", window))?;
         let win_hwnd = win.hwnd;
         let target = crate::engine::input::BackgroundClicker::focused_control(win_hwnd);
         let no_focused_control = target == win_hwnd;
@@ -2984,7 +3017,7 @@ mod act_result_tests {
 
 #[cfg(test)]
 mod pick_window_tests {
-    use super::{pick_window, WindowInfo};
+    use super::{pick_window, PickMiss, WindowInfo};
 
     fn win(name: &str, hwnd: isize, state: &'static str) -> WindowInfo {
         WindowInfo { name: name.into(), pid: 1, focused: false, hwnd, state }
@@ -2994,26 +3027,32 @@ mod pick_window_tests {
     fn the_resolved_handle_wins_over_an_earlier_title_match() {
         // The decoy is first in z-order and its title contains the target's.
         let ws = [win("Ghost Key Bed 2", 20, "normal"), win("Ghost Key Bed", 10, "normal")];
-        assert_eq!(pick_window(&ws, "Ghost Key Bed", Some(10)).map(|w| w.hwnd), Some(10));
+        assert_eq!(pick_window(&ws, "Ghost Key Bed", Some(10)).map(|w| w.hwnd), Ok(10));
     }
 
     #[test]
     fn without_a_handle_the_first_title_match_is_used_as_before() {
         let ws = [win("Ghost Key Bed 2", 20, "normal"), win("Ghost Key Bed", 10, "normal")];
-        assert_eq!(pick_window(&ws, "Ghost Key Bed", None).map(|w| w.hwnd), Some(20));
+        assert_eq!(pick_window(&ws, "Ghost Key Bed", None).map(|w| w.hwnd), Ok(20));
     }
 
     #[test]
-    fn a_handle_that_is_gone_or_minimised_falls_back_to_the_title() {
+    fn a_resolved_window_that_closed_is_an_error_not_the_decoy() {
+        // The target (10) closed; the decoy whose title contains it is still up.
+        let ws = [win("Ghost Key Bed 2", 20, "normal")];
+        assert_eq!(pick_window(&ws, "Ghost Key Bed", Some(10)).map(|w| w.hwnd), Err(PickMiss::HintGone));
+    }
+
+    #[test]
+    fn a_resolved_window_that_is_minimised_is_an_error_not_another_match() {
         let ws = [win("Notes", 10, "minimized"), win("Notes", 11, "normal")];
-        assert_eq!(pick_window(&ws, "notes", Some(10)).map(|w| w.hwnd), Some(11));
-        assert_eq!(pick_window(&ws, "notes", Some(99)).map(|w| w.hwnd), Some(11));
+        assert_eq!(pick_window(&ws, "notes", Some(10)).map(|w| w.hwnd), Err(PickMiss::HintMinimized));
     }
 
     #[test]
-    fn nothing_matching_is_none() {
-        let ws = [win("Other", 10, "normal")];
-        assert!(pick_window(&ws, "Notes", None).is_none());
-        assert!(pick_window(&[], "Notes", Some(10)).is_none());
+    fn without_a_handle_minimised_windows_are_skipped_and_nothing_matching_is_an_error() {
+        let ws = [win("Notes", 10, "minimized"), win("Notes", 11, "normal")];
+        assert_eq!(pick_window(&ws, "notes", None).map(|w| w.hwnd), Ok(11));
+        assert_eq!(pick_window(&[win("Other", 10, "normal")], "Notes", None).map(|w| w.hwnd), Err(PickMiss::NoTitleMatch));
     }
 }

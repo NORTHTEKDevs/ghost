@@ -76,3 +76,45 @@ applies is `click_verify`'s, already covered by its 16 tests.
 The "before" distant rows report correct 0/20 because that probe version
 expected +1 for a double-click; the `verified` counts in them are valid. The
 probe now expects +2.
+
+## Review fix to C2 - a supplied handle that is gone or minimised is an error
+
+**Change.** `pick_window` (`crates/ghost-session/src/session.rs`) now returns
+`Result<&WindowInfo, PickMiss>`. When the caller supplied a resolved handle and
+that window has closed (`HintGone`) or is minimised (`HintMinimized`), the verb
+fails with an error naming the cause; it no longer falls back to a title match,
+which would hand the input to the decoy exactly when the target has just closed.
+The title fallback remains only for calls that came with no handle.
+`act_background`, `key_background` and `edit_command_background` all resolve
+through it. Also moved `cursor_unchanged`'s doc comment back onto its own
+function (C2 and C3 had inserted code between the two).
+
+**What the live probe can and cannot show** (`target_closed_probe.py`, both
+windows launched by the probe, decoy edit focused through Ghost and read with
+WM_GETTEXT). The target closes, then `ghost_key q`:
+
+| Case | Before (fa7fef6) | After |
+|---|---|---|
+| no `window` arg, relying on the anchor: refused / decoy got the key | 10/10 / 0/10 | 10/10 / 0/10 |
+| `window="Ghost Gone Bed"`: refused / decoy got the key | 10/10 / 0/10 | 10/10 / 0/10 (`pick-after`) |
+
+The MCP target resolver already rejects a closed anchor before `pick_window` is
+reached, so the hole is only the window closing between resolution and
+dispatch - a race a probe cannot hit on demand. The unit tests are the proof:
+
+| Criterion | Target | Measured |
+|---|---|---|
+| Unit: resolved handle closed, decoy open -> `HintGone`, not the decoy | error | pass (5 of 5 red on a stub, all green) |
+| Unit: resolved handle minimised -> `HintMinimized`, not another match | error | pass |
+| Unit: handle beats an earlier title match; no handle -> first visible match; nothing -> `NoTitleMatch` | as stated | pass |
+| C2 decoy probe still correct (`pick-c2-regression`) | target 20/20, decoy 0/20 | 20/20, 0/20; response window 20/20; Ctrl+A 20/20 |
+| `cargo test --workspace` | 0 failed | 585 / 0 / 27, both runs |
+| clippy, vibecode lint | 0 / 0 HIGH | 0 / 0 findings |
+
+New candidate found here (not fixed):
+
+- **C11 - a closed anchor yields a misleading error.** `ghost_key` with no
+  `window` after the anchored window closed answers "'press_key' has no
+  background path on the user's desktop and the focus policy is 'background'"
+  (10/10, `pick-after/target_closed.json`), which points the agent at the focus
+  policy instead of saying the anchored window is gone.

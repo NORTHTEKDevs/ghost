@@ -1,0 +1,146 @@
+{
+ "anchor": [
+  {
+   "target_gone": true,
+   "is_error": true,
+   "decoy_got_q": false,
+   "error": "Core error: 'press_key' has no background path on the user's desktop and the focus policy is 'background'. Work where no policy is needed: launch the app with ghost_window op=launch (it lands on a hidden desktop) or the browser with ghost_browser_launch, then drive the anchored window. Real input on the user's desktop is the operator's call: GHOST_FOCUS_LOCK=off in the server environment, then ghost_set_focus_policy",
+   "sent_to": null
+  },
+  {
+   "target_gone": true,
+   "is_error": true,
+   "decoy_got_q": false,
+   "error": "Core error: 'press_key' has no background path on the user's desktop and the focus policy is 'background'. Work where no policy is needed: launch the app with ghost_window op=launch (it lands on a hidden desktop) or the browser with ghost_browser_launch, then drive the anchored window. Real input on the user's desktop is the operator's call: GHOST_FOCUS_LOCK=off in the server environment, then ghost_set_focus_policy",
+   "sent_to": null
+  },
+  {
+   "target_gone": true,
+   "is_error": true,
+   "decoy_got_q": false,
+   "error": "Core error: 'press_key' has no background path on the user's desktop and the focus policy is 'background'. Work where no policy is needed: launch the app with ghost_window op=launch (it lands on a hidden desktop) or the browser with ghost_browser_launch, then drive the anchored window. Real input on the user's desktop is the operator's call: GHOST_FOCUS_LOCK=off in the server environment, then ghost_set_focus_policy",
+   "sent_to": null
+  },
+  {
+   "target_gone": true,
+   "is_error": true,
+   "decoy_got_q": false,
+   "error": "Core error: 'press_key' has no background path on the user's desktop and the focus policy is 'background'. Work where no policy is needed: launch the app with ghost_window op=launch (it lands on a hidden desktop) or the browser with ghost_browser_launch, then drive the anchored window. Real input on the user's desktop is the operator's call: GHOST_FOCUS_LOCK=off in the server environment, then ghost_set_focus_policy",
+   "sent_to": null
+  },
+  {
+   "target_gone": true,
+   "is_error": true,
+   "decoy_got_q": false,
+   "error": "Core error: 'press_key' has no background path on the user's desktop and the focus policy is 'background'. Work where no policy is needed: launch the app with ghost_window op=launch (it lands on a hidden desktop) or the browser with ghost_browser_launch, then drive the anchored window. Real input on the user's desktop is the operator's call: GHOST_FOCUS_LOCK=off in the server environment, then ghost_set_focus_policy",
+   "sent_to": null
+  },
+  {
+   "target_gone": true,
+   "is_error": true,
+   "decoy_got_q": false,
+   "error": "Core error: 'press_key' has no background path on the user's desktop and the focus policy is 'background'. Work where no policy is needed: launch the app with ghost_window op=launch (it lands on a hidden desktop) or the browser with ghost_browser_launch, then drive the anchored window. Real input on the user's desktop is the operator's call: GHOST_FOCUS_LOCK=off in the server environment, then ghost_set_focus_policy",
+   "sent_to": null
+  },
+  {
+   "target_gone": true,
+   "is_error": true,
+   "decoy_got_q": false,
+   "error": "Core error: 'press_key' has no background path on the user's desktop and the focus policy is 'background'. Work where no policy is needed: launch the app with ghost_window op=launch (it lands on a hidden desktop) or the browser with ghost_browser_launch, then drive the anchored window. Real input on the user's desktop is the operator's call: GHOST_FOCUS_LOCK=off in the server environment, then ghost_set_focus_policy",
+   "sent_to": null
+  },
+  {
+   "target_gone": true,
+   "is_error": true,
+   "decoy_got_q": false,
+   "error": "Core error: 'press_key' has no background path on the user's desktop and the focus policy is 'background'. Work where no policy is needed: launch the app with ghost_window op=launch (it lands on a hidden desktop) or the browser with ghost_browser_launch, then drive the anchored window. Real input on the user's desktop is the operator's call: GHOST_FOCUS_LOCK=off in the server environment, then ghost_set_focus_policy",
+   "sent_to": null
+  },
+  {
+   "target_gone": true,
+   "is_error": true,
+   "decoy_got_q": false,
+   "error": "Core error: 'press_key' has no background path on the user's desktop and the focus policy is 'background'. Work where no policy is needed: launch the app with ghost_window op=launch (it lands on a hidden desktop) or the browser with ghost_browser_launch, then drive the anchored window. Real input on the user's desktop is the operator's call: GHOST_FOCUS_LOCK=off in the server environment, then ghost_set_focus_policy",
+   "sent_to": null
+  },
+  {
+   "target_gone": true,
+   "is_error": true,
+   "decoy_got_q": false,
+   "error": "Core error: 'press_key' has no background path on the user's desktop and the focus policy is 'background'. Work where no policy is needed: launch the app with ghost_window op=launch (it lands on a hidden desktop) or the browser with ghost_browser_launch, then drive the anchored window. Real input on the user's desktop is the operator's call: GHOST_FOCUS_LOCK=off in the server environment, then ghost_set_focus_policy",
+   "sent_to": null
+  }
+ ],
+ "explicit": [
+  {
+   "target_gone": true,
+   "is_error": true,
+   "decoy_got_q": false,
+   "error": "Process not found: window 'Ghost Gone Bed' (no open window matches; open windows: 'ghost-improve', 'Grok Bot', '\u25d1 Kryos-lang session without shutdown', 'C:\\Program Files\\nodejs\\node.exe' [minimized], 'ccb-test', 'Inbox (2,204) - info@northtek.io - Northtek Mail - Comet' [minimized], 'Windows Security', 'Windows Security' [minimized], 'iCUE' [minimized], 'Click to Do', '391107966 - RustDesk' [minimized], 'Windows Input Experience', ... 4 more)",
+   "sent_to": null
+  },
+  {
+   "target_gone": true,
+   "is_error": true,
+   "decoy_got_q": false,
+   "error": "Process not found: window 'Ghost Gone Bed' (no open window matches; open windows: 'ghost-improve', 'Grok Bot', '\u25d1 Kryos-lang session without shutdown', 'C:\\Program Files\\nodejs\\node.exe' [minimized], 'ccb-test', 'Inbox (2,204) - info@northtek.io - Northtek Mail - Comet' [minimized], 'Windows Security', 'Windows Security' [minimized], 'iCUE' [minimized], 'Click to Do', '391107966 - RustDesk' [minimized], 'Windows Input Experience', ... 4 more)",
+   "sent_to": null
+  },
+  {
+   "target_gone": true,
+   "is_error": true,
+   "decoy_got_q": false,
+   "error": "Process not found: window 'Ghost Gone Bed' (no open window matches; open windows: 'ghost-improve', 'Grok Bot', '\u25d1 Kryos-lang session without shutdown', 'C:\\Program Files\\nodejs\\node.exe' [minimized], 'ccb-test', 'Inbox (2,204) - info@northtek.io - Northtek Mail - Comet' [minimized], 'Windows Security', 'Windows Security' [minimized], 'iCUE' [minimized], 'Click to Do', '391107966 - RustDesk' [minimized], 'Windows Input Experience', ... 4 more)",
+   "sent_to": null
+  },
+  {
+   "target_gone": true,
+   "is_error": true,
+   "decoy_got_q": false,
+   "error": "Process not found: window 'Ghost Gone Bed' (no open window matches; open windows: 'ghost-improve', 'Grok Bot', '\u25d1 Kryos-lang session without shutdown', 'C:\\Program Files\\nodejs\\node.exe' [minimized], 'ccb-test', 'Inbox (2,204) - info@northtek.io - Northtek Mail - Comet' [minimized], 'Windows Security', 'Windows Security' [minimized], 'iCUE' [minimized], 'Click to Do', '391107966 - RustDesk' [minimized], 'Windows Input Experience', ... 4 more)",
+   "sent_to": null
+  },
+  {
+   "target_gone": true,
+   "is_error": true,
+   "decoy_got_q": false,
+   "error": "Process not found: window 'Ghost Gone Bed' (no open window matches; open windows: 'ghost-improve', 'Grok Bot', '\u25d1 Kryos-lang session without shutdown', 'C:\\Program Files\\nodejs\\node.exe' [minimized], 'ccb-test', 'Inbox (2,204) - info@northtek.io - Northtek Mail - Comet' [minimized], 'Windows Security', 'Windows Security' [minimized], 'iCUE' [minimized], 'Click to Do', '391107966 - RustDesk' [minimized], 'Windows Input Experience', ... 4 more)",
+   "sent_to": null
+  },
+  {
+   "target_gone": true,
+   "is_error": true,
+   "decoy_got_q": false,
+   "error": "Process not found: window 'Ghost Gone Bed' (no open window matches; open windows: 'ghost-improve', 'Grok Bot', '\u25d1 Kryos-lang session without shutdown', 'C:\\Program Files\\nodejs\\node.exe' [minimized], 'ccb-test', 'Inbox (2,204) - info@northtek.io - Northtek Mail - Comet' [minimized], 'Windows Security', 'Windows Security' [minimized], 'iCUE' [minimized], 'Click to Do', '391107966 - RustDesk' [minimized], 'Windows Input Experience', ... 4 more)",
+   "sent_to": null
+  },
+  {
+   "target_gone": true,
+   "is_error": true,
+   "decoy_got_q": false,
+   "error": "Process not found: window 'Ghost Gone Bed' (no open window matches; open windows: 'ghost-improve', 'Grok Bot', '\u25d1 Kryos-lang session without shutdown', 'C:\\Program Files\\nodejs\\node.exe' [minimized], 'ccb-test', 'Inbox (2,204) - info@northtek.io - Northtek Mail - Comet' [minimized], 'Windows Security', 'Windows Security' [minimized], 'iCUE' [minimized], 'Click to Do', '391107966 - RustDesk' [minimized], 'Windows Input Experience', ... 4 more)",
+   "sent_to": null
+  },
+  {
+   "target_gone": true,
+   "is_error": true,
+   "decoy_got_q": false,
+   "error": "Process not found: window 'Ghost Gone Bed' (no open window matches; open windows: 'ghost-improve', 'Grok Bot', '\u25d1 Kryos-lang session without shutdown', 'C:\\Program Files\\nodejs\\node.exe' [minimized], 'ccb-test', 'Inbox (2,204) - info@northtek.io - Northtek Mail - Comet' [minimized], 'Windows Security', 'Windows Security' [minimized], 'iCUE' [minimized], 'Click to Do', '391107966 - RustDesk' [minimized], 'Windows Input Experience', ... 4 more)",
+   "sent_to": null
+  },
+  {
+   "target_gone": true,
+   "is_error": true,
+   "decoy_got_q": false,
+   "error": "Process not found: window 'Ghost Gone Bed' (no open window matches; open windows: 'ghost-improve', 'Grok Bot', '\u25d1 Kryos-lang session without shutdown', 'C:\\Program Files\\nodejs\\node.exe' [minimized], 'ccb-test', 'Inbox (2,204) - info@northtek.io - Northtek Mail - Comet' [minimized], 'Windows Security', 'Windows Security' [minimized], 'iCUE' [minimized], 'Click to Do', '391107966 - RustDesk' [minimized], 'Windows Input Experience', ... 4 more)",
+   "sent_to": null
+  },
+  {
+   "target_gone": true,
+   "is_error": true,
+   "decoy_got_q": false,
+   "error": "Process not found: window 'Ghost Gone Bed' (no open window matches; open windows: 'ghost-improve', 'Grok Bot', '\u25d1 Kryos-lang session without shutdown', 'C:\\Program Files\\nodejs\\node.exe' [minimized], 'ccb-test', 'Inbox (2,204) - info@northtek.io - Northtek Mail - Comet' [minimized], 'Windows Security', 'Windows Security' [minimized], 'iCUE' [minimized], 'Click to Do', '391107966 - RustDesk' [minimized], 'Windows Input Experience', ... 4 more)",
+   "sent_to": null
+  }
+ ]
+}
