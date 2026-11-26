@@ -1950,7 +1950,8 @@ async fn handle_tool(
                 .map(|v| v as usize)
                 .filter(|v| *v > 0)
                 .unwrap_or(20_000);
-            let (text, truncated) = match session.read_text(window, max_chars).await {
+            let hint = p["_target_hwnd"].as_i64().map(|h| h as isize);
+            let (text, truncated) = match session.read_text(window, max_chars, hint).await {
                 Ok(r) => r,
                 Err(e) => {
                     let msg = e.to_string();
