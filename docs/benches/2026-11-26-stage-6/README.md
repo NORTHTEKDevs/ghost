@@ -48,3 +48,31 @@ The "before" build is fa7fef6 built in a gitignored worktree
   `let (_, key_only) = parse_key_combo(keys)?;` drops the modifiers, so
   "Ctrl+A" would post "a", while the comment above says combos are refused. Not
   measured yet (safe to measure on a testbed).
+
+## C3 - background double_click verified like a click
+
+**Change.** The polling loop from stage 2's click branch became one helper per
+path: `poll_click_effect` in `session.rs` (async; takes the element by value
+because it is not `Sync`) and in `hidden.rs` (blocking, for the hidden desktop's
+worker thread). `click` and `double_click` both use it: title every poll, UIA
+name/value and whole-window persisting pixels at 80 ms. The user-desktop
+`double_click` used to compare only the control's own rect after a fixed 80 ms;
+the hidden one took a single whole-window diff after 80 ms. The rect-scoped
+pixel closure (`verify_pixels`, `win_origin`) had no other user and is removed.
+No new unit test: the helper only sequences captures and reads; the decision it
+applies is `click_verify`'s, already covered by its 16 tests.
+
+| Criterion | Target | Before (`c3-before-*`) | After run 1 / run 2 |
+|---|---|---|---|
+| Real double-click (counter +2), user: correct / verified | 20/20 / 20/20 | 20/20 / **0/20** | 20/20 / 20/20, 20/20 / 20/20 |
+| Real double-click, hidden: correct / verified | 20/20 / 20/20 | 20/20 / 5/20 | 20/20 / 20/20, 20/20 / 20/20 |
+| Double-click whose only effect is a distant label, user / hidden: verified | 20/20 | 0/20 / 19/20 | 20/20 / 20/20 both runs |
+| Double-click with no effect (label), user / hidden: verified=false | >= 19/20 | 20/20 / 20/20 | 20/20 / 20/20 both runs |
+| Real double-click median, user / hidden | - | 123.1 / 115.2 ms | 43.5 / 41.5 ms, 44.1 / 38.1 ms |
+| Plain click after the refactor, user / hidden: verified | 20/20 | - | 20/20 / 20/20 (`c3-after-click-*`) |
+| `cargo test --workspace` | 0 failed | 584 / 0 / 27 | 584 / 0 / 27, both runs |
+| clippy, vibecode lint | 0 / 0 HIGH | - | 0 / 0 findings |
+
+The "before" distant rows report correct 0/20 because that probe version
+expected +1 for a double-click; the `verified` counts in them are valid. The
+probe now expects +2.

@@ -1,0 +1,921 @@
+{
+ "exe": "C:\\Users\\Krist\\projects\\active\\ghost\\target-improve\\release\\ghost-mcp.exe",
+ "n": 20,
+ "ops": [
+  {
+   "op": "see_text",
+   "n": 20,
+   "median_ms": 15.4,
+   "p95_ms": 19.4,
+   "min_ms": 13.4,
+   "max_ms": 19.4,
+   "correct": 20,
+   "accuracy": 1.0,
+   "errors": 0,
+   "verified_true": 0,
+   "verified_null": 20,
+   "verified_false": 0
+  },
+  {
+   "op": "see_full",
+   "n": 20,
+   "median_ms": 14.6,
+   "p95_ms": 17.6,
+   "min_ms": 12.7,
+   "max_ms": 17.6,
+   "correct": 20,
+   "accuracy": 1.0,
+   "errors": 0,
+   "verified_true": 0,
+   "verified_null": 20,
+   "verified_false": 0
+  },
+  {
+   "op": "find",
+   "n": 20,
+   "median_ms": 4.4,
+   "p95_ms": 5.7,
+   "min_ms": 3.7,
+   "max_ms": 5.7,
+   "correct": 20,
+   "accuracy": 1.0,
+   "errors": 0,
+   "verified_true": 0,
+   "verified_null": 20,
+   "verified_false": 0
+  },
+  {
+   "op": "act_double_click[increment]",
+   "n": 20,
+   "median_ms": 41.5,
+   "p95_ms": 43.6,
+   "min_ms": 37.2,
+   "max_ms": 43.6,
+   "correct": 20,
+   "accuracy": 1.0,
+   "errors": 0,
+   "verified_true": 20,
+   "verified_null": 0,
+   "verified_false": 0
+  },
+  {
+   "op": "act_type",
+   "n": 20,
+   "median_ms": 5.6,
+   "p95_ms": 7.6,
+   "min_ms": 4.2,
+   "max_ms": 7.6,
+   "correct": 20,
+   "accuracy": 1.0,
+   "errors": 0,
+   "verified_true": 20,
+   "verified_null": 0,
+   "verified_false": 0
+  }
+ ],
+ "raw": {
+  "see_text": [
+   {
+    "ms": 13.554999997722916,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 13
+   },
+   {
+    "ms": 13.737400000536582,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 13
+   },
+   {
+    "ms": 13.370500000746688,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 13
+   },
+   {
+    "ms": 16.727400001400383,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 16
+   },
+   {
+    "ms": 14.236400002118899,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 14
+   },
+   {
+    "ms": 15.36859999760054,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 15
+   },
+   {
+    "ms": 14.16369999788003,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 13
+   },
+   {
+    "ms": 14.958700001443503,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 14
+   },
+   {
+    "ms": 15.18249999935506,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 14
+   },
+   {
+    "ms": 17.332399998849723,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 17
+   },
+   {
+    "ms": 16.141399999469286,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 15
+   },
+   {
+    "ms": 18.962399997690227,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 18
+   },
+   {
+    "ms": 15.84770000044955,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 15
+   },
+   {
+    "ms": 16.980699998384807,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 16
+   },
+   {
+    "ms": 15.37550000284682,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 15
+   },
+   {
+    "ms": 18.02239999960875,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 17
+   },
+   {
+    "ms": 17.293599998083664,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 17
+   },
+   {
+    "ms": 15.289299997675698,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 14
+   },
+   {
+    "ms": 14.82640000176616,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 14
+   },
+   {
+    "ms": 19.361899998330045,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 19
+   }
+  ],
+  "see_full": [
+   {
+    "ms": 14.762700000574114,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 14,
+    "bytes": 1072
+   },
+   {
+    "ms": 12.724699998216238,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 12,
+    "bytes": 1072
+   },
+   {
+    "ms": 14.52679999783868,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 14,
+    "bytes": 1072
+   },
+   {
+    "ms": 13.264799999888055,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 13,
+    "bytes": 1072
+   },
+   {
+    "ms": 17.107400002714712,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 16,
+    "bytes": 1072
+   },
+   {
+    "ms": 15.21359999969718,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 14,
+    "bytes": 1072
+   },
+   {
+    "ms": 14.50210000257357,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 14,
+    "bytes": 1072
+   },
+   {
+    "ms": 17.563599998538848,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 17,
+    "bytes": 1072
+   },
+   {
+    "ms": 13.517200000933371,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 13,
+    "bytes": 1072
+   },
+   {
+    "ms": 15.243999998347135,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 15,
+    "bytes": 1072
+   },
+   {
+    "ms": 16.28740000160178,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 16,
+    "bytes": 1072
+   },
+   {
+    "ms": 13.549499999498948,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 13,
+    "bytes": 1072
+   },
+   {
+    "ms": 15.418599999975413,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 15,
+    "bytes": 1072
+   },
+   {
+    "ms": 13.854500000888947,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 13,
+    "bytes": 1072
+   },
+   {
+    "ms": 15.604800002620323,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 15,
+    "bytes": 1072
+   },
+   {
+    "ms": 13.323200000741053,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 13,
+    "bytes": 1072
+   },
+   {
+    "ms": 13.84189999953378,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 13,
+    "bytes": 1072
+   },
+   {
+    "ms": 15.18969999960973,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 15,
+    "bytes": 1072
+   },
+   {
+    "ms": 12.817300001188414,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 12,
+    "bytes": 1072
+   },
+   {
+    "ms": 14.907099997799378,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 14,
+    "bytes": 1072
+   }
+  ],
+  "find": [
+   {
+    "ms": 5.677200002537575,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 5,
+    "source": "uia",
+    "matches": 1
+   },
+   {
+    "ms": 4.874800000834512,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 4,
+    "source": "uia",
+    "matches": 1
+   },
+   {
+    "ms": 4.70109999878332,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 4,
+    "source": "uia",
+    "matches": 1
+   },
+   {
+    "ms": 4.45670000044629,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 4,
+    "source": "uia",
+    "matches": 1
+   },
+   {
+    "ms": 4.870699998718919,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 4,
+    "source": "uia",
+    "matches": 1
+   },
+   {
+    "ms": 4.308299998228904,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 4,
+    "source": "uia",
+    "matches": 1
+   },
+   {
+    "ms": 3.8492999992740806,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 3,
+    "source": "uia",
+    "matches": 1
+   },
+   {
+    "ms": 3.877300001477124,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 3,
+    "source": "uia",
+    "matches": 1
+   },
+   {
+    "ms": 4.738899999210844,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 4,
+    "source": "uia",
+    "matches": 1
+   },
+   {
+    "ms": 4.1412999999010935,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 3,
+    "source": "uia",
+    "matches": 1
+   },
+   {
+    "ms": 3.7188999995123595,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 3,
+    "source": "uia",
+    "matches": 1
+   },
+   {
+    "ms": 5.133999999088701,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 5,
+    "source": "uia",
+    "matches": 1
+   },
+   {
+    "ms": 4.329600000346545,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 4,
+    "source": "uia",
+    "matches": 1
+   },
+   {
+    "ms": 4.482100001041545,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 4,
+    "source": "uia",
+    "matches": 1
+   },
+   {
+    "ms": 4.215400000248337,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 4,
+    "source": "uia",
+    "matches": 1
+   },
+   {
+    "ms": 4.458099996554665,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 4,
+    "source": "uia",
+    "matches": 1
+   },
+   {
+    "ms": 4.147100000409409,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 3,
+    "source": "uia",
+    "matches": 1
+   },
+   {
+    "ms": 4.1388999998162035,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 3,
+    "source": "uia",
+    "matches": 1
+   },
+   {
+    "ms": 4.050300001836149,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 3,
+    "source": "uia",
+    "matches": 1
+   },
+   {
+    "ms": 5.016999999497784,
+    "is_error": false,
+    "correct": true,
+    "server_ms": 4,
+    "source": "uia",
+    "matches": 1
+   }
+  ],
+  "act_double_click[increment]": [
+   {
+    "ms": 37.44619999997667,
+    "is_error": false,
+    "correct": true,
+    "before": 4,
+    "after": 6,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 37
+   },
+   {
+    "ms": 37.51349999947706,
+    "is_error": false,
+    "correct": true,
+    "before": 6,
+    "after": 8,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 37
+   },
+   {
+    "ms": 38.206900000659516,
+    "is_error": false,
+    "correct": true,
+    "before": 8,
+    "after": 10,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 37
+   },
+   {
+    "ms": 37.48280000218074,
+    "is_error": false,
+    "correct": true,
+    "before": 10,
+    "after": 12,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 37
+   },
+   {
+    "ms": 38.282099998468766,
+    "is_error": false,
+    "correct": true,
+    "before": 12,
+    "after": 14,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 37
+   },
+   {
+    "ms": 41.34609999891836,
+    "is_error": false,
+    "correct": true,
+    "before": 14,
+    "after": 16,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 41
+   },
+   {
+    "ms": 42.17070000231615,
+    "is_error": false,
+    "correct": true,
+    "before": 16,
+    "after": 18,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 41
+   },
+   {
+    "ms": 38.03490000063903,
+    "is_error": false,
+    "correct": true,
+    "before": 18,
+    "after": 20,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 37
+   },
+   {
+    "ms": 42.02109999823733,
+    "is_error": false,
+    "correct": true,
+    "before": 20,
+    "after": 22,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 41
+   },
+   {
+    "ms": 43.590600002062274,
+    "is_error": false,
+    "correct": true,
+    "before": 22,
+    "after": 24,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 43
+   },
+   {
+    "ms": 42.73359999933746,
+    "is_error": false,
+    "correct": true,
+    "before": 24,
+    "after": 26,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 42
+   },
+   {
+    "ms": 42.46670000065933,
+    "is_error": false,
+    "correct": true,
+    "before": 26,
+    "after": 28,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 42
+   },
+   {
+    "ms": 43.64720000012312,
+    "is_error": false,
+    "correct": true,
+    "before": 28,
+    "after": 30,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 43
+   },
+   {
+    "ms": 41.72949999701814,
+    "is_error": false,
+    "correct": true,
+    "before": 30,
+    "after": 32,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 41
+   },
+   {
+    "ms": 37.21819999918807,
+    "is_error": false,
+    "correct": true,
+    "before": 32,
+    "after": 34,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 37
+   },
+   {
+    "ms": 39.07949999847915,
+    "is_error": false,
+    "correct": true,
+    "before": 34,
+    "after": 36,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 38
+   },
+   {
+    "ms": 38.647500001388835,
+    "is_error": false,
+    "correct": true,
+    "before": 36,
+    "after": 38,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 38
+   },
+   {
+    "ms": 42.21440000037546,
+    "is_error": false,
+    "correct": true,
+    "before": 38,
+    "after": 40,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 41
+   },
+   {
+    "ms": 42.70330000144895,
+    "is_error": false,
+    "correct": true,
+    "before": 40,
+    "after": 42,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 42
+   },
+   {
+    "ms": 42.21470000265981,
+    "is_error": false,
+    "correct": true,
+    "before": 42,
+    "after": 44,
+    "verified": true,
+    "verified_by": "title",
+    "error": null,
+    "server_ms": 41
+   }
+  ],
+  "act_type": [
+   {
+    "ms": 4.924799999571405,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 4
+   },
+   {
+    "ms": 5.5721999997331295,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 5
+   },
+   {
+    "ms": 4.767899998114444,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 4
+   },
+   {
+    "ms": 5.467099999805214,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 5
+   },
+   {
+    "ms": 6.892899997183122,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 6
+   },
+   {
+    "ms": 5.996500000037486,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 5
+   },
+   {
+    "ms": 4.2481000018597115,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 4
+   },
+   {
+    "ms": 5.553000002691988,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 5
+   },
+   {
+    "ms": 5.428100001154235,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 5
+   },
+   {
+    "ms": 5.541300000913907,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 5
+   },
+   {
+    "ms": 6.088800000725314,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 5
+   },
+   {
+    "ms": 5.699699999240693,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 5
+   },
+   {
+    "ms": 7.636599999386817,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 7
+   },
+   {
+    "ms": 6.691200000204844,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 6
+   },
+   {
+    "ms": 7.411500002490357,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 7
+   },
+   {
+    "ms": 5.323200002749218,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 5
+   },
+   {
+    "ms": 5.763799999840558,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 5
+   },
+   {
+    "ms": 4.753000001073815,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 4
+   },
+   {
+    "ms": 6.846899999800371,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 6
+   },
+   {
+    "ms": 4.494600001635263,
+    "is_error": false,
+    "correct": true,
+    "verified": true,
+    "server_ms": 4
+   }
+  ]
+ },
+ "cold_start": {
+  "n": 10,
+  "median_ms": 19.2,
+  "p95_ms": 22.1,
+  "raw": [
+   20.7,
+   17.8,
+   19.3,
+   18.4,
+   17.9,
+   19.2,
+   19.4,
+   19.0,
+   22.1,
+   20.0
+  ]
+ },
+ "tools_list": {
+  "bytes": 32094,
+  "tools": 54
+ },
+ "surface": "hidden",
+ "launch": {
+  "ms": 114.1,
+  "is_error": false,
+  "resp": {
+   "data": {
+    "desktop": "auto",
+    "note": "started on a hidden desktop (never on your screen) and anchored: ghost_see / ghost_act / ghost_key now target it by default. Drive it by title like any other window; ghost_desktop_close id=auto ends it.",
+    "pid": 37280,
+    "surface": "hidden",
+    "target": {
+     "desktop": "auto",
+     "hwnd": 93783570,
+     "pid": 37280,
+     "source": "anchor",
+     "surface": "hidden",
+     "title": "Ghost Probe Bed"
+    },
+    "window": {
+     "hwnd": 93783570,
+     "pid": 37280,
+     "title": "Ghost Probe Bed"
+    }
+   },
+   "foreground": {
+    "hwnd": 50072408,
+    "title": "ghost-improve"
+   },
+   "ms": 113,
+   "ok": true
+  }
+ }
+}
