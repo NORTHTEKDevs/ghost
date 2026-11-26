@@ -1,0 +1,297 @@
+{
+ "exe": "C:\\Users\\Krist\\projects\\active\\ghost\\target-improve\\release\\ghost-mcp.exe",
+ "n": 20,
+ "ops": [
+  {
+   "op": "act_click[distant]",
+   "n": 20,
+   "median_ms": 149.7,
+   "p95_ms": 155.5,
+   "min_ms": 143.4,
+   "max_ms": 155.5,
+   "correct": 20,
+   "accuracy": 1.0,
+   "errors": 0,
+   "verified_true": 20,
+   "verified_null": 0,
+   "verified_false": 0
+  }
+ ],
+ "raw": {
+  "act_click[distant]": [
+   {
+    "ms": 143.71910000045318,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": true,
+    "verified_by": "pixels",
+    "error": null,
+    "server_ms": 143
+   },
+   {
+    "ms": 155.50039999652654,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": true,
+    "verified_by": "pixels",
+    "error": null,
+    "server_ms": 155
+   },
+   {
+    "ms": 149.3442999999388,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": true,
+    "verified_by": "pixels",
+    "error": null,
+    "server_ms": 149
+   },
+   {
+    "ms": 150.81829999689944,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": true,
+    "verified_by": "pixels",
+    "error": null,
+    "server_ms": 150
+   },
+   {
+    "ms": 147.74819999729516,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": true,
+    "verified_by": "pixels",
+    "error": null,
+    "server_ms": 147
+   },
+   {
+    "ms": 143.38380000117468,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": true,
+    "verified_by": "pixels",
+    "error": null,
+    "server_ms": 143
+   },
+   {
+    "ms": 152.1504999982426,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": true,
+    "verified_by": "pixels",
+    "error": null,
+    "server_ms": 151
+   },
+   {
+    "ms": 152.60980000311974,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": true,
+    "verified_by": "pixels",
+    "error": null,
+    "server_ms": 152
+   },
+   {
+    "ms": 148.1869000053848,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": true,
+    "verified_by": "pixels",
+    "error": null,
+    "server_ms": 147
+   },
+   {
+    "ms": 151.93529999669408,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": true,
+    "verified_by": "pixels",
+    "error": null,
+    "server_ms": 151
+   },
+   {
+    "ms": 155.0965999995242,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": true,
+    "verified_by": "pixels",
+    "error": null,
+    "server_ms": 154
+   },
+   {
+    "ms": 150.57009999873117,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": true,
+    "verified_by": "pixels",
+    "error": null,
+    "server_ms": 150
+   },
+   {
+    "ms": 151.5131999985897,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": true,
+    "verified_by": "pixels",
+    "error": null,
+    "server_ms": 151
+   },
+   {
+    "ms": 147.83339999848977,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": true,
+    "verified_by": "pixels",
+    "error": null,
+    "server_ms": 147
+   },
+   {
+    "ms": 145.42200000141747,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": true,
+    "verified_by": "pixels",
+    "error": null,
+    "server_ms": 145
+   },
+   {
+    "ms": 154.66179999930318,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": true,
+    "verified_by": "pixels",
+    "error": null,
+    "server_ms": 154
+   },
+   {
+    "ms": 147.68259999982547,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": true,
+    "verified_by": "pixels",
+    "error": null,
+    "server_ms": 147
+   },
+   {
+    "ms": 147.98570000129985,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": true,
+    "verified_by": "pixels",
+    "error": null,
+    "server_ms": 147
+   },
+   {
+    "ms": 150.11950000189245,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": true,
+    "verified_by": "pixels",
+    "error": null,
+    "server_ms": 149
+   },
+   {
+    "ms": 147.4000000016531,
+    "is_error": false,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": true,
+    "verified_by": "pixels",
+    "error": null,
+    "server_ms": 147
+   }
+  ]
+ },
+ "cold_start": {
+  "n": 10,
+  "median_ms": 17.8,
+  "p95_ms": 21.6,
+  "raw": [
+   21.6,
+   17.6,
+   17.9,
+   18.2,
+   17.4,
+   17.4,
+   18.4,
+   17.8,
+   17.2,
+   18.0
+  ]
+ },
+ "tools_list": {
+  "bytes": 32094,
+  "tools": 54
+ },
+ "surface": "hidden",
+ "launch": {
+  "ms": 122.5,
+  "is_error": false,
+  "resp": {
+   "data": {
+    "desktop": "auto",
+    "note": "started on a hidden desktop (never on your screen) and anchored: ghost_see / ghost_act / ghost_key now target it by default. Drive it by title like any other window; ghost_desktop_close id=auto ends it.",
+    "pid": 39484,
+    "surface": "hidden",
+    "target": {
+     "desktop": "auto",
+     "hwnd": 397149986,
+     "pid": 39484,
+     "source": "anchor",
+     "surface": "hidden",
+     "title": "Ghost Probe Bed"
+    },
+    "window": {
+     "hwnd": 397149986,
+     "pid": 39484,
+     "title": "Ghost Probe Bed"
+    }
+   },
+   "foreground": {
+    "hwnd": 50072408,
+    "title": "ghost-improve"
+   },
+   "ms": 122,
+   "ok": true
+  }
+ }
+}

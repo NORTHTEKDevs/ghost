@@ -1,0 +1,12 @@
+ghost doctor
+
+  windows build        PASS  build 26300
+  interactive desktop  PASS  console session 1
+  ui automation        PASS  IUIAutomation created
+  dpi awareness        PASS  aware, display scale 100%
+  monitors             PASS  1 monitor(s), virtual desktop 2560x1440
+  screen capture       PASS  captured 1346821 bytes
+  vision (optional)    PASS  credential found in NVIDIA_API_KEY
+
+All checks passed.
+exit=0
