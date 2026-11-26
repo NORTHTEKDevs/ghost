@@ -116,7 +116,7 @@ fn root_window(hwnd: isize) -> isize {
 /// The deepest visible child window of `root` under screen point (x, y), or
 /// `root` when there is none (windowless content).
 #[cfg(windows)]
-fn deepest_child_at(root: isize, x: i32, y: i32) -> isize {
+pub(crate) fn deepest_child_at(root: isize, x: i32, y: i32) -> isize {
     use windows::Win32::Foundation::{HWND, POINT};
     use windows::Win32::Graphics::Gdi::ScreenToClient;
     use windows::Win32::UI::WindowsAndMessaging::{ChildWindowFromPointEx, CWP_SKIPINVISIBLE, CWP_SKIPTRANSPARENT};
@@ -142,7 +142,7 @@ fn deepest_child_at(root: isize, x: i32, y: i32) -> isize {
 /// owner - the testbed popup's "Ping" read verified 1/20 while watching only
 /// the popup itself.
 #[cfg(windows)]
-fn titles_of(root: isize) -> (String, String) {
+pub(crate) fn titles_of(root: isize) -> (String, String) {
     use windows::Win32::Foundation::HWND;
     use windows::Win32::UI::WindowsAndMessaging::{GetWindow, GW_OWNER};
     let owner = unsafe { GetWindow(HWND(root as *mut _), GW_OWNER) }
