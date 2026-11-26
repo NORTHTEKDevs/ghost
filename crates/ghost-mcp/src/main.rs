@@ -1349,7 +1349,7 @@ fn is_window_scoped(name: &str, args: &Value) -> bool {
     match name {
         "ghost_see" => matches!(
             args["mode"].as_str().unwrap_or("fast"),
-            "fast" | "full" | "text"
+            "fast" | "full" | "text" | "delta"
         ),
         "ghost_find" | "ghost_act" | "ghost_key" | "ghost_click_at" | "ghost_snapshot"
         | "ghost_assert" | "ghost_scroll" => true,
@@ -2190,10 +2190,13 @@ async fn handle_tool(
             Ok(serde_json::to_value(result).map_err(|e| e.to_string())?)
         }
         "ghost_describe_screen_delta" => {
+            // Per-window snapshots of the resolved window (see_delta). The old
+            // path diffed a global cache nothing filled and ignored `window`:
+            // it answered "nothing changed" whatever happened.
             let window = p["window"].as_str();
             let since_seq = p["since_seq"].as_u64();
-            let delta = session.describe_screen_delta(window, since_seq).await.map_err(|e| e.to_string())?;
-            Ok(serde_json::to_value(delta).map_err(|e| e.to_string())?)
+            let hint = p["_target_hwnd"].as_i64().map(|h| h as isize);
+            session.see_delta(window, hint, since_seq).await.map_err(|e| e.to_string())
         }
         "ghost_click_background" => {
             let window = p["window"].as_str().ok_or("missing param: window")?;

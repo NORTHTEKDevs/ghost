@@ -1,0 +1,7 @@
+    Checking ghost-testbed v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-testbed)
+    Checking ghost-session v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-session)
+    Checking ghost-mcp v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-mcp)
+    Checking ghost-cli v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-cli)
+    Checking ghost-http v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-http)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.36s
+exit=0
