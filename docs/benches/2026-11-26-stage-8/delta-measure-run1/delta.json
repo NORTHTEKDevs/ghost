@@ -1,0 +1,112 @@
+{
+ "explicit": [
+  {
+   "reads": "empty",
+   "elements": 0,
+   "is_error": false
+  },
+  {
+   "reads": "empty",
+   "elements": 0,
+   "is_error": false
+  },
+  {
+   "reads": "empty",
+   "elements": 0,
+   "is_error": false
+  },
+  {
+   "reads": "empty",
+   "elements": 0,
+   "is_error": false
+  },
+  {
+   "reads": "empty",
+   "elements": 0,
+   "is_error": false
+  },
+  {
+   "reads": "empty",
+   "elements": 0,
+   "is_error": false
+  },
+  {
+   "reads": "empty",
+   "elements": 0,
+   "is_error": false
+  },
+  {
+   "reads": "empty",
+   "elements": 0,
+   "is_error": false
+  },
+  {
+   "reads": "empty",
+   "elements": 0,
+   "is_error": false
+  },
+  {
+   "reads": "empty",
+   "elements": 0,
+   "is_error": false
+  }
+ ],
+ "anchored": [
+  {
+   "reads": "empty",
+   "elements": 0,
+   "is_error": false
+  },
+  {
+   "reads": "empty",
+   "elements": 0,
+   "is_error": false
+  },
+  {
+   "reads": "empty",
+   "elements": 0,
+   "is_error": false
+  },
+  {
+   "reads": "empty",
+   "elements": 0,
+   "is_error": false
+  },
+  {
+   "reads": "empty",
+   "elements": 0,
+   "is_error": false
+  },
+  {
+   "reads": "empty",
+   "elements": 0,
+   "is_error": false
+  },
+  {
+   "reads": "empty",
+   "elements": 0,
+   "is_error": false
+  },
+  {
+   "reads": "empty",
+   "elements": 0,
+   "is_error": false
+  },
+  {
+   "reads": "empty",
+   "elements": 0,
+   "is_error": false
+  },
+  {
+   "reads": "empty",
+   "elements": 0,
+   "is_error": false
+  }
+ ],
+ "shape": [
+  "added",
+  "removed",
+  "seq",
+  "updated"
+ ]
+}
