@@ -2271,6 +2271,16 @@ impl GhostSession {
             screenshot: None,
         })?;
         let name = el.name();
+        // Refuse a disabled control before dispatching anything, for every
+        // action, exactly as the foreground path (act_on_element) and the hidden
+        // desktop path do. This path used to post BM_CLICK to it (or WM_SETTEXT
+        // into a disabled edit) and answer ok:true.
+        if !el.is_enabled() {
+            return Err(GhostError::ElementNotInteractable {
+                element: name,
+                reason: "element is disabled".into(),
+            });
+        }
         let rect = el.bounding_rect();
 
         // A nonzero native window handle means the control is a real Win32 window

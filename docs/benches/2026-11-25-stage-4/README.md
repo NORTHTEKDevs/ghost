@@ -53,3 +53,28 @@ The foreground did not change during any of the 10 runs, so they show the false
 FAIL is gone on an unchanged desktop but do not exercise attribution live; the
 unit tests do. No verdict carried "(interference audit off...)", so both audits
 were on and read in all 10 runs.
+
+## Item 4 - the user-desktop background path refuses a disabled control
+
+**Change.** `crates/ghost-session/src/session.rs`, `act_background`: right after
+the element is resolved, a disabled element is refused with
+`GhostError::ElementNotInteractable { reason: "element is disabled" }`, for every
+action, exactly as `act_on_element` (foreground) and the hidden-desktop path do.
+It used to post `BM_CLICK` to the dead control and answer `ok: true,
+verified: false`; for `type` it would have written into a disabled edit with
+`WM_SETTEXT`.
+
+| Criterion | Target | Before (`item4-before-*`) | After, run 1 / run 2 |
+|---|---|---|---|
+| Disabled `Locked`, user desktop: refused | 20/20 | 0/20 (ok:true, verified=false) | **20/20 / 20/20** |
+| Same error as the hidden path | identical | - | `Element not interactable: Locked - element is disabled`, error_code -32002, on both paths |
+| Increment, user: correct and verified | unchanged (20/20) | 20/20, median 43.4 ms | 20/20, 44.2 / 59.0 ms (run 3: 50.4 ms) |
+| Static label, user: verified=false | unchanged (20/20) | 20/20 | 20/20 / 20/20 |
+| `cargo test --workspace` | 0 failed | 575 / 0 / 27 | 575 / 0 / 27, both runs |
+| clippy, vibecode lint on changed files | 0 / 0 HIGH | - | 0 / 0 findings |
+
+The increment medians differ between runs because the timings are bimodal at
+~43 and ~58-59 ms, one ~15.6 ms Windows timer tick apart, in every run before and
+after the change (the before run has 6/20 in the upper mode); which mode a click
+lands in moves the median. The refusal check runs before dispatch and is one UIA
+property read.
