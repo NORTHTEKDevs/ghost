@@ -128,3 +128,18 @@ Remaining: R2-1 ghost_key waits two back-to-back guard settles (median 190.6 ms;
 hidden-desktop testbed (tooling, not Ghost - deferred).
 Decision: STAGE 10 = R2-1 (+ R2-2, tiny), then declare convergence unless it surfaces something new.
 
+## Stage 10 - ghost_key single guard (52f46b0), kill exit code diagnostic (dfb0689) - VERIFIED
+Grok Bot (2:48 AM AKST): cargo test 623 / 0 / 27 x2; clippy 0; lint 0 on crates changed since f4e031e.
+key_routing_probe n=20: ghost_key median 126.6 ms (was 190.6), target 20/20, decoy 0/20, focus_preserved
+20/20. The 60 ms watch is kept only for background=true under the foreground policy (no outer guard there).
+
+## CONVERGED (2:50 AM AKST)
+Round 2 found no remaining accuracy or safety defect with evidence; its only runtime item (R2-1) is done
+and R2-2 is a diagnostic. R2-3 (port bench/run_bench.py + soak.py to the hidden-desktop testbed) is
+measurement tooling with no runtime payoff - left for Kristian to decide.
+Final independent re-measure (target-improve @ dfb0689): doctor all pass; verify 3/3 ALL CLAIMS HOLD
+(screenshot claim 86 ms, run 4.9 s); act click verified 20/20 user (58.5 ms) / hidden (41.9 ms); find
+18.1 / 5.7 ms; see text 17.6 / 19.1 ms; type 5.4 / 5.2 ms; tab screenshot median 31.6 ms, first 60 ms,
+page correct 20/20.
+Not deployed: target/release and ~/.local/bin ghost-mcp.exe are still the old build; nothing pushed.
+
