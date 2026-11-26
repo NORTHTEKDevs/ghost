@@ -104,3 +104,17 @@ Nit for stage 8: cover refusal is raised as GhostError::Vision ("Vision error: .
 Open: ghost_see mode=delta cache keyed by title (unmeasured); C6, C7, C5, C8.
 Next: STAGE 8 (sent 2:01 AM AKST).
 
+## Stage 8 - error kinds (e1c92f7), C6 audit during-input incidents (c95c4e2), C7 hidden click_at (1991c97), measurements (88fd892) - VERIFIED
+Grok Bot (2:20 AM AKST, Claude idle): cargo test 610 / 0 / 27 on 3 consecutive runs (no flake reproduced);
+clippy 0; lint 0 on crates changed since 757222c; ghost verify 2/2 ALL CLAIMS HOLD.
+- Cover refusal now "Element not interactable" 20/20; uncovered clicks still land 20/20.
+- C7 hidden_click_at_probe n=20: increment correct+verified 20/20, 22.6 ms (Claude's before: 0/20 - the
+  click never reached the child control); distant note 20/20 verified (pixels); no-effect label
+  verified=false 20/20; double_click 20/20.
+- Measured, not fixed (by Claude): C5 0/200 false positives on each surface (gap closed); C8 bimodal
+  43/59 ms, max ~9 ms average saving - not worth it.
+- NEW DEFECT: ghost_see mode=delta never reports a change (snapshot_delta ignores its window and diffs a
+  global mirror nothing fills). My delta_probe: explicit and anchored 10/10 empty despite real changes.
+Decision (Grok Bot): fixing delta to honour its documented contract is in scope, not a contract change ->
+STAGE 9. Then convergence round 2.
+

@@ -22,6 +22,9 @@
 //!   only appends ` [popup=N]` to the main window's title (an owned window a
 //!   coordinate click must still be allowed to reach).
 //!
+//! - a BUTTON "Count 0" whose own caption counts its clicks ("Count 1", ...):
+//!   a change the interactive UI tree can see (for `ghost_see mode=delta`).
+//!
 //! `ghost-testbed [--title <text>] [--label <text>] [--pos <x>,<y>] [--topmost]`.
 //! `--label` sets the Status label's starting text, so two windows can be told
 //! apart through their UI tree. `--pos` places the window and `--topmost`
@@ -49,11 +52,13 @@ mod bed {
     const ID_NOTE: i32 = 106;
     const ID_STATUS: i32 = 107;
     const ID_POPUP: i32 = 108;
+    const ID_COUNT: i32 = 109;
     const ID_PING: i32 = 201;
 
     static CLICKS: AtomicU32 = AtomicU32::new(0);
     static NOTES: AtomicU32 = AtomicU32::new(0);
     static PINGS: AtomicU32 = AtomicU32::new(0);
+    static COUNTS: AtomicU32 = AtomicU32::new(0);
     static BASE_TITLE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
     fn wide(s: &str) -> Vec<u16> {
@@ -90,6 +95,13 @@ mod bed {
                     }
                     ID_POPUP => {
                         open_popup(hwnd);
+                    }
+                    ID_COUNT => {
+                        let n = COUNTS.fetch_add(1, Ordering::SeqCst) + 1;
+                        let text = wide(&format!("Count {n}"));
+                        if let Ok(b) = GetDlgItem(hwnd, ID_COUNT) {
+                            let _ = SetWindowTextW(b, PCWSTR(text.as_ptr()));
+                        }
                     }
                     ID_QUIT => {
                         // PostMessage, not DestroyWindow: BM_CLICK arrives as a
@@ -317,6 +329,7 @@ mod bed {
             let _note = child(w!("BUTTON"), w!("Note"), BS_PUSHBUTTON as u32, 370, 70, 110, 34, ID_NOTE);
             let _status = child(w!("STATIC"), PCWSTR(label_w.as_ptr()), 0, 20, 180, 200, 22, ID_STATUS);
             let _popup = child(w!("BUTTON"), w!("Popup"), BS_PUSHBUTTON as u32, 370, 114, 110, 34, ID_POPUP);
+            let _count = child(w!("BUTTON"), w!("Count 0"), BS_PUSHBUTTON as u32, 250, 170, 110, 30, ID_COUNT);
             let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
             let mut msg = MSG::default();
             while GetMessageW(&mut msg, None, 0, 0).into() {

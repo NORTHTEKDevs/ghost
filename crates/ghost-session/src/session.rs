@@ -1824,6 +1824,37 @@ impl GhostSession {
         self.tree.describe_screen(window).map_err(GhostError::Core)
     }
 
+    /// `ghost_see mode=delta`: walk the window the target resolver chose (as
+    /// `describe_window` does) and answer what changed since this window was
+    /// last read - see `crate::see_delta`. Snapshots are kept per window,
+    /// keyed by the resolved handle, or by the title when there is none.
+    pub async fn see_delta(
+        &self,
+        window: Option<&str>,
+        hwnd_hint: Option<isize>,
+        since_seq: Option<u64>,
+    ) -> Result<serde_json::Value> {
+        let elements = self.describe_window(window, hwnd_hint).await?;
+        // The fields and the offscreen filter of a full-mode reply, plus
+        // `enabled`, so a control greying out shows as `updated`.
+        let now: Vec<serde_json::Value> = elements
+            .iter()
+            .filter(|e| e.right > e.left && e.bottom > e.top && e.left > -30000 && e.top > -30000)
+            .map(|e| serde_json::json!({
+                "name": e.name, "role": e.role,
+                "left": e.left, "top": e.top, "right": e.right, "bottom": e.bottom,
+                "enabled": e.enabled,
+            }))
+            .collect();
+        let key = match (hwnd_hint, window) {
+            (Some(h), _) => format!("hwnd:{h}"),
+            (None, Some(w)) => format!("title:{w}"),
+            (None, None) => "foreground".to_string(),
+        };
+        let mut store = crate::see_delta::store().lock().unwrap_or_else(|p| p.into_inner());
+        Ok(store.observe(&key, since_seq, now))
+    }
+
     /// `describe_screen` for the window the target resolver chose: with its
     /// handle (`hwnd_hint`) that window is walked, not the first window whose
     /// title contains `window` - which returned a decoy's elements while the
