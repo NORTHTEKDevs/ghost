@@ -1,0 +1,4 @@
+<stdin>:7: SyntaxWarning: "\g" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\g"? A raw string is also an option.
+<stdin>:8: SyntaxWarning: "\g" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\g"? A raw string is also an option.
+[{"seq_before": 0, "seq_after": 0, "added": 0, "removed": 0, "updated": 0}, {"seq_before": 0, "seq_after": 0, "added": 0, "removed": 0, "updated": 0}, {"seq_before": 0, "seq_after": 0, "added": 0, "removed": 0, "updated": 0}]
+deltas reporting any change after a real change: 0 / 10

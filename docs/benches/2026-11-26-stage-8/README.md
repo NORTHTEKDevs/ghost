@@ -98,3 +98,36 @@ and an unused import are removed.
 
 No new unit test: the decision is `click_verify::decide` and the hit test is C4's
 `deepest_child_at`; the probe (before 0/20) is the test.
+
+## 3b. ghost_see mode=delta - measured broken, NOT fixed here (needs a decision)
+
+**Measured.**
+- `delta_probe.py` (target 120,120 and a same-title decoy 700,400, both launched
+  by the probe, no input sent): every delta reply had empty `added` /
+  `removed` / `updated`, with `window=` and anchored alike, 20/20 per case over
+  two runs (`delta-measure-run*`). The anchored case records only booleans and
+  counts, never element names or text, because an unanchored delta could read
+  the human's foreground window.
+- `delta-after-change.txt`: on the target alone, take a delta, type into its
+  edit and click Increment, then take a delta since the first seq: **0/10
+  reported any change**; `seq` stayed 0.
+
+**Cause (code).** `UiaCache::snapshot_delta` ignores its `window` argument
+(`_window`, `crates/ghost-cache/src/uia_mirror.rs:144`) and diffs one global
+mirror, and nothing in production fills that mirror: `apply_snapshot` has no
+caller outside tests. `is_window_scoped` (main.rs) also leaves `mode=delta` out
+of target resolution. So `ghost_see mode=delta`, advertised as "changed only",
+always answers "nothing changed" - for any window.
+
+**Why not fixed.** The two honest fixes change the tool's contract: implement a
+real per-window delta (describe the resolved window on each call, keep
+per-window snapshots, diff against `since_seq`), or withdraw the mode (a clear
+error, and drop it from the schema). That is the owner's call.
+
+## 4. C5 and C8 - measured, not fixed
+
+| Measurement | Result | Decision |
+|---|---|---|
+| C5: no-effect clicks (static label) reading verified=true, hidden desktop, n=200 (`c5-hidden-label-n200`) | **0 / 200** | no fix: with the earlier 1/140, ~1 in 340 since the 20 ms confirming capture; no measurable gap left |
+| C5: the same on the user desktop, n=200 (`c5-user-label-n200`) | **0 / 200** | no fix |
+| C8: user-desktop Increment click latency, n=200 (`c8-user-increment-n200`) | bimodal: 89 at median 43.1 ms, 111 at median 59.0 ms; overall median 57.9, mean 52.0 | no fix: the most a high-resolution timer could gain is moving every click to the fast mode, about 9 ms mean per click - small next to an agent step measured in seconds. The waitable-timer variant was NOT built or run; this is the upper bound from the measured distribution, not a timer measurement |
