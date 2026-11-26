@@ -215,10 +215,33 @@ pub fn release_all_modifiers() {
 mod tests {
     use super::*;
 
-    // These mutate process-global and session-global state (the named event), so
-    // they run as one test to avoid interference from parallel test threads.
+    /// Set in the child copy of this test binary that runs the round trip.
+    const CHILD_ENV: &str = "GHOST_STOP_ROUND_TRIP_CHILD";
+
+    /// Raising the stop in this process would refuse every gated primitive
+    /// that another unit test is calling on a parallel thread (13 of them
+    /// failed with `Stopped` in 2 of 7 runs). So the round trip runs in a child
+    /// copy of this binary, which has its own flag and its own per-process
+    /// event, and this process never raises either.
     #[test]
     fn stop_flag_round_trips_and_broadcasts() {
+        if std::env::var_os(CHILD_ENV).is_some() {
+            return round_trip();
+        }
+        let out = std::process::Command::new(std::env::current_exe().expect("test binary"))
+            .args(["input::hotkey::tests::stop_flag_round_trips_and_broadcasts", "--exact", "--nocapture", "--test-threads=1"])
+            .env(CHILD_ENV, "1")
+            .output()
+            .expect("run the round trip in a child process");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success() && stdout.contains("1 passed"),
+            "round trip failed in the child:\n{stdout}\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    fn round_trip() {
         // The shared event every running Ghost watches must be left alone: the
         // tests use their own per-process event.
         assert_ne!(stop_event_name(), STOP_EVENT_NAME);
