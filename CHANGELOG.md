@@ -1,5 +1,63 @@
 # Changelog
 
+## [0.24.1] - emergency stop gates every action path
+
+### Security
+
+Thanks to a privately reported security disclosure. After `ghost_stop` (or
+Ctrl+Alt+G), a `ghost_act` click on an app running on Ghost's hidden desktop
+still ran and changed the app. An audit
+(`docs/plans/2026-11-26-emergency-stop-audit.md`) found more of the same:
+- the hidden-desktop key, click_at, scroll and launch paths;
+- every `ghost_desktop_*` action;
+- all browser and tab input, including `ghost_tab_eval`;
+- launching apps;
+- window focus and window state;
+- setting the clipboard, and `ghost_http_post`.
+
+A Ghost process started while a stop was in force (a CLI command,
+`ghost-http`, a fresh MCP server) could also act for up to a second before
+it learned of the stop. Before the fix, a live test drove seven of these
+paths while stopped and all seven acted. Now all seven are refused, change
+nothing, and work again after `ghost_reset`
+(`docs/benches/2026-11-26-emergency-stop/`).
+
+- **One gate in front of everything.** Every MCP tool has an explicit class:
+  read, action, or stop control. While stopped, actions are refused with
+  "emergency stop active ... until ghost_reset" (error code -32004) before
+  any route runs: the browser, a hidden desktop, or the user's desktop. A new
+  tool counts as an action until someone classifies it, and a test fails if
+  any dispatchable tool is unclassified. `ghost_run` steps and each op of
+  `ghost_batch_actions` are checked one by one.
+- **Checked again at the moment of dispatch.** The hidden desktop's worker
+  re-checks just before it runs an action job, so a job already queued when
+  the stop arrives does not run. Each low-level primitive checks too:
+  - posted clicks, keys and text;
+  - UIA Invoke and SetValue;
+  - focus and window-state changes;
+  - process launch, clipboard set and scroll;
+  - browser page input.
+- **The stop reaches every process at once.** `is_stopped()` reads the shared
+  stop event directly instead of waiting for a watcher thread to copy it.
+- **CLI and HTTP.** Action subcommands refuse; action routes answer `409`.
+- **Still available while stopped:**
+  - `ghost_stop` and `ghost_reset`, and every read-only tool, so an agent can
+    see where it was;
+  - releasing held modifier keys;
+  - handing the foreground back to the human;
+  - ending processes and shells;
+  - lowering the focus policy to `background`.
+
+### Fixed
+
+- **Linux CI.** `cargo clippy --workspace -D warnings` failed on Linux: four
+  Windows-only click_at helpers were dead code there, and a pixel loop used
+  `chunks_exact` where newer clippy wants `as_chunks`. Behaviour is unchanged.
+- **`cargo test` no longer stops every running Ghost.** The emergency-stop
+  unit tests raised the real shared stop event, briefly stopping every Ghost
+  process on the machine, other sessions' servers included. They now use a
+  per-process test event. The production event is unchanged.
+
 ## [0.24.0] - the right window, and proof it landed
 
 Reliability and safety work, measured before and after on a shared desktop
