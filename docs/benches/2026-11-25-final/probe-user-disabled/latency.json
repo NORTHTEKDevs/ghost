@@ -1,0 +1,266 @@
+{
+ "exe": "C:\\Users\\Krist\\projects\\active\\ghost\\target-improve\\release\\ghost-mcp.exe",
+ "n": 20,
+ "ops": [
+  {
+   "op": "act_click[disabled]",
+   "n": 20,
+   "median_ms": 19.4,
+   "p95_ms": 31.8,
+   "min_ms": 12.6,
+   "max_ms": 31.8,
+   "correct": 20,
+   "accuracy": 1.0,
+   "errors": 20,
+   "verified_true": 0,
+   "verified_null": 20,
+   "verified_false": 0
+  }
+ ],
+ "raw": {
+  "act_click[disabled]": [
+   {
+    "ms": 16.98430000033113,
+    "is_error": true,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": null,
+    "verified_by": null,
+    "error": "{\"data\": null, \"error\": \"Element not interactable: Locked - element is disabled\", \"error_code\": -32002, \"foreground\": {\"hwnd\": 50072408, \"title\": \"ghost-improve\"}, \"ms\": 16, \"ok\": false, \"suggested_action\": \"element exists but isn't actionable (disabled or covered) - call ghost_see and check is_enab",
+    "server_ms": 16
+   },
+   {
+    "ms": 22.56889999989653,
+    "is_error": true,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": null,
+    "verified_by": null,
+    "error": "{\"data\": null, \"error\": \"Element not interactable: Locked - element is disabled\", \"error_code\": -32002, \"foreground\": {\"hwnd\": 50072408, \"title\": \"ghost-improve\"}, \"ms\": 22, \"ok\": false, \"suggested_action\": \"element exists but isn't actionable (disabled or covered) - call ghost_see and check is_enab",
+    "server_ms": 22
+   },
+   {
+    "ms": 18.931700000393903,
+    "is_error": true,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": null,
+    "verified_by": null,
+    "error": "{\"data\": null, \"error\": \"Element not interactable: Locked - element is disabled\", \"error_code\": -32002, \"foreground\": {\"hwnd\": 50072408, \"title\": \"ghost-improve\"}, \"ms\": 18, \"ok\": false, \"suggested_action\": \"element exists but isn't actionable (disabled or covered) - call ghost_see and check is_enab",
+    "server_ms": 18
+   },
+   {
+    "ms": 31.771199999639066,
+    "is_error": true,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": null,
+    "verified_by": null,
+    "error": "{\"data\": null, \"error\": \"Element not interactable: Locked - element is disabled\", \"error_code\": -32002, \"foreground\": {\"hwnd\": 50072408, \"title\": \"ghost-improve\"}, \"ms\": 31, \"ok\": false, \"suggested_action\": \"element exists but isn't actionable (disabled or covered) - call ghost_see and check is_enab",
+    "server_ms": 31
+   },
+   {
+    "ms": 20.939599999110214,
+    "is_error": true,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": null,
+    "verified_by": null,
+    "error": "{\"data\": null, \"error\": \"Element not interactable: Locked - element is disabled\", \"error_code\": -32002, \"foreground\": {\"hwnd\": 50072408, \"title\": \"ghost-improve\"}, \"ms\": 20, \"ok\": false, \"suggested_action\": \"element exists but isn't actionable (disabled or covered) - call ghost_see and check is_enab",
+    "server_ms": 20
+   },
+   {
+    "ms": 19.180700001015794,
+    "is_error": true,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": null,
+    "verified_by": null,
+    "error": "{\"data\": null, \"error\": \"Element not interactable: Locked - element is disabled\", \"error_code\": -32002, \"foreground\": {\"hwnd\": 50072408, \"title\": \"ghost-improve\"}, \"ms\": 18, \"ok\": false, \"suggested_action\": \"element exists but isn't actionable (disabled or covered) - call ghost_see and check is_enab",
+    "server_ms": 18
+   },
+   {
+    "ms": 19.80100000218954,
+    "is_error": true,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": null,
+    "verified_by": null,
+    "error": "{\"data\": null, \"error\": \"Element not interactable: Locked - element is disabled\", \"error_code\": -32002, \"foreground\": {\"hwnd\": 50072408, \"title\": \"ghost-improve\"}, \"ms\": 19, \"ok\": false, \"suggested_action\": \"element exists but isn't actionable (disabled or covered) - call ghost_see and check is_enab",
+    "server_ms": 19
+   },
+   {
+    "ms": 19.69190000090748,
+    "is_error": true,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": null,
+    "verified_by": null,
+    "error": "{\"data\": null, \"error\": \"Element not interactable: Locked - element is disabled\", \"error_code\": -32002, \"foreground\": {\"hwnd\": 50072408, \"title\": \"ghost-improve\"}, \"ms\": 19, \"ok\": false, \"suggested_action\": \"element exists but isn't actionable (disabled or covered) - call ghost_see and check is_enab",
+    "server_ms": 19
+   },
+   {
+    "ms": 29.83920000042417,
+    "is_error": true,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": null,
+    "verified_by": null,
+    "error": "{\"data\": null, \"error\": \"Element not interactable: Locked - element is disabled\", \"error_code\": -32002, \"foreground\": {\"hwnd\": 50072408, \"title\": \"ghost-improve\"}, \"ms\": 29, \"ok\": false, \"suggested_action\": \"element exists but isn't actionable (disabled or covered) - call ghost_see and check is_enab",
+    "server_ms": 29
+   },
+   {
+    "ms": 15.901400001894217,
+    "is_error": true,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": null,
+    "verified_by": null,
+    "error": "{\"data\": null, \"error\": \"Element not interactable: Locked - element is disabled\", \"error_code\": -32002, \"foreground\": {\"hwnd\": 50072408, \"title\": \"ghost-improve\"}, \"ms\": 15, \"ok\": false, \"suggested_action\": \"element exists but isn't actionable (disabled or covered) - call ghost_see and check is_enab",
+    "server_ms": 15
+   },
+   {
+    "ms": 29.98680000018794,
+    "is_error": true,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": null,
+    "verified_by": null,
+    "error": "{\"data\": null, \"error\": \"Element not interactable: Locked - element is disabled\", \"error_code\": -32002, \"foreground\": {\"hwnd\": 50072408, \"title\": \"ghost-improve\"}, \"ms\": 29, \"ok\": false, \"suggested_action\": \"element exists but isn't actionable (disabled or covered) - call ghost_see and check is_enab",
+    "server_ms": 29
+   },
+   {
+    "ms": 22.05840000169701,
+    "is_error": true,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": null,
+    "verified_by": null,
+    "error": "{\"data\": null, \"error\": \"Element not interactable: Locked - element is disabled\", \"error_code\": -32002, \"foreground\": {\"hwnd\": 50072408, \"title\": \"ghost-improve\"}, \"ms\": 21, \"ok\": false, \"suggested_action\": \"element exists but isn't actionable (disabled or covered) - call ghost_see and check is_enab",
+    "server_ms": 21
+   },
+   {
+    "ms": 19.82060000227648,
+    "is_error": true,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": null,
+    "verified_by": null,
+    "error": "{\"data\": null, \"error\": \"Element not interactable: Locked - element is disabled\", \"error_code\": -32002, \"foreground\": {\"hwnd\": 50072408, \"title\": \"ghost-improve\"}, \"ms\": 19, \"ok\": false, \"suggested_action\": \"element exists but isn't actionable (disabled or covered) - call ghost_see and check is_enab",
+    "server_ms": 19
+   },
+   {
+    "ms": 18.664700000954326,
+    "is_error": true,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": null,
+    "verified_by": null,
+    "error": "{\"data\": null, \"error\": \"Element not interactable: Locked - element is disabled\", \"error_code\": -32002, \"foreground\": {\"hwnd\": 50072408, \"title\": \"ghost-improve\"}, \"ms\": 18, \"ok\": false, \"suggested_action\": \"element exists but isn't actionable (disabled or covered) - call ghost_see and check is_enab",
+    "server_ms": 18
+   },
+   {
+    "ms": 20.95740000004298,
+    "is_error": true,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": null,
+    "verified_by": null,
+    "error": "{\"data\": null, \"error\": \"Element not interactable: Locked - element is disabled\", \"error_code\": -32002, \"foreground\": {\"hwnd\": 50072408, \"title\": \"ghost-improve\"}, \"ms\": 20, \"ok\": false, \"suggested_action\": \"element exists but isn't actionable (disabled or covered) - call ghost_see and check is_enab",
+    "server_ms": 20
+   },
+   {
+    "ms": 17.38380000097095,
+    "is_error": true,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": null,
+    "verified_by": null,
+    "error": "{\"data\": null, \"error\": \"Element not interactable: Locked - element is disabled\", \"error_code\": -32002, \"foreground\": {\"hwnd\": 50072408, \"title\": \"ghost-improve\"}, \"ms\": 17, \"ok\": false, \"suggested_action\": \"element exists but isn't actionable (disabled or covered) - call ghost_see and check is_enab",
+    "server_ms": 17
+   },
+   {
+    "ms": 15.133199998672353,
+    "is_error": true,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": null,
+    "verified_by": null,
+    "error": "{\"data\": null, \"error\": \"Element not interactable: Locked - element is disabled\", \"error_code\": -32002, \"foreground\": {\"hwnd\": 50072408, \"title\": \"ghost-improve\"}, \"ms\": 14, \"ok\": false, \"suggested_action\": \"element exists but isn't actionable (disabled or covered) - call ghost_see and check is_enab",
+    "server_ms": 14
+   },
+   {
+    "ms": 16.51789999959874,
+    "is_error": true,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": null,
+    "verified_by": null,
+    "error": "{\"data\": null, \"error\": \"Element not interactable: Locked - element is disabled\", \"error_code\": -32002, \"foreground\": {\"hwnd\": 50072408, \"title\": \"ghost-improve\"}, \"ms\": 16, \"ok\": false, \"suggested_action\": \"element exists but isn't actionable (disabled or covered) - call ghost_see and check is_enab",
+    "server_ms": 16
+   },
+   {
+    "ms": 12.586900000314927,
+    "is_error": true,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": null,
+    "verified_by": null,
+    "error": "{\"data\": null, \"error\": \"Element not interactable: Locked - element is disabled\", \"error_code\": -32002, \"foreground\": {\"hwnd\": 50072408, \"title\": \"ghost-improve\"}, \"ms\": 12, \"ok\": false, \"suggested_action\": \"element exists but isn't actionable (disabled or covered) - call ghost_see and check is_enab",
+    "server_ms": 12
+   },
+   {
+    "ms": 13.784400001895847,
+    "is_error": true,
+    "correct": true,
+    "before": 0,
+    "after": 0,
+    "verified": null,
+    "verified_by": null,
+    "error": "{\"data\": null, \"error\": \"Element not interactable: Locked - element is disabled\", \"error_code\": -32002, \"foreground\": {\"hwnd\": 50072408, \"title\": \"ghost-improve\"}, \"ms\": 13, \"ok\": false, \"suggested_action\": \"element exists but isn't actionable (disabled or covered) - call ghost_see and check is_enab",
+    "server_ms": 13
+   }
+  ]
+ },
+ "cold_start": {
+  "n": 10,
+  "median_ms": 19.0,
+  "p95_ms": 25.6,
+  "raw": [
+   25.6,
+   19.8,
+   19.2,
+   18.5,
+   18.9,
+   17.9,
+   19.9,
+   18.9,
+   21.3,
+   18.4
+  ]
+ },
+ "tools_list": {
+  "bytes": 32094,
+  "tools": 54
+ },
+ "surface": "user"
+}
