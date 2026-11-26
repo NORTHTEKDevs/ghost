@@ -1,0 +1,213 @@
+{
+ "n": 20,
+ "landed_once": 20,
+ "double": 0,
+ "missed": 0,
+ "fallback": 0,
+ "verified": 20,
+ "foreground_changed": 0,
+ "median_ms": 23.7,
+ "p95_ms": 39.2,
+ "raw": [
+  {
+   "delta": 1,
+   "verified": true,
+   "verified_by": "title",
+   "fallback": false,
+   "foreground_changed": false,
+   "focus_preserved": true,
+   "is_error": false,
+   "ms": 24.0
+  },
+  {
+   "delta": 1,
+   "verified": true,
+   "verified_by": "title",
+   "fallback": false,
+   "foreground_changed": false,
+   "focus_preserved": true,
+   "is_error": false,
+   "ms": 23.2
+  },
+  {
+   "delta": 1,
+   "verified": true,
+   "verified_by": "title",
+   "fallback": false,
+   "foreground_changed": false,
+   "focus_preserved": true,
+   "is_error": false,
+   "ms": 25.1
+  },
+  {
+   "delta": 1,
+   "verified": true,
+   "verified_by": "title",
+   "fallback": false,
+   "foreground_changed": false,
+   "focus_preserved": true,
+   "is_error": false,
+   "ms": 23.1
+  },
+  {
+   "delta": 1,
+   "verified": true,
+   "verified_by": "title",
+   "fallback": false,
+   "foreground_changed": false,
+   "focus_preserved": true,
+   "is_error": false,
+   "ms": 22.9
+  },
+  {
+   "delta": 1,
+   "verified": true,
+   "verified_by": "title",
+   "fallback": false,
+   "foreground_changed": false,
+   "focus_preserved": true,
+   "is_error": false,
+   "ms": 25.2
+  },
+  {
+   "delta": 1,
+   "verified": true,
+   "verified_by": "title",
+   "fallback": false,
+   "foreground_changed": false,
+   "focus_preserved": true,
+   "is_error": false,
+   "ms": 23.4
+  },
+  {
+   "delta": 1,
+   "verified": true,
+   "verified_by": "title",
+   "fallback": false,
+   "foreground_changed": false,
+   "focus_preserved": true,
+   "is_error": false,
+   "ms": 39.2
+  },
+  {
+   "delta": 1,
+   "verified": true,
+   "verified_by": "title",
+   "fallback": false,
+   "foreground_changed": false,
+   "focus_preserved": true,
+   "is_error": false,
+   "ms": 23.2
+  },
+  {
+   "delta": 1,
+   "verified": true,
+   "verified_by": "title",
+   "fallback": false,
+   "foreground_changed": false,
+   "focus_preserved": true,
+   "is_error": false,
+   "ms": 24.3
+  },
+  {
+   "delta": 1,
+   "verified": true,
+   "verified_by": "title",
+   "fallback": false,
+   "foreground_changed": false,
+   "focus_preserved": true,
+   "is_error": false,
+   "ms": 23.6
+  },
+  {
+   "delta": 1,
+   "verified": true,
+   "verified_by": "title",
+   "fallback": false,
+   "foreground_changed": false,
+   "focus_preserved": true,
+   "is_error": false,
+   "ms": 23.8
+  },
+  {
+   "delta": 1,
+   "verified": true,
+   "verified_by": "title",
+   "fallback": false,
+   "foreground_changed": false,
+   "focus_preserved": true,
+   "is_error": false,
+   "ms": 37.0
+  },
+  {
+   "delta": 1,
+   "verified": true,
+   "verified_by": "title",
+   "fallback": false,
+   "foreground_changed": false,
+   "focus_preserved": true,
+   "is_error": false,
+   "ms": 22.2
+  },
+  {
+   "delta": 1,
+   "verified": true,
+   "verified_by": "title",
+   "fallback": false,
+   "foreground_changed": false,
+   "focus_preserved": true,
+   "is_error": false,
+   "ms": 22.5
+  },
+  {
+   "delta": 1,
+   "verified": true,
+   "verified_by": "title",
+   "fallback": false,
+   "foreground_changed": false,
+   "focus_preserved": true,
+   "is_error": false,
+   "ms": 23.8
+  },
+  {
+   "delta": 1,
+   "verified": true,
+   "verified_by": "title",
+   "fallback": false,
+   "foreground_changed": false,
+   "focus_preserved": true,
+   "is_error": false,
+   "ms": 22.8
+  },
+  {
+   "delta": 1,
+   "verified": true,
+   "verified_by": "title",
+   "fallback": false,
+   "foreground_changed": false,
+   "focus_preserved": true,
+   "is_error": false,
+   "ms": 22.7
+  },
+  {
+   "delta": 1,
+   "verified": true,
+   "verified_by": "title",
+   "fallback": false,
+   "foreground_changed": false,
+   "focus_preserved": true,
+   "is_error": false,
+   "ms": 38.9
+  },
+  {
+   "delta": 1,
+   "verified": true,
+   "verified_by": "title",
+   "fallback": false,
+   "foreground_changed": false,
+   "focus_preserved": true,
+   "is_error": false,
+   "ms": 24.9
+  }
+ ]
+}
