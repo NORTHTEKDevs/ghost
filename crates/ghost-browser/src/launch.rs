@@ -196,6 +196,15 @@ pub fn base_args(opts: &LaunchOptions) -> Vec<String> {
         // The "new" headless is the real browser rendering path, not the old
         // stripped-down shell; pages behave the same as windowed.
         args.push("--headless=new".to_string());
+        // Headless has no display, and Chrome's GPU compositor then hands out a
+        // new frame about once a second, so every Page.captureScreenshot waited
+        // ~1 s for one (Chrome 1004 ms, Edge 614 ms median). Software
+        // compositing produces the frame on demand: 31 ms / 40 ms, the page
+        // pixels identical, ~3.7% of a core idle. GPU raster and WebGL are
+        // untouched; plain --disable-gpu would take WebGL away.
+        // Measured in docs/benches/2026-11-25-stage-3 (vsync, frame-rate,
+        // occlusion and compositor-stage flags made no difference).
+        args.push("--disable-gpu-compositing".to_string());
     } else if opts.desktop.is_none() {
         // Start far off the visible desktop so the window never flashes in front of
         // the user, even for the moment before ghost repositions it. On a hidden
@@ -614,6 +623,20 @@ mod tests {
         let args = base_args(&opts);
         assert!(args.iter().any(|a| a == "--headless=new"));
         assert!(!args.iter().any(|a| a.starts_with("--window-position")));
+    }
+
+    #[test]
+    fn headless_mode_composites_in_software_and_only_headless_does() {
+        // Without it a headless capture waits ~1 s for Chrome's next GPU frame
+        // (docs/benches/2026-11-25-stage-3). Windowed browsers draw for a real
+        // or hidden desktop and keep their GPU compositor.
+        let headless = base_args(&LaunchOptions { mode: LaunchMode::Headless, ..Default::default() });
+        assert!(headless.iter().any(|a| a == "--disable-gpu-compositing"));
+        assert!(!headless.iter().any(|a| a == "--disable-gpu"), "WebGL must keep its GPU");
+        for desktop in [None, Some("ghost-1-auto".to_string())] {
+            let windowed = base_args(&LaunchOptions { mode: LaunchMode::Windowed, desktop, ..Default::default() });
+            assert!(!windowed.iter().any(|a| a == "--disable-gpu-compositing"));
+        }
     }
 
     #[test]

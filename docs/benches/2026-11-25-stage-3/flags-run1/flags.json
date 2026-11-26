@@ -1,0 +1,450 @@
+[
+ {
+  "n": 20,
+  "first_ms": 1525.4,
+  "median_ms": 1003.9,
+  "p95_ms": 1525.4,
+  "valid": 20,
+  "centre_ok": 20,
+  "idle_cpu_pct_of_one_core": 2.8,
+  "raw": [
+   {
+    "ms": 1525.4,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 89.7,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 301.8,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 697.3,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1007.0,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1001.3,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1010.7,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1002.2,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 998.7,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1012.0,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1000.1,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1005.6,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1004.2,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1004.2,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1012.8,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1003.5,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1000.5,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1006.3,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 999.9,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1007.8,
+    "ok": true,
+    "centre_ok": true
+   }
+  ],
+  "variant": "A: ghost headless as shipped"
+ },
+ {
+  "n": 20,
+  "first_ms": 1535.8,
+  "median_ms": 1009.2,
+  "p95_ms": 1535.8,
+  "valid": 20,
+  "centre_ok": 20,
+  "idle_cpu_pct_of_one_core": 5.3,
+  "raw": [
+   {
+    "ms": 1535.8,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 106.5,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 365.1,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 643.2,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1000.2,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1014.7,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1000.6,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1009.0,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1010.6,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1010.5,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1005.6,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1009.2,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1009.8,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1007.0,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1009.1,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1013.3,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1012.3,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1010.3,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1010.9,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1008.8,
+    "ok": true,
+    "centre_ok": true
+   }
+  ],
+  "variant": "B: + --disable-gpu-vsync --disable-frame-rate-limit"
+ },
+ {
+  "n": 20,
+  "first_ms": 1531.4,
+  "median_ms": 1008.2,
+  "p95_ms": 1531.4,
+  "valid": 20,
+  "centre_ok": 20,
+  "idle_cpu_pct_of_one_core": 9.4,
+  "raw": [
+   {
+    "ms": 1531.4,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 108.5,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 283.9,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 730.6,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1001.6,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1010.1,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1010.1,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1008.7,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1008.4,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1008.1,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1010.0,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1008.3,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1007.6,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1008.0,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1006.2,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1012.9,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1011.2,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1013.7,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1007.0,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1007.8,
+    "ok": true,
+    "centre_ok": true
+   }
+  ],
+  "variant": "C: + --disable-frame-rate-limit"
+ },
+ {
+  "n": 20,
+  "first_ms": 1567.3,
+  "median_ms": 1009.5,
+  "p95_ms": 1567.3,
+  "valid": 20,
+  "centre_ok": 20,
+  "idle_cpu_pct_of_one_core": 2.5,
+  "raw": [
+   {
+    "ms": 1567.3,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 91.4,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 265.0,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 745.1,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1012.9,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1014.2,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1003.3,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1012.8,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1013.6,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 999.6,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1009.9,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1009.2,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1000.2,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1008.7,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1007.6,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1014.0,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1015.4,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 994.8,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1013.4,
+    "ok": true,
+    "centre_ok": true
+   },
+   {
+    "ms": 1010.5,
+    "ok": true,
+    "centre_ok": true
+   }
+  ],
+  "variant": "D: + --disable-gpu-vsync"
+ }
+]
