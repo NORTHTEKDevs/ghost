@@ -48,7 +48,8 @@ struct Located {
     name: String,
     rect: Option<(i32, i32, i32, i32)>,
     ctrl: isize,
-    enabled: bool,
+    /// Definitely disabled; an unanswered IsEnabled is not (see refuse_as_disabled).
+    disabled: bool,
     control_type: u32,
 }
 
@@ -60,7 +61,7 @@ impl Located {
                 .bounding_rect()
                 .map(|r| (r.left, r.top, r.right, r.bottom)),
             ctrl: el.native_window_handle(),
-            enabled: el.is_enabled(),
+            disabled: crate::element::refuse_as_disabled(el.is_enabled_checked()),
             control_type: el.control_type(),
         }
     }
@@ -474,7 +475,7 @@ impl GhostSession {
             let info = Located::of(&el);
             let t_find = t_start.elapsed().as_millis() as u64;
             let t_action_start = Instant::now();
-            if !info.enabled {
+            if info.disabled {
                 return Err(GhostError::ElementNotInteractable {
                     element: info.name,
                     reason: "element is disabled".into(),
@@ -817,7 +818,7 @@ mod tests {
 
     #[test]
     fn located_centre_and_rect_json() {
-        let l = Located { name: "x".into(), rect: Some((10, 20, 30, 40)), ctrl: 0, enabled: true, control_type: 0 };
+        let l = Located { name: "x".into(), rect: Some((10, 20, 30, 40)), ctrl: 0, disabled: false, control_type: 0 };
         assert_eq!(l.center(), (20, 30));
         assert_eq!(l.rect_json()["right"], 30);
         let none = Located { rect: None, ..l };

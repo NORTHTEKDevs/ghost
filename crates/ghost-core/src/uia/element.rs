@@ -55,8 +55,15 @@ impl UiaElement {
         }
     }
 
+    /// UIA IsEnabled, `false` when the provider does not answer. Fine for
+    /// describing a tree; an action should decide on [`Self::is_enabled_checked`].
     pub fn is_enabled(&self) -> bool {
-        unsafe { self.0.CurrentIsEnabled().map(|b| b.as_bool()).unwrap_or(false) }
+        self.is_enabled_checked().unwrap_or(false)
+    }
+
+    /// UIA IsEnabled, or `None` when the provider returns an error for it.
+    pub fn is_enabled_checked(&self) -> Option<bool> {
+        unsafe { self.0.CurrentIsEnabled().ok().map(|b| b.as_bool()) }
     }
 
     /// True if the element is off-screen (UIA IsOffscreen: scrolled out of view,

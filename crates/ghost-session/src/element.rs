@@ -21,9 +21,17 @@ impl GhostElement {
         self.inner.bounding_rect().map(|r| (r.left, r.top, r.right, r.bottom))
     }
 
-    /// True if the element is enabled (interactable).
+    /// True if the element is enabled (interactable). False also when the
+    /// provider did not answer; actions use [`Self::is_definitely_disabled`].
     pub fn is_enabled(&self) -> bool {
         self.inner.is_enabled()
+    }
+
+    /// True only when the element reports itself disabled. An action refuses
+    /// on this, not on `!is_enabled()`, so a provider that errors on IsEnabled
+    /// is still driven.
+    pub fn is_definitely_disabled(&self) -> bool {
+        refuse_as_disabled(self.inner.is_enabled_checked())
     }
 
     /// True if the element is a text-editable control (edit/document/combobox) —
@@ -48,7 +56,7 @@ impl GhostElement {
     /// COM objects require thread affinity and cannot be safely passed across `spawn_blocking`.
     pub fn click(&self) -> Result<()> {
         if is_stopped() { return Err(GhostError::Stopped); }
-        if !self.inner.is_enabled() {
+        if self.is_definitely_disabled() {
             return Err(GhostError::ElementNotInteractable {
                 element: self.inner.name(),
                 reason: "element is disabled".into(),
@@ -63,7 +71,7 @@ impl GhostElement {
     /// COM objects require thread affinity and cannot be safely passed across `spawn_blocking`.
     pub fn type_text(&self, text: &str) -> Result<()> {
         if is_stopped() { return Err(GhostError::Stopped); }
-        if !self.inner.is_enabled() {
+        if self.is_definitely_disabled() {
             return Err(GhostError::ElementNotInteractable {
                 element: self.inner.name(),
                 reason: "element is disabled".into(),
@@ -106,7 +114,7 @@ impl GhostElement {
     /// caller must NOT silently steal focus in that case.
     pub fn click_background(&self) -> Result<()> {
         if is_stopped() { return Err(GhostError::Stopped); }
-        if !self.inner.is_enabled() {
+        if self.is_definitely_disabled() {
             return Err(GhostError::ElementNotInteractable {
                 element: self.inner.name(),
                 reason: "element is disabled".into(),
@@ -120,7 +128,7 @@ impl GhostElement {
     /// ValuePattern.
     pub fn type_text_background(&self, text: &str) -> Result<()> {
         if is_stopped() { return Err(GhostError::Stopped); }
-        if !self.inner.is_enabled() {
+        if self.is_definitely_disabled() {
             return Err(GhostError::ElementNotInteractable {
                 element: self.inner.name(),
                 reason: "element is disabled".into(),
@@ -133,3 +141,31 @@ impl GhostElement {
 // Note: GhostElement wraps live COM objects (IUIAutomationElement) which require a
 // running Windows UIA server. Unit tests cannot meaningfully test this without
 // mocking COM or spinning up a real UIA server. Integration tests are in tests/notepad.rs.
+
+/// Whether an action must refuse an element as disabled, given its enabled
+/// state (`None` = the accessibility provider did not answer). Only a definite
+/// "disabled" refuses: a provider that errors on IsEnabled used to read as
+/// disabled, so every act path refused an element it could have driven.
+pub(crate) fn refuse_as_disabled(enabled: Option<bool>) -> bool {
+    enabled == Some(false)
+}
+
+#[cfg(test)]
+mod refuse_tests {
+    use super::refuse_as_disabled;
+
+    #[test]
+    fn a_definitely_disabled_element_is_refused() {
+        assert!(refuse_as_disabled(Some(false)));
+    }
+
+    #[test]
+    fn an_enabled_element_is_not_refused() {
+        assert!(!refuse_as_disabled(Some(true)));
+    }
+
+    #[test]
+    fn an_element_whose_provider_did_not_answer_is_not_refused() {
+        assert!(!refuse_as_disabled(None));
+    }
+}
