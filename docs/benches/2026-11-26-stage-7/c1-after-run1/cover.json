@@ -1,0 +1,559 @@
+{
+ "handles": {
+  "target": 249301316,
+  "cover": 184551212,
+  "popup": 273353700
+ },
+ "points": {
+  "covered": [
+   553,
+   238
+  ],
+  "uncovered": [
+   288,
+   238
+  ],
+  "popup": [
+   271,
+   276
+  ]
+ },
+ "covered": [
+  {
+   "refused": true,
+   "error": "Vision error: ghost_click_at background: (553,238) is covered by 'Ghost Cover Over' (pid 31028), a window of another process lying over the target 'Ghost Cover Bed'; nothing was sent. Pass hwnd=<the target's hwnd> to post to the target itse",
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": null,
+   "ms": 0.2
+  },
+  {
+   "refused": true,
+   "error": "Vision error: ghost_click_at background: (553,238) is covered by 'Ghost Cover Over' (pid 31028), a window of another process lying over the target 'Ghost Cover Bed'; nothing was sent. Pass hwnd=<the target's hwnd> to post to the target itse",
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": null,
+   "ms": 0.8
+  },
+  {
+   "refused": true,
+   "error": "Vision error: ghost_click_at background: (553,238) is covered by 'Ghost Cover Over' (pid 31028), a window of another process lying over the target 'Ghost Cover Bed'; nothing was sent. Pass hwnd=<the target's hwnd> to post to the target itse",
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": null,
+   "ms": 0.9
+  },
+  {
+   "refused": true,
+   "error": "Vision error: ghost_click_at background: (553,238) is covered by 'Ghost Cover Over' (pid 31028), a window of another process lying over the target 'Ghost Cover Bed'; nothing was sent. Pass hwnd=<the target's hwnd> to post to the target itse",
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": null,
+   "ms": 0.8
+  },
+  {
+   "refused": true,
+   "error": "Vision error: ghost_click_at background: (553,238) is covered by 'Ghost Cover Over' (pid 31028), a window of another process lying over the target 'Ghost Cover Bed'; nothing was sent. Pass hwnd=<the target's hwnd> to post to the target itse",
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": null,
+   "ms": 0.8
+  },
+  {
+   "refused": true,
+   "error": "Vision error: ghost_click_at background: (553,238) is covered by 'Ghost Cover Over' (pid 31028), a window of another process lying over the target 'Ghost Cover Bed'; nothing was sent. Pass hwnd=<the target's hwnd> to post to the target itse",
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": null,
+   "ms": 1.0
+  },
+  {
+   "refused": true,
+   "error": "Vision error: ghost_click_at background: (553,238) is covered by 'Ghost Cover Over' (pid 31028), a window of another process lying over the target 'Ghost Cover Bed'; nothing was sent. Pass hwnd=<the target's hwnd> to post to the target itse",
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": null,
+   "ms": 0.6
+  },
+  {
+   "refused": true,
+   "error": "Vision error: ghost_click_at background: (553,238) is covered by 'Ghost Cover Over' (pid 31028), a window of another process lying over the target 'Ghost Cover Bed'; nothing was sent. Pass hwnd=<the target's hwnd> to post to the target itse",
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": null,
+   "ms": 0.8
+  },
+  {
+   "refused": true,
+   "error": "Vision error: ghost_click_at background: (553,238) is covered by 'Ghost Cover Over' (pid 31028), a window of another process lying over the target 'Ghost Cover Bed'; nothing was sent. Pass hwnd=<the target's hwnd> to post to the target itse",
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": null,
+   "ms": 0.8
+  },
+  {
+   "refused": true,
+   "error": "Vision error: ghost_click_at background: (553,238) is covered by 'Ghost Cover Over' (pid 31028), a window of another process lying over the target 'Ghost Cover Bed'; nothing was sent. Pass hwnd=<the target's hwnd> to post to the target itse",
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": null,
+   "ms": 0.9
+  },
+  {
+   "refused": true,
+   "error": "Vision error: ghost_click_at background: (553,238) is covered by 'Ghost Cover Over' (pid 31028), a window of another process lying over the target 'Ghost Cover Bed'; nothing was sent. Pass hwnd=<the target's hwnd> to post to the target itse",
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": null,
+   "ms": 0.9
+  },
+  {
+   "refused": true,
+   "error": "Vision error: ghost_click_at background: (553,238) is covered by 'Ghost Cover Over' (pid 31028), a window of another process lying over the target 'Ghost Cover Bed'; nothing was sent. Pass hwnd=<the target's hwnd> to post to the target itse",
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": null,
+   "ms": 0.9
+  },
+  {
+   "refused": true,
+   "error": "Vision error: ghost_click_at background: (553,238) is covered by 'Ghost Cover Over' (pid 31028), a window of another process lying over the target 'Ghost Cover Bed'; nothing was sent. Pass hwnd=<the target's hwnd> to post to the target itse",
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": null,
+   "ms": 0.9
+  },
+  {
+   "refused": true,
+   "error": "Vision error: ghost_click_at background: (553,238) is covered by 'Ghost Cover Over' (pid 31028), a window of another process lying over the target 'Ghost Cover Bed'; nothing was sent. Pass hwnd=<the target's hwnd> to post to the target itse",
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": null,
+   "ms": 0.8
+  },
+  {
+   "refused": true,
+   "error": "Vision error: ghost_click_at background: (553,238) is covered by 'Ghost Cover Over' (pid 31028), a window of another process lying over the target 'Ghost Cover Bed'; nothing was sent. Pass hwnd=<the target's hwnd> to post to the target itse",
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": null,
+   "ms": 0.8
+  },
+  {
+   "refused": true,
+   "error": "Vision error: ghost_click_at background: (553,238) is covered by 'Ghost Cover Over' (pid 31028), a window of another process lying over the target 'Ghost Cover Bed'; nothing was sent. Pass hwnd=<the target's hwnd> to post to the target itse",
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": null,
+   "ms": 0.9
+  },
+  {
+   "refused": true,
+   "error": "Vision error: ghost_click_at background: (553,238) is covered by 'Ghost Cover Over' (pid 31028), a window of another process lying over the target 'Ghost Cover Bed'; nothing was sent. Pass hwnd=<the target's hwnd> to post to the target itse",
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": null,
+   "ms": 0.6
+  },
+  {
+   "refused": true,
+   "error": "Vision error: ghost_click_at background: (553,238) is covered by 'Ghost Cover Over' (pid 31028), a window of another process lying over the target 'Ghost Cover Bed'; nothing was sent. Pass hwnd=<the target's hwnd> to post to the target itse",
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": null,
+   "ms": 0.9
+  },
+  {
+   "refused": true,
+   "error": "Vision error: ghost_click_at background: (553,238) is covered by 'Ghost Cover Over' (pid 31028), a window of another process lying over the target 'Ghost Cover Bed'; nothing was sent. Pass hwnd=<the target's hwnd> to post to the target itse",
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": null,
+   "ms": 0.7
+  },
+  {
+   "refused": true,
+   "error": "Vision error: ghost_click_at background: (553,238) is covered by 'Ghost Cover Over' (pid 31028), a window of another process lying over the target 'Ghost Cover Bed'; nothing was sent. Pass hwnd=<the target's hwnd> to post to the target itse",
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": null,
+   "ms": 0.9
+  }
+ ],
+ "uncovered": [
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 1,
+   "target_pings": 0,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": true,
+   "ms": 230.7
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 2,
+   "target_pings": 0,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": true,
+   "ms": 325.6
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 1,
+   "target_pings": 0,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": true,
+   "ms": 225.9
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 2,
+   "target_pings": 0,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": true,
+   "ms": 322.6
+  },
+  {
+   "skipped": "point owned by 50072408 'ghost-improve', not this script's expected window"
+  },
+  {
+   "skipped": "point owned by 50072408 'ghost-improve', not this script's expected window"
+  },
+  {
+   "skipped": "point owned by 50072408 'ghost-improve', not this script's expected window"
+  },
+  {
+   "skipped": "point owned by 50072408 'ghost-improve', not this script's expected window"
+  },
+  {
+   "skipped": "point owned by 50072408 'ghost-improve', not this script's expected window"
+  },
+  {
+   "skipped": "point owned by 50072408 'ghost-improve', not this script's expected window"
+  },
+  {
+   "skipped": "point owned by 50072408 'ghost-improve', not this script's expected window"
+  },
+  {
+   "skipped": "point owned by 50072408 'ghost-improve', not this script's expected window"
+  },
+  {
+   "skipped": "point owned by 50072408 'ghost-improve', not this script's expected window"
+  },
+  {
+   "skipped": "point owned by 50072408 'ghost-improve', not this script's expected window"
+  },
+  {
+   "skipped": "point owned by 50072408 'ghost-improve', not this script's expected window"
+  },
+  {
+   "skipped": "point owned by 50072408 'ghost-improve', not this script's expected window"
+  },
+  {
+   "skipped": "point owned by 50072408 'ghost-improve', not this script's expected window"
+  },
+  {
+   "skipped": "point owned by 50072408 'ghost-improve', not this script's expected window"
+  },
+  {
+   "skipped": "point owned by 50072408 'ghost-improve', not this script's expected window"
+  },
+  {
+   "skipped": "point owned by 50072408 'ghost-improve', not this script's expected window"
+  }
+ ],
+ "popup": [
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": -6,
+   "target_pings": 1,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": true,
+   "ms": 226.7
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 308.0
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 307.1
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 310.0
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 293.8
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 306.6
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 293.6
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 293.8
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 294.6
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 308.2
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 308.4
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 323.9
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 308.5
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 290.7
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 309.3
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 309.8
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 308.3
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 306.1
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 294.0
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 305.3
+  }
+ ]
+}

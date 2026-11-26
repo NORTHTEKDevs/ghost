@@ -1,0 +1,687 @@
+{
+ "handles": {
+  "target": 174786546,
+  "cover": 134220540,
+  "popup": 33950206
+ },
+ "points": {
+  "covered": [
+   553,
+   238
+  ],
+  "uncovered": [
+   288,
+   238
+  ],
+  "popup": [
+   271,
+   276
+  ]
+ },
+ "covered": [
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 1,
+   "cover_changed": true,
+   "verified": true,
+   "ms": 215.6
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 2,
+   "cover_changed": true,
+   "verified": false,
+   "ms": 323.6
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 2,
+   "cover_changed": true,
+   "verified": false,
+   "ms": 311.5
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 2,
+   "cover_changed": true,
+   "verified": false,
+   "ms": 309.9
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 2,
+   "cover_changed": true,
+   "verified": false,
+   "ms": 324.5
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 2,
+   "cover_changed": true,
+   "verified": false,
+   "ms": 309.0
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 2,
+   "cover_changed": true,
+   "verified": false,
+   "ms": 309.0
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 2,
+   "cover_changed": true,
+   "verified": false,
+   "ms": 308.6
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 2,
+   "cover_changed": true,
+   "verified": false,
+   "ms": 326.8
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 2,
+   "cover_changed": true,
+   "verified": false,
+   "ms": 309.1
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 2,
+   "cover_changed": true,
+   "verified": false,
+   "ms": 310.2
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 2,
+   "cover_changed": true,
+   "verified": false,
+   "ms": 309.0
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 2,
+   "cover_changed": true,
+   "verified": false,
+   "ms": 323.6
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 2,
+   "cover_changed": true,
+   "verified": false,
+   "ms": 308.3
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 2,
+   "cover_changed": true,
+   "verified": false,
+   "ms": 309.2
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 2,
+   "cover_changed": true,
+   "verified": false,
+   "ms": 326.6
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 2,
+   "cover_changed": true,
+   "verified": false,
+   "ms": 322.2
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 2,
+   "cover_changed": true,
+   "verified": false,
+   "ms": 307.8
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 2,
+   "cover_changed": true,
+   "verified": false,
+   "ms": 311.1
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 0,
+   "target_notes_title_unchanged": true,
+   "cover_clicks": 2,
+   "cover_changed": true,
+   "verified": false,
+   "ms": 310.5
+  }
+ ],
+ "uncovered": [
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 1,
+   "target_pings": 0,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": true,
+   "ms": 229.2
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 2,
+   "target_pings": 0,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 790.8
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 2,
+   "target_pings": 0,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 323.2
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 2,
+   "target_pings": 0,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 306.5
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 2,
+   "target_pings": 0,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 310.1
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 2,
+   "target_pings": 0,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 309.9
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 2,
+   "target_pings": 0,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 309.4
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 2,
+   "target_pings": 0,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 303.8
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 2,
+   "target_pings": 0,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 308.3
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 2,
+   "target_pings": 0,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 320.3
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 2,
+   "target_pings": 0,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 307.0
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 2,
+   "target_pings": 0,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 326.5
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 2,
+   "target_pings": 0,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 322.1
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 2,
+   "target_pings": 0,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 307.0
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 2,
+   "target_pings": 0,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 323.4
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 2,
+   "target_pings": 0,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 317.7
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 2,
+   "target_pings": 0,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 308.9
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 2,
+   "target_pings": 0,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 307.4
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 2,
+   "target_pings": 0,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 306.4
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 2,
+   "target_pings": 0,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 308.3
+  }
+ ],
+ "popup": [
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": -39,
+   "target_pings": 1,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": true,
+   "ms": 676.8
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 304.6
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 292.9
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 319.9
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 308.2
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 301.4
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 294.6
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 300.9
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 309.8
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 324.1
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 305.9
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 307.6
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 291.5
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 301.5
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 293.0
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 303.5
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 309.8
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 296.2
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 303.5
+  },
+  {
+   "refused": false,
+   "error": null,
+   "target_clicks": 0,
+   "target_pings": 2,
+   "target_notes_title_unchanged": false,
+   "cover_clicks": 0,
+   "cover_changed": false,
+   "verified": false,
+   "ms": 309.1
+  }
+ ]
+}

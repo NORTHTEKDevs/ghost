@@ -1602,7 +1602,8 @@ async fn handle_tool(
             // does not, so chained find -> click_at flows pass hwnd through.
             if session.is_background_only() {
                 let hwnd = p["hwnd"].as_i64().map(|h| h as isize);
-                return session.click_at_background(x, y, hwnd).await.map_err(|e| e.to_string());
+                let target = p["_target_hwnd"].as_i64().map(|h| h as isize);
+                return session.click_at_background(x, y, hwnd, target).await.map_err(|e| e.to_string());
             }
             session.click_at(x, y).await.map_err(|e| e.to_string())?;
             Ok(json!({ "ok": true }))

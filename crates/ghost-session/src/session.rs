@@ -68,6 +68,64 @@ fn read_scope(window: Option<&str>, hint: Option<isize>, handle_reads: bool) -> 
     }
 }
 
+/// What `click_at_background` knows about the window at a click point, for
+/// deciding whether a coordinate click may be posted to it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Cover {
+    /// Top-level window at the point.
+    pub hwnd: isize,
+    pub pid: u32,
+    /// Its owner chain (GW_OWNER), nearest first.
+    pub owners: Vec<isize>,
+    /// Its process is one Ghost launched (in this server's job).
+    pub launched_by_ghost: bool,
+    /// The window the call was resolved to (anchor or `window=`), and its pid.
+    pub target: isize,
+    pub target_pid: u32,
+}
+
+/// Whether a coordinate click may be posted to the window covering the point.
+/// Yes for the target itself, a window of the target's process (a second
+/// window, a dialog), a window the target owns (menus, dropdowns, tooltips),
+/// or a process Ghost launched. Anything else is someone else's window lying
+/// over the target: the review probe delivered 10 clicks to the terminal
+/// hosting the session that way (docs/benches/2026-11-25-final).
+pub(crate) fn cover_allowed(cover: &Cover) -> bool {
+    cover.hwnd == cover.target
+        || (cover.pid != 0 && cover.pid == cover.target_pid)
+        || cover.owners.contains(&cover.target)
+        || cover.launched_by_ghost
+}
+
+/// The [`Cover`] facts for the window at a click point.
+#[cfg(windows)]
+fn cover_at(at: isize, target: isize) -> Cover {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{GetAncestor, GetWindow, GA_ROOT, GW_OWNER};
+    let top = unsafe { GetAncestor(HWND(at as *mut _), GA_ROOT).0 as isize };
+    let top = if top == 0 { at } else { top };
+    let mut owners = Vec::new();
+    let mut h = top;
+    for _ in 0..8 {
+        match unsafe { GetWindow(HWND(h as *mut _), GW_OWNER) } {
+            Ok(o) if !o.is_invalid() => {
+                h = o.0 as isize;
+                owners.push(h);
+            }
+            _ => break,
+        }
+    }
+    let pid = crate::engine::system::window_pid(top);
+    Cover {
+        hwnd: top,
+        pid,
+        owners,
+        launched_by_ghost: pid != 0 && ghost_browser::launch::job::is_bound_to_this_process(pid),
+        target,
+        target_pid: crate::engine::system::window_pid(target),
+    }
+}
+
 /// Why [`pick_window`] found no window to drive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PickMiss {
@@ -861,7 +919,7 @@ impl GhostSession {
                 }),
             };
             if self.is_background_only() {
-                self.click_at_background(x, y, Some(hwnd)).await?;
+                self.click_at_background(x, y, Some(hwnd), None).await?;
             } else {
                 self.click_at(x, y).await?;
             }
@@ -872,7 +930,7 @@ impl GhostSession {
         // the window that owns it (with UIA Invoke fallback) instead of moving
         // the real cursor - same dispatch every other anchored verb uses.
         if self.is_background_only() {
-            self.click_at_background(x, y, None).await?;
+            self.click_at_background(x, y, None, None).await?;
             return Ok(());
         }
         self.click_at(x, y).await
@@ -1092,13 +1150,40 @@ impl GhostSession {
     /// the window. `verified` stays null when nothing could render; never a
     /// blind success.
     #[cfg(windows)]
-    pub async fn click_at_background(&self, x: i32, y: i32, hwnd_override: Option<isize>) -> Result<serde_json::Value> {
+    pub async fn click_at_background(
+        &self,
+        x: i32,
+        y: i32,
+        hwnd_override: Option<isize>,
+        target_hint: Option<isize>,
+    ) -> Result<serde_json::Value> {
         if is_stopped() { return Err(GhostError::Stopped); }
         use windows::Win32::Foundation::POINT;
         use windows::Win32::UI::WindowsAndMessaging::WindowFromPoint;
         let hwnd = match hwnd_override {
             Some(h) if h != 0 => h,
-            _ => unsafe { WindowFromPoint(POINT { x, y }).0 as isize },
+            _ => {
+                let at = unsafe { WindowFromPoint(POINT { x, y }).0 as isize };
+                // With a resolved target (anchor or window=), the window at the
+                // point must be the target's or one it owns: otherwise someone
+                // else's window is lying over the target and the click would
+                // land in it (see cover_allowed). With no target, the caller
+                // addressed the screen itself and the point's owner is it.
+                if let Some(target) = target_hint.filter(|t| *t != 0) {
+                    let cover = cover_at(at, target);
+                    if !cover_allowed(&cover) {
+                        return Err(GhostError::Vision(format!(
+                            "ghost_click_at background: ({x},{y}) is covered by '{}' (pid {}), a window of another \
+                             process lying over the target '{}'; nothing was sent. Pass hwnd=<the target's hwnd> to \
+                             post to the target itself (that path is occlusion-proof), or bring the target into view",
+                            window_title_of(cover.hwnd),
+                            cover.pid,
+                            window_title_of(target),
+                        )));
+                    }
+                }
+                at
+            }
         };
         if hwnd == 0 {
             return Err(GhostError::Vision(format!(
@@ -1203,7 +1288,13 @@ impl GhostSession {
     /// to the window owning the point); other platforms report the gap instead
     /// of faking it, consistent with the capability matrix.
     #[cfg(not(windows))]
-    pub async fn click_at_background(&self, _x: i32, _y: i32, _hwnd_override: Option<isize>) -> Result<serde_json::Value> {
+    pub async fn click_at_background(
+        &self,
+        _x: i32,
+        _y: i32,
+        _hwnd_override: Option<isize>,
+        _target_hint: Option<isize>,
+    ) -> Result<serde_json::Value> {
         Err(GhostError::Vision(
             "click_at background is Windows-only (posted WM_LBUTTONDOWN); use the foreground path on this platform".into(),
         ))
@@ -3114,5 +3205,51 @@ mod read_scope_tests {
     fn nothing_given_reads_the_foreground_scope() {
         assert_eq!(read_scope(None, None, true), ReadScope::Foreground);
         assert_eq!(read_scope(None, Some(10), false), ReadScope::Foreground);
+    }
+}
+
+#[cfg(test)]
+mod cover_tests {
+    use super::{cover_allowed, Cover};
+
+    fn cover(hwnd: isize, pid: u32, owners: &[isize]) -> Cover {
+        Cover { hwnd, pid, owners: owners.to_vec(), launched_by_ghost: false, target: 10, target_pid: 100 }
+    }
+
+    #[test]
+    fn the_target_itself_is_allowed() {
+        assert!(cover_allowed(&cover(10, 100, &[])));
+    }
+
+    #[test]
+    fn another_window_of_the_targets_process_is_allowed() {
+        assert!(cover_allowed(&cover(11, 100, &[])));
+    }
+
+    #[test]
+    fn a_window_the_target_owns_is_allowed_even_from_another_process() {
+        // e.g. a shell-hosted dropdown owned by the target window
+        assert!(cover_allowed(&cover(12, 200, &[10])));
+        assert!(cover_allowed(&cover(12, 200, &[13, 10])));
+    }
+
+    #[test]
+    fn a_window_of_a_process_ghost_launched_is_allowed() {
+        let mut c = cover(20, 300, &[]);
+        c.launched_by_ghost = true;
+        assert!(cover_allowed(&c));
+    }
+
+    #[test]
+    fn someone_elses_window_over_the_target_is_refused() {
+        assert!(!cover_allowed(&cover(20, 300, &[])));
+        assert!(!cover_allowed(&cover(20, 300, &[21])));
+    }
+
+    #[test]
+    fn an_unknown_pid_never_matches_the_target_by_accident() {
+        let mut c = cover(20, 0, &[]);
+        c.target_pid = 0;
+        assert!(!cover_allowed(&c));
     }
 }
