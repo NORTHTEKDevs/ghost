@@ -1,0 +1,178 @@
+{
+ "handles": {
+  "Ghost Read Bed 2": 38341596,
+  "Ghost Read Bed": 183175154
+ },
+ "titles_after_setup": [
+  "Ghost Read Bed 2",
+  "Ghost Read Bed"
+ ],
+ "truth": {
+  "target_edit": "abq",
+  "decoy_edit": ""
+ },
+ "text": [
+  {
+   "reads_target": true,
+   "reported_hwnd": 183175154,
+   "is_error": false,
+   "ms": 13.1
+  },
+  {
+   "reads_target": true,
+   "reported_hwnd": 183175154,
+   "is_error": false,
+   "ms": 14.2
+  },
+  {
+   "reads_target": true,
+   "reported_hwnd": 183175154,
+   "is_error": false,
+   "ms": 14.4
+  },
+  {
+   "reads_target": true,
+   "reported_hwnd": 183175154,
+   "is_error": false,
+   "ms": 12.8
+  },
+  {
+   "reads_target": true,
+   "reported_hwnd": 183175154,
+   "is_error": false,
+   "ms": 12.8
+  },
+  {
+   "reads_target": true,
+   "reported_hwnd": 183175154,
+   "is_error": false,
+   "ms": 14.4
+  },
+  {
+   "reads_target": true,
+   "reported_hwnd": 183175154,
+   "is_error": false,
+   "ms": 11.4
+  },
+  {
+   "reads_target": true,
+   "reported_hwnd": 183175154,
+   "is_error": false,
+   "ms": 14.3
+  },
+  {
+   "reads_target": true,
+   "reported_hwnd": 183175154,
+   "is_error": false,
+   "ms": 14.6
+  },
+  {
+   "reads_target": true,
+   "reported_hwnd": 183175154,
+   "is_error": false,
+   "ms": 12.7
+  }
+ ],
+ "tree": [
+  {
+   "reads_target": false,
+   "increment_lefts": [
+    798,
+    798
+   ],
+   "reported_hwnd": 183175154,
+   "is_error": false,
+   "ms": 38.4
+  },
+  {
+   "reads_target": false,
+   "increment_lefts": [
+    798,
+    798
+   ],
+   "reported_hwnd": 183175154,
+   "is_error": false,
+   "ms": 33.8
+  },
+  {
+   "reads_target": false,
+   "increment_lefts": [
+    798,
+    798
+   ],
+   "reported_hwnd": 183175154,
+   "is_error": false,
+   "ms": 31.7
+  },
+  {
+   "reads_target": false,
+   "increment_lefts": [
+    798,
+    798
+   ],
+   "reported_hwnd": 183175154,
+   "is_error": false,
+   "ms": 30.3
+  },
+  {
+   "reads_target": false,
+   "increment_lefts": [
+    798,
+    798
+   ],
+   "reported_hwnd": 183175154,
+   "is_error": false,
+   "ms": 33.0
+  },
+  {
+   "reads_target": false,
+   "increment_lefts": [
+    798,
+    798
+   ],
+   "reported_hwnd": 183175154,
+   "is_error": false,
+   "ms": 31.6
+  },
+  {
+   "reads_target": false,
+   "increment_lefts": [
+    798,
+    798
+   ],
+   "reported_hwnd": 183175154,
+   "is_error": false,
+   "ms": 34.5
+  },
+  {
+   "reads_target": false,
+   "increment_lefts": [
+    798,
+    798
+   ],
+   "reported_hwnd": 183175154,
+   "is_error": false,
+   "ms": 31.5
+  },
+  {
+   "reads_target": false,
+   "increment_lefts": [
+    798,
+    798
+   ],
+   "reported_hwnd": 183175154,
+   "is_error": false,
+   "ms": 31.8
+  },
+  {
+   "reads_target": false,
+   "increment_lefts": [
+    798,
+    798
+   ],
+   "reported_hwnd": 183175154,
+   "is_error": false,
+   "ms": 31.9
+  }
+ ]
+}

@@ -97,3 +97,39 @@ both rows.
 
 A no-effect `click_at` takes ~230 ms (the full 80 ms poll plus the guard's
 100 ms settle, kept because nothing was observed), against ~340 ms before.
+
+## C9b - ghost_see full mode and ghost_snapshot walk the window they report
+
+**Defect.** `describe_screen(window_title)` re-resolves the window by first
+title match. With the target "Ghost Read Bed" and a decoy "Ghost Read Bed 2" in
+front, an anchored `ghost_see` (full mode) reported the target's hwnd and
+returned the DECOY's elements: its "Increment" buttons at left=798 (the decoy's
+position) instead of 218, 10/10 (`c9b-before`).
+
+**Change.** `GhostSession::describe_window(window, hwnd_hint)` makes C9's
+`read_scope` decision: the resolved handle on Windows (`describe_hwnd`, the same
+interactive walk and node budget as the title path, from a different root),
+else the title, else the foreground scope; a resolved window that has closed is
+an error. `ghost_see` full mode and `ghost_snapshot` with a window use it with
+the injected `_target_hwnd`. `describe_screen` itself is unchanged for its other
+callers (CLI, HTTP server, examples). No new unit test: the decision is
+`read_scope`, covered by C9's 3 tests.
+
+**Marker.** A full-mode reply lists only interactive elements - no edit values
+(stage 6b) and no static labels (checked here: `--label` markers did not appear)
+- so the probe places the two windows apart (`--pos`: target 120,120, decoy
+700,400) and reads which window the returned "Increment" buttons lie in.
+
+| Criterion | Target | Before (`c9b-before`) | After run 1 / run 2 |
+|---|---|---|---|
+| Full-mode tree comes from the target (decoy in front) | 10/10 | **0/10** (decoy's elements, left=798) | 10/10 / 10/10 |
+| Reported hwnd is the target | 10/10 | 10/10 | 10/10 / 10/10 |
+| C9 text read still the target | 10/10 | 10/10 | 10/10 / 10/10 |
+| see / find / click / type accuracy, user and hidden (`c9b-regression-*`) | 20/20 | - | 20/20 each |
+| `ghost verify` | pass | - | 10/10 claims |
+| `cargo test --workspace` | 0 failed | 604 / 0 / 27 | 604 / 0 / 27, both runs |
+| clippy, vibecode lint | 0 / 0 HIGH | - | 0 / 0 findings |
+
+Not covered: `ghost_see mode=delta` reads the UIA mirror cache keyed by title
+(`describe_screen_delta` -> `cache.snapshot_delta(window, ..)`), a different
+mechanism; it needs its own measurement.
