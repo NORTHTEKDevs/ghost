@@ -335,23 +335,18 @@ impl GhostSession {
     }
 
     /// The anchor if its window still exists, with its title refreshed and
-    /// remembered. A dead anchor is cleared so it cannot keep steering verbs at
-    /// a closed window.
+    /// remembered. A closed anchor is kept (it reads as `None` here) so that
+    /// `resolve_target` keeps refusing unanchored verbs until the agent picks a
+    /// window or clears the anchor; see [`anchor_status`].
     pub async fn live_anchor(&self) -> Option<WindowTarget> {
         let a = self.anchor()?;
         let cands = self.candidates().await.ok()?;
-        match cands
-            .iter()
-            .find(|c| c.hwnd == a.hwnd && c.surface == a.surface)
-        {
-            Some(c) => {
+        match anchor_status(Some(&a), &cands) {
+            AnchorStatus::Live(c) => {
                 self.remember_title(&c.title);
                 Some(c.to_target(TargetSource::Anchor))
             }
-            None => {
-                self.clear_anchor();
-                None
-            }
+            AnchorStatus::Closed | AnchorStatus::Unset => None,
         }
     }
 
@@ -416,10 +411,29 @@ impl GhostSession {
                     tokio::time::sleep(RESOLVE_POLL).await;
                 }
             }
-            _ => match self.live_anchor().await {
-                Some(a) => Ok(a),
-                None => Self::foreground_target(),
-            },
+            _ => {
+                let anchor = self.anchor();
+                let cands = self.candidates().await?;
+                match anchor_status(anchor.as_ref(), &cands) {
+                    AnchorStatus::Live(c) => {
+                        self.remember_title(&c.title);
+                        Ok(c.to_target(TargetSource::Anchor))
+                    }
+                    // Falling back to the foreground here retargeted whatever
+                    // window the human was using once the anchored one closed,
+                    // and `ghost_key` answered with a focus-policy error that
+                    // never mentioned the closed window (C11).
+                    AnchorStatus::Closed => Err(GhostError::ProcessNotFound {
+                        name: format!(
+                            "the anchored window '{}' (it has closed, so nothing was done; pass \
+                             window=<title> to choose another window, or ghost_window op=anchor \
+                             clear=true to work on the foreground window again)",
+                            anchor.map(|a| a.title).unwrap_or_default()
+                        ),
+                    }),
+                    AnchorStatus::Unset => Self::foreground_target(),
+                }
+            }
         }
     }
 }
@@ -442,9 +456,65 @@ impl GhostSession {
     }
 }
 
+/// What an unanchored verb targets: the live anchor, nothing (the anchored
+/// window closed - an error, never a silent switch), or, only when no window
+/// was ever anchored, the foreground.
+#[derive(Debug, PartialEq)]
+pub(crate) enum AnchorStatus<'a> {
+    Unset,
+    Live(&'a Candidate),
+    Closed,
+}
+
+pub(crate) fn anchor_status<'a>(anchor: Option<&WindowTarget>, cands: &'a [Candidate]) -> AnchorStatus<'a> {
+    let Some(a) = anchor else { return AnchorStatus::Unset };
+    match cands.iter().find(|c| c.hwnd == a.hwnd && c.surface == a.surface) {
+        Some(c) => AnchorStatus::Live(c),
+        None => AnchorStatus::Closed,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn anchored(hwnd: isize, title: &str) -> WindowTarget {
+        WindowTarget {
+            hwnd,
+            title: title.into(),
+            pid: 1,
+            minimized: false,
+            surface: Surface::User,
+            source: TargetSource::Explicit,
+            drifted_from: None,
+        }
+    }
+
+    #[test]
+    fn a_live_anchor_is_used() {
+        let cands = vec![c("Bed", false, 10)];
+        assert_eq!(anchor_status(Some(&anchored(10, "Bed")), &cands), AnchorStatus::Live(&cands[0]));
+    }
+
+    #[test]
+    fn a_closed_anchor_is_closed_even_when_the_human_has_another_window() {
+        // The anchored window (10) is gone; the human's window (20) is open and
+        // must not become the target.
+        let cands = vec![c("Human's editor", false, 20)];
+        assert_eq!(anchor_status(Some(&anchored(10, "Bed")), &cands), AnchorStatus::Closed);
+    }
+
+    #[test]
+    fn the_same_handle_on_another_desktop_is_not_the_anchor() {
+        let mut other = c("Bed", false, 10);
+        other.surface = Surface::Hidden { desktop: "ghost-1".into() };
+        assert_eq!(anchor_status(Some(&anchored(10, "Bed")), &[other]), AnchorStatus::Closed);
+    }
+
+    #[test]
+    fn never_anchored_is_unset() {
+        assert_eq!(anchor_status(None, &[c("Bed", false, 10)]), AnchorStatus::Unset);
+    }
 
     fn c(title: &str, minimized: bool, hwnd: isize) -> Candidate {
         Candidate {
