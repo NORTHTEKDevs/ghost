@@ -175,6 +175,20 @@ async fn poll_point_effect(
     outcome
 }
 
+/// The refusal for a coordinate click whose point is covered by another
+/// process's window: "element not interactable" (code -32002, whose hint
+/// already says "disabled or covered"), not a vision error.
+fn cover_refusal(x: i32, y: i32, cover_title: &str, cover_pid: u32, target_title: &str) -> GhostError {
+    GhostError::ElementNotInteractable {
+        element: format!("the point ({x},{y}) in '{target_title}'"),
+        reason: format!(
+            "it is covered by '{cover_title}' (pid {cover_pid}), a window of another process lying over the \
+             target; nothing was sent. Pass hwnd=<the target's hwnd> to post to the target itself (that path is \
+             occlusion-proof), or bring the target into view"
+        ),
+    }
+}
+
 /// The [`Cover`] facts for the window at a click point.
 #[cfg(windows)]
 fn cover_at(at: isize, target: isize) -> Cover {
@@ -217,20 +231,25 @@ enum PickMiss {
 
 impl PickMiss {
     fn explain(self, verb: &str, window: &str) -> GhostError {
-        GhostError::Vision(match self {
-            PickMiss::HintGone => format!(
-                "{verb} background: the window resolved for '{window}' has closed; nothing was sent \
-                 (another window with a matching title is not used in its place)"
-            ),
-            PickMiss::HintMinimized => format!(
-                "{verb} background: the window resolved for '{window}' is minimized and can't be driven \
-                 in the background; restore it with ghost_window op=state state=restore"
-            ),
-            PickMiss::NoTitleMatch => format!(
+        match self {
+            PickMiss::HintGone => GhostError::ProcessNotFound {
+                name: format!(
+                    "the window resolved for '{window}' ({verb} background: it has closed; nothing was sent, \
+                     and another window with a matching title is not used in its place)"
+                ),
+            },
+            PickMiss::HintMinimized => GhostError::ElementNotInteractable {
+                element: format!("window '{window}'"),
+                reason: format!(
+                    "{verb} background: it is minimized and can't be driven in the background; restore it \
+                     with ghost_window op=state state=restore"
+                ),
+            },
+            PickMiss::NoTitleMatch => GhostError::Vision(format!(
                 "{verb} background: no visible window matching '{window}' (minimized windows can't be \
                  driven in background)"
-            ),
-        })
+            )),
+        }
     }
 }
 
@@ -1250,14 +1269,13 @@ impl GhostSession {
                 if let Some(target) = target_hint.filter(|t| *t != 0) {
                     let cover = cover_at(at, target);
                     if !cover_allowed(&cover) {
-                        return Err(GhostError::Vision(format!(
-                            "ghost_click_at background: ({x},{y}) is covered by '{}' (pid {}), a window of another \
-                             process lying over the target '{}'; nothing was sent. Pass hwnd=<the target's hwnd> to \
-                             post to the target itself (that path is occlusion-proof), or bring the target into view",
-                            window_title_of(cover.hwnd),
+                        return Err(cover_refusal(
+                            x,
+                            y,
+                            &window_title_of(cover.hwnd),
                             cover.pid,
-                            window_title_of(target),
-                        )));
+                            &window_title_of(target),
+                        ));
                     }
                 }
                 at
@@ -1819,10 +1837,12 @@ impl GhostSession {
             #[cfg(windows)]
             ReadScope::Handle(h) => {
                 if crate::engine::system::window_rect(h).is_none() {
-                    return Err(GhostError::Vision(format!(
-                        "ghost_see: the window resolved for '{}' has closed; nothing was read",
-                        window.unwrap_or("the anchor")
-                    )));
+                    return Err(GhostError::ProcessNotFound {
+                        name: format!(
+                            "the window resolved for '{}' (ghost_see: it has closed; nothing was read)",
+                            window.unwrap_or("the anchor")
+                        ),
+                    });
                 }
                 self.tree.describe_hwnd(h).map_err(GhostError::Core)
             }
@@ -2241,10 +2261,12 @@ impl GhostSession {
             #[cfg(windows)]
             ReadScope::Handle(h) => {
                 if crate::engine::system::window_rect(h).is_none() {
-                    return Err(GhostError::Vision(format!(
-                        "ghost_see mode=text: the window resolved for '{}' has closed; nothing was read",
-                        window.unwrap_or("the anchor")
-                    )));
+                    return Err(GhostError::ProcessNotFound {
+                        name: format!(
+                            "the window resolved for '{}' (ghost_see mode=text: it has closed; nothing was read)",
+                            window.unwrap_or("the anchor")
+                        ),
+                    });
                 }
                 self.tree.collect_text_in_hwnd(h, max_chars).map_err(GhostError::Core)
             }
@@ -3378,5 +3400,25 @@ mod invoke_fallback_tests {
     #[test]
     fn an_observed_effect_is_never_followed_by_invoke() {
         assert!(!invoke_fallback_due(true, Some(true)));
+    }
+}
+
+#[cfg(test)]
+mod refusal_kind_tests {
+    use super::{cover_refusal, GhostError, PickMiss};
+
+    #[test]
+    fn a_covered_point_is_an_element_not_interactable_error() {
+        let e = cover_refusal(5, 6, "Cover", 42, "Target");
+        assert!(matches!(e, GhostError::ElementNotInteractable { .. }), "{e}");
+        let m = e.to_string();
+        assert!(m.starts_with("Element not interactable"), "{m}");
+        assert!(m.contains("'Cover' (pid 42)") && m.contains("nothing was sent"), "{m}");
+    }
+
+    #[test]
+    fn a_closed_resolved_window_is_process_not_found_and_minimised_is_not_interactable() {
+        assert!(matches!(PickMiss::HintGone.explain("ghost_key", "Bed"), GhostError::ProcessNotFound { .. }));
+        assert!(matches!(PickMiss::HintMinimized.explain("ghost_key", "Bed"), GhostError::ElementNotInteractable { .. }));
     }
 }

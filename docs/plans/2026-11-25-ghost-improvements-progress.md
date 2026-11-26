@@ -89,3 +89,18 @@ since d586cce. Probes n=10, all windows launched by the probes:
 - C2 key routing regression: target 10/10, decoy 0/10.
 Next: STAGE 7 = C1 + C4 + C9b (sent 1:37 AM AKST).
 
+## Stage 7 - C1 cover refusal (8aa410d), C4 click_at to the child under the point, no double fire (b406c10), C9b full-mode see by handle (757222c) - VERIFIED
+Grok Bot (2:00 AM AKST, Claude idle): cargo test 604 / 0 / 27; clippy 0; lint 0 on crates changed since
+363cf14; ghost verify ALL CLAIMS HOLD. Probes (only probe-created, topmost windows; WindowFromPoint checked
+before each click):
+- C1 cover_probe n=20: covered point refused 20/20, 0 clicks into the cover (Claude's before: 39 clicks in
+  the cover); uncovered target click lands 20/20 verified; same-process owned popup reached 20/20.
+- C4 pinned_click_probe n=20: increment lands exactly once 20/20, fallback 0, verified 20/20, foreground
+  unchanged, median 23.9 ms (was ~340 ms via UIA Invoke); static label verified=false 20/20 (~230 ms incl.
+  guard settle). Before the fix the unpinned path double-fired (39 activations in 20 calls).
+- C9b read_routing_probe: see tree reads the target 10/10 (was 0/10); see text 10/10.
+- Regressions: key routing 10/10 target / 0 decoy; act click user 44.4 ms, hidden 37.7 ms, 20/20 verified.
+Nit for stage 8: cover refusal is raised as GhostError::Vision ("Vision error: ...") - wrong error kind.
+Open: ghost_see mode=delta cache keyed by title (unmeasured); C6, C7, C5, C8.
+Next: STAGE 8 (sent 2:01 AM AKST).
+
