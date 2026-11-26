@@ -70,3 +70,44 @@ value (control without a decoy: text has "abq", tree does not). The tree rows
 read 0/10 before and after for that reason, not as a measured defect. Needs a
 marker the tree exposes (for example a title change on the target only) to
 measure.
+
+## C11 - a closed anchor is an error, never a silent switch to the foreground
+
+**Defect.** `resolve_target(None)` used the anchor if its window was alive and
+otherwise fell back to the human's foreground window, and `live_anchor` cleared a
+dead anchor. So after the anchored window closed, an unanchored verb retargeted
+whatever window the human was using - against the design's own rule ("once a
+target has been anchored, unanchored verbs use the anchor ... never the human's
+window by accident"). For `ghost_key` this surfaced as a focus-policy error that
+never mentioned the closed window: "'press_key' has no background path on the
+user's desktop ..." (10/10, `stage-6/pick-after/target_closed.json`).
+
+**Change** (`crates/ghost-session/src/target.rs`). A pure
+`anchor_status(anchor, candidates)` returns `Unset`, `Live` or `Closed`. With no
+`window` argument, `Closed` is an error naming the anchored window and saying
+nothing was done and how to continue; the foreground is used only when no window
+was ever anchored. The closed anchor is kept (it is no longer cleared) so every
+unanchored call keeps refusing until the agent passes a `window` or clears the
+anchor with `ghost_window op=anchor clear=true`. `live_anchor`, which only
+reports, still returns `None` for it.
+
+**Probe** (`anchor_closed_probe.py`, both windows launched by the probe; the
+closed-anchor `ghost_see` is not run on the old build because there it would
+read the human's foreground window).
+
+| Criterion | Target | Before | After run 1 / run 2 |
+|---|---|---|---|
+| `ghost_key` after the anchor closed: refused, naming the closed anchor | 10/10 | refused 10/10 with the focus-policy error, naming it 0/10 | 10/10 / 10/10 |
+| `ghost_see mode=text` after the anchor closed: refused, naming it | 10/10 | not run (would read the human's window) | 10/10 / 10/10 |
+| after re-anchoring with `window=`, unanchored read comes from that window | 10/10 | - | 10/10 / 10/10 |
+| Unit: live anchor used; closed anchor `Closed` even with another window open; same handle on another desktop is not it; never anchored `Unset` | as stated | 3 of 4 red on a stub | 4/4 green |
+| see / find / click / type accuracy, user and hidden (`c11-regression-*`) | 20/20 | - | 20/20 each |
+| C2 decoy routing (`c11-key-regression`) | target 20/20, decoy 0 | - | 20/20, 0 |
+| `ghost verify` | pass | - | 10/10 claims (`c11-verify.txt`) |
+| `cargo test --workspace` | 0 failed | 591 / 0 / 27 | 595 / 0 / 27, both runs |
+| clippy, vibecode lint | 0 / 0 HIGH | - | 0 / 0 findings |
+
+The error reads "Process not found: the anchored window '<title>' (it has closed,
+so nothing was done; pass window=<title> ... or ghost_window op=anchor
+clear=true ...)": it keeps the error variant (and code) agents already get for a
+title that matches nothing.
