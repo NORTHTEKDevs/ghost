@@ -123,6 +123,111 @@ fn find_server() -> Result<std::path::PathBuf, String> {
     }
 }
 
+/// One synthetic foreground change from a server's interference audit
+/// (`ghost_stats.interference_audit.incidents`).
+#[derive(Debug, Clone, PartialEq)]
+struct FgIncident {
+    epoch_ms: u64,
+    to_hwnd: i64,
+    in_flight: Vec<String>,
+}
+
+/// The incidents a server's audit recorded at or after `since_ms`, or `None`
+/// when the audit is off (or the reply is not an audit), in which case nothing
+/// can be attributed.
+fn incidents_since(stats: &Value, since_ms: u64) -> Option<Vec<FgIncident>> {
+    let audit = &stats["interference_audit"];
+    if audit["enabled"] != json!(true) {
+        return None;
+    }
+    let list = audit["incidents"].as_array()?;
+    Some(
+        list.iter()
+            .filter_map(|i| {
+                Some(FgIncident {
+                    epoch_ms: i["epoch_ms"].as_u64()?,
+                    to_hwnd: i["to_hwnd"].as_i64()?,
+                    in_flight: i["in_flight"]
+                        .as_array()
+                        .map(|a| a.iter().filter_map(|t| t.as_str().map(String::from)).collect())
+                        .unwrap_or_default(),
+                })
+            })
+            .filter(|i| i.epoch_ms >= since_ms)
+            .collect(),
+    )
+}
+
+/// "Foreground window never changed", judged with the servers' interference
+/// audits rather than a bare before/after handle compare. Before 2026-11-25 the
+/// bare compare failed 2 of 4 runs on a desktop where a human and another agent
+/// were switching windows, so `verify` could not gate anything.
+///
+/// A change counts against Ghost when the audit saw it with a Ghost tool call
+/// in flight, or when the new foreground belongs to a process this run
+/// launched. Either FAILS even if the foreground is back where it started by
+/// the end. A change with real input behind it, or a synthetic one by another
+/// program, passes with a note. With no audit, only an unchanged handle passes.
+fn foreground_verdict(
+    before: Option<i64>,
+    after: Option<i64>,
+    incidents: Option<&[FgIncident]>,
+    ghost_pids: &[u32],
+    pid_of: impl Fn(i64) -> u32,
+) -> (bool, String) {
+    let Some(incidents) = incidents else {
+        // No audit to attribute with: only an unchanged handle proves anything.
+        return (
+            before.is_some() && before == after,
+            format!("hwnd {before:?} -> {after:?} (interference audit off: handles compared only)"),
+        );
+    };
+    let ghost_caused: Vec<&FgIncident> = incidents
+        .iter()
+        .filter(|i| {
+            let pid = pid_of(i.to_hwnd);
+            !i.in_flight.is_empty() || (pid != 0 && ghost_pids.contains(&pid))
+        })
+        .collect();
+    if let Some(i) = ghost_caused.first() {
+        // Even when the foreground ended where it started: Ghost took it.
+        return (
+            false,
+            format!(
+                "Ghost took the foreground: hwnd {} during [{}]; {} such change(s), ended {before:?} -> {after:?}",
+                i.to_hwnd,
+                i.in_flight.join(", "),
+                ghost_caused.len()
+            ),
+        );
+    }
+    let Some(b) = before else {
+        return (false, "foreground could not be read before the run".into());
+    };
+    let others = incidents.len();
+    if Some(b) == after {
+        let note = if others > 0 { format!("; {others} synthetic change(s) by other programs") } else { String::new() };
+        return (true, format!("hwnd {b} -> {b}{note}"));
+    }
+    (
+        true,
+        format!(
+            "hwnd {b} -> {after:?}, not by Ghost: {others} synthetic change(s) with no Ghost call in flight, \
+             the rest followed real input"
+        ),
+    )
+}
+
+#[cfg(windows)]
+fn window_pid(hwnd: i64) -> u32 {
+    ghost_core::system::window_pid(hwnd as isize)
+}
+
+#[cfg(not(windows))]
+fn window_pid(_hwnd: i64) -> u32 {
+    0
+}
+
 fn ms(t: Instant) -> f64 {
     t.elapsed().as_secs_f64() * 1000.0
 }
@@ -160,6 +265,13 @@ pub fn run(strict_cursor: bool) -> i32 {
     };
     let init = s.call("initialize", json!({}), &mut pending);
     a.claim("server starts and answers initialize", init.is_ok(), format!("{:.0}ms", ms(t0)));
+    // Everything this run starts, for attributing foreground changes at the end.
+    let run_start_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let mut ghost_pids: Vec<u32> = vec![s.child.id()];
+    let mut second_incidents: Option<Vec<FgIncident>> = Some(Vec::new());
 
     let state = |s: &mut Server, pending: &mut Vec<Value>| -> Option<Value> {
         s.call("ghost_session_state", json!({}), pending)
@@ -188,6 +300,9 @@ pub fn run(strict_cursor: bool) -> i32 {
     let t = Instant::now();
     let launch = s.call("ghost_browser_launch", json!({"id": "v", "mode": "headless"}), &mut pending);
     let launch_ok = launch.as_ref().map(|v| v["result"]["port"].is_number()).unwrap_or(false);
+    if let Some(pid) = launch.as_ref().ok().and_then(|v| v["result"]["pid"].as_u64()) {
+        ghost_pids.push(pid as u32);
+    }
     let launch_ms = ms(t);
     a.claim(
         "isolated browser launches (budget 10s)",
@@ -298,9 +413,14 @@ pub fn run(strict_cursor: bool) -> i32 {
         match Server::spawn(&exe) {
             Ok(mut s2) => {
                 let mut pending2 = Vec::new();
+                ghost_pids.push(s2.child.id());
                 let ok = (|| -> Result<bool, String> {
                     s2.call("initialize", json!({}), &mut pending2)?;
-                    s2.call("ghost_browser_launch", json!({"id": "w", "mode": "headless"}), &mut pending2)?;
+                    let launched =
+                        s2.call("ghost_browser_launch", json!({"id": "w", "mode": "headless"}), &mut pending2)?;
+                    if let Some(pid) = launched["result"]["pid"].as_u64() {
+                        ghost_pids.push(pid as u32);
+                    }
                     let tab = s2
                         .call("ghost_tab_open", json!({"browser": "w", "url": url}), &mut pending2)?
                         ["result"]["tab"]
@@ -323,6 +443,12 @@ pub fn run(strict_cursor: bool) -> i32 {
                     Ok(got == "OK:second")
                 })()
                 .unwrap_or(false);
+                // Its calls are invisible to the first server's audit, so its own
+                // audit is read before it goes.
+                second_incidents = s2
+                    .call("ghost_stats", json!({}), &mut pending2)
+                    .ok()
+                    .and_then(|v| incidents_since(&v["result"], run_start_ms));
                 a.claim(
                     "second ghost server ran its own browser (20s)",
                     ok && ms(t) < 20_000.0,
@@ -356,11 +482,20 @@ pub fn run(strict_cursor: bool) -> i32 {
     let _ = s.call("ghost_browser_close", json!({"id": "v"}), &mut pending);
     let after = state(&mut s, &mut pending);
     let fg_after = after.as_ref().and_then(|v| v["foreground_hwnd"].as_i64());
-    a.claim(
-        "foreground window never changed",
-        fg_before.is_some() && fg_before == fg_after,
-        format!("hwnd {fg_before:?} -> {fg_after:?}"),
-    );
+    let first_incidents = s
+        .call("ghost_stats", json!({}), &mut pending)
+        .ok()
+        .and_then(|v| incidents_since(&v["result"], run_start_ms));
+    // Both audits or none: one server's alone could miss the other's changes.
+    let incidents = match (first_incidents, second_incidents) {
+        (Some(mut a), Some(b)) => {
+            a.extend(b);
+            Some(a)
+        }
+        _ => None,
+    };
+    let (ok, evidence) = foreground_verdict(fg_before, fg_after, incidents.as_deref(), &ghost_pids, window_pid);
+    a.claim("foreground never taken by Ghost", ok, evidence);
     let cur_after = after.as_ref().map(|v| v["cursor"].clone());
     if strict_cursor {
         a.claim("cursor never moved (strict)", cur_before == cur_after, format!("{cur_before:?} -> {cur_after:?}"));
@@ -385,5 +520,80 @@ pub fn run(strict_cursor: bool) -> i32 {
             println!("  - {name}");
         }
         1
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn inc(to_hwnd: i64, in_flight: &[&str]) -> FgIncident {
+        FgIncident { epoch_ms: 1_000, to_hwnd, in_flight: in_flight.iter().map(|s| s.to_string()).collect() }
+    }
+
+    const LAUNCHED: u32 = 4242;
+
+    fn pid_of(hwnd: i64) -> u32 {
+        if hwnd == 77 { LAUNCHED } else { 9 }
+    }
+
+    #[test]
+    fn unchanged_with_nothing_recorded_passes() {
+        assert!(foreground_verdict(Some(5), Some(5), Some(&[]), &[LAUNCHED], pid_of).0);
+    }
+
+    #[test]
+    fn a_change_the_human_made_passes() {
+        // A human change leaves no incident: real input was behind it.
+        let (ok, why) = foreground_verdict(Some(5), Some(6), Some(&[]), &[LAUNCHED], pid_of);
+        assert!(ok, "{why}");
+        assert!(why.contains("not by Ghost"), "{why}");
+    }
+
+    #[test]
+    fn a_synthetic_change_by_another_program_passes_with_a_note() {
+        let (ok, why) = foreground_verdict(Some(5), Some(6), Some(&[inc(6, &[])]), &[LAUNCHED], pid_of);
+        assert!(ok, "{why}");
+        assert!(why.contains("1 synthetic change"), "{why}");
+    }
+
+    #[test]
+    fn a_ghost_caused_change_fails_even_when_the_foreground_returns_to_where_it_started() {
+        let (ok, why) =
+            foreground_verdict(Some(5), Some(5), Some(&[inc(6, &["ghost_tab_click"])]), &[LAUNCHED], pid_of);
+        assert!(!ok, "{why}");
+        assert!(why.contains("ghost_tab_click"), "{why}");
+    }
+
+    #[test]
+    fn a_launched_window_taking_the_foreground_fails_with_nothing_in_flight() {
+        let (ok, why) = foreground_verdict(Some(5), Some(77), Some(&[inc(77, &[])]), &[LAUNCHED], pid_of);
+        assert!(!ok, "{why}");
+    }
+
+    #[test]
+    fn without_an_audit_only_an_unchanged_handle_passes() {
+        assert!(foreground_verdict(Some(5), Some(5), None, &[], pid_of).0);
+        assert!(!foreground_verdict(Some(5), Some(6), None, &[], pid_of).0);
+        assert!(!foreground_verdict(None, None, None, &[], pid_of).0);
+    }
+
+    #[test]
+    fn an_unreadable_starting_foreground_never_passes() {
+        assert!(!foreground_verdict(None, Some(6), Some(&[]), &[], pid_of).0);
+    }
+
+    #[test]
+    fn audit_incidents_before_the_run_are_ignored_and_an_off_audit_is_none() {
+        let stats = json!({ "interference_audit": { "enabled": true, "incidents": [
+            { "epoch_ms": 500, "to_hwnd": 1, "in_flight": ["old"] },
+            { "epoch_ms": 1500, "to_hwnd": 2, "in_flight": ["ghost_act"] },
+            { "epoch_ms": 2500, "to_hwnd": 3, "in_flight": [] },
+        ]}});
+        let got = incidents_since(&stats, 1_000).expect("audit on");
+        assert_eq!(got.iter().map(|i| i.to_hwnd).collect::<Vec<_>>(), [2, 3]);
+        assert_eq!(got[0].in_flight, ["ghost_act"]);
+        assert_eq!(incidents_since(&json!({ "interference_audit": { "enabled": false } }), 0), None);
+        assert_eq!(incidents_since(&json!({}), 0), None);
     }
 }

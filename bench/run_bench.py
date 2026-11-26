@@ -29,6 +29,11 @@ import subprocess
 import sys
 import time
 
+# The testbed built alongside the ghost-mcp under test; set from --exe in main().
+# It used to be pinned to target/release, so benching a side build (target-improve,
+# a CI artifact dir) silently drove the live build's testbed.
+TESTBED_EXE = None
+
 DEFAULT_EXE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     "..",
@@ -474,8 +479,8 @@ def task_value_equals_assert(g):
     """Assertion: value-equals reads a real element value. Uses the Ghost Testbed
     window (crates/ghost-testbed) on the hidden desktop: Notepad restores the
     user's own tabs into any instance, so it must never be a bench target."""
-    exe = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "target", "release", "ghost-testbed.exe")
-    if not os.path.exists(exe):
+    exe = TESTBED_EXE
+    if not exe or not os.path.exists(exe):
         return (False, "testbed not built (cargo build -p ghost-testbed --release)", None)
     g.call("ghost_window", {"op": "launch", "exe": exe})
     _sleep(600)
@@ -734,6 +739,8 @@ def main():
     args = ap.parse_args()
 
     exe = os.path.abspath(args.exe)
+    global TESTBED_EXE
+    TESTBED_EXE = os.path.join(os.path.dirname(exe), "ghost-testbed.exe")
     if not os.path.exists(exe):
         print(
             f"ERROR: ghost-mcp binary not found at {exe}\nBuild it: cargo build --release -p ghost-mcp",
