@@ -1806,6 +1806,33 @@ impl GhostSession {
         self.tree.describe_screen(window).map_err(GhostError::Core)
     }
 
+    /// `describe_screen` for the window the target resolver chose: with its
+    /// handle (`hwnd_hint`) that window is walked, not the first window whose
+    /// title contains `window` - which returned a decoy's elements while the
+    /// response named the target (C9b, docs/benches/2026-11-26-stage-7).
+    pub async fn describe_window(
+        &self,
+        window: Option<&str>,
+        hwnd_hint: Option<isize>,
+    ) -> Result<Vec<crate::engine::uia::ElementDescriptor>> {
+        match read_scope(window, hwnd_hint, cfg!(windows)) {
+            #[cfg(windows)]
+            ReadScope::Handle(h) => {
+                if crate::engine::system::window_rect(h).is_none() {
+                    return Err(GhostError::Vision(format!(
+                        "ghost_see: the window resolved for '{}' has closed; nothing was read",
+                        window.unwrap_or("the anchor")
+                    )));
+                }
+                self.tree.describe_hwnd(h).map_err(GhostError::Core)
+            }
+            #[cfg(not(windows))]
+            ReadScope::Handle(_) => unreachable!("read_scope never picks a handle off Windows"),
+            ReadScope::Title(w) => self.tree.describe_screen(Some(w)).map_err(GhostError::Core),
+            ReadScope::Foreground => self.tree.describe_screen(None).map_err(GhostError::Core),
+        }
+    }
+
     /// Fast describe scoped to the foreground window subtree only.
     /// 5-50x faster than describe_screen(None); preferred default for agent loops.
     #[tracing::instrument(skip(self))]

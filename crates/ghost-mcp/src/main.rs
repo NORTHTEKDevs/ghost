@@ -1929,7 +1929,8 @@ async fn handle_tool(
         }
         "ghost_describe_screen" => {
             let window = p["window"].as_str();
-            let elements = match session.describe_screen(window).await {
+            let hint = p["_target_hwnd"].as_i64().map(|h| h as isize);
+            let elements = match session.describe_window(window, hint).await {
                 Ok(els) => els,
                 Err(e) => {
                     // Scope miss: return an actionable error with the live window list
@@ -2591,7 +2592,10 @@ async fn handle_ghost_snapshot(session: &GhostSession, args: &Value) -> std::res
     let p = args;
     let window = p.get("window").and_then(|v| v.as_str());
     let elements = match window {
-        Some(w) => session.describe_screen(Some(w)).await.map_err(|e| e.to_string())?,
+        Some(w) => session
+            .describe_window(Some(w), p["_target_hwnd"].as_i64().map(|h| h as isize))
+            .await
+            .map_err(|e| e.to_string())?,
         None => session.describe_screen_fast().await.map_err(|e| e.to_string())?,
     };
     Ok(snapshot_response(&elements, p))
