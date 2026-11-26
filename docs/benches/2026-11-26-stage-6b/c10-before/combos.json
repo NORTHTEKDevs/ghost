@@ -1,0 +1,370 @@
+{
+ "Ctrl+A": [
+  {
+   "edit_after": "baseA",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "A",
+   "ms": 217.4
+  },
+  {
+   "edit_after": "baseA",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "A",
+   "ms": 191.1
+  },
+  {
+   "edit_after": "baseA",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "A",
+   "ms": 220.1
+  },
+  {
+   "edit_after": "baseA",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "A",
+   "ms": 216.2
+  },
+  {
+   "edit_after": "baseA",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "A",
+   "ms": 218.2
+  },
+  {
+   "edit_after": "baseA",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "A",
+   "ms": 188.9
+  },
+  {
+   "edit_after": "baseA",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "A",
+   "ms": 188.4
+  },
+  {
+   "edit_after": "baseA",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "A",
+   "ms": 193.8
+  },
+  {
+   "edit_after": "baseA",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "A",
+   "ms": 217.7
+  },
+  {
+   "edit_after": "baseA",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "A",
+   "ms": 189.2
+  }
+ ],
+ "Ctrl+S": [
+  {
+   "edit_after": "baseS",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "S",
+   "ms": 189.2
+  },
+  {
+   "edit_after": "baseS",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "S",
+   "ms": 192.2
+  },
+  {
+   "edit_after": "baseS",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "S",
+   "ms": 218.8
+  },
+  {
+   "edit_after": "baseS",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "S",
+   "ms": 217.0
+  },
+  {
+   "edit_after": "baseS",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "S",
+   "ms": 189.5
+  },
+  {
+   "edit_after": "baseS",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "S",
+   "ms": 187.9
+  },
+  {
+   "edit_after": "baseS",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "S",
+   "ms": 214.6
+  },
+  {
+   "edit_after": "baseS",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "S",
+   "ms": 190.4
+  },
+  {
+   "edit_after": "baseS",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "S",
+   "ms": 217.7
+  },
+  {
+   "edit_after": "baseS",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "S",
+   "ms": 188.8
+  }
+ ],
+ "Ctrl+Shift+K": [
+  {
+   "edit_after": "baseK",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "K",
+   "ms": 197.5
+  },
+  {
+   "edit_after": "baseK",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "K",
+   "ms": 189.9
+  },
+  {
+   "edit_after": "baseK",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "K",
+   "ms": 187.3
+  },
+  {
+   "edit_after": "baseK",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "K",
+   "ms": 190.8
+  },
+  {
+   "edit_after": "baseK",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "K",
+   "ms": 193.2
+  },
+  {
+   "edit_after": "baseK",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "K",
+   "ms": 189.5
+  },
+  {
+   "edit_after": "baseK",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "K",
+   "ms": 190.7
+  },
+  {
+   "edit_after": "baseK",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "K",
+   "ms": 218.1
+  },
+  {
+   "edit_after": "baseK",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "K",
+   "ms": 189.5
+  },
+  {
+   "edit_after": "baseK",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "K",
+   "ms": 188.5
+  }
+ ],
+ "Alt+X": [
+  {
+   "edit_after": "baseX",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "X",
+   "ms": 192.9
+  },
+  {
+   "edit_after": "baseX",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "X",
+   "ms": 219.4
+  },
+  {
+   "edit_after": "baseX",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "X",
+   "ms": 192.7
+  },
+  {
+   "edit_after": "baseX",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "X",
+   "ms": 217.2
+  },
+  {
+   "edit_after": "baseX",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "X",
+   "ms": 190.1
+  },
+  {
+   "edit_after": "baseX",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "X",
+   "ms": 218.8
+  },
+  {
+   "edit_after": "baseX",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "X",
+   "ms": 216.2
+  },
+  {
+   "edit_after": "baseX",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "X",
+   "ms": 189.8
+  },
+  {
+   "edit_after": "baseX",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "X",
+   "ms": 186.6
+  },
+  {
+   "edit_after": "baseX",
+   "bare_key_typed": false,
+   "is_error": false,
+   "error": null,
+   "command": null,
+   "key": "X",
+   "ms": 220.4
+  }
+ ]
+}
