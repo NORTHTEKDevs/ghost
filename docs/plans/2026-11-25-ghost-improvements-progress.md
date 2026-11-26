@@ -64,3 +64,16 @@ Grok Bot added C8 (timer-tick bimodal click median). Rule adopted: no probe may 
 did not create.
 Next: STAGE 6 = C2 + C3 (sent 12:43 AM AKST); STAGE 7 = C1 + C4; STAGE 8 = C6, C7 (measure), C5, C8.
 
+## Stage 6 - C2 key/edit routing (94bfc03), C3 double_click verification (8d80333), C2 follow-up: refuse when the resolved window is gone (d586cce) - VERIFIED
+Grok Bot (1:15-1:25 AM AKST, Claude holding idle, no probe overlap): 8d80333 gates in an isolated worktree
+(584 / 0 / 27, clippy 0, lint 0); d586cce at HEAD: cargo test 585 / 0 / 27, clippy 0, lint 0 on main.rs,
+session.rs, hidden.rs.
+- C2 key_routing_probe n=20, decoy window in front: q landed in target 20/20, decoy 0/20, response names
+  target 20/20; Ctrl+A response names target 20/20 (Claude's before: 0/20).
+- C3 latency_probe n=20: double_click increment verified 20/20 user (50.6 ms) and hidden (32.9 ms)
+  (before 0/20 and 5/20, ~120 ms); double_click label verified=false 20/20 both; plain click unchanged.
+- d586cce target_closed_probe n=10: target closed -> refused 10/10 in anchor and explicit modes, decoy got
+  the key 0/10. Anchor-mode error text is misleading ("press_key has no background path") -> C11.
+Queued: stage 6b = C10 (background ghost_key drops combo modifiers), C9 (ghost_see mode=text resolves by
+title), C11 (error text). Then stage 7 = C1 + C4, stage 8 = C6, C7, C5, C8.
+

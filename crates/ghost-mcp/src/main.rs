@@ -2635,38 +2635,12 @@ async fn handle_ghost_key(
     // title merely contains the target's).
     let hint = p["_target_hwnd"].as_i64().map(|h| h as isize);
 
-    // Background mode: post a single key to a named window's focused control
-    // without taking foreground. Modifier combos are rejected - posting can't set
-    // the modifier state apps read (GetKeyState), so a combo would silently break.
+    // Background mode: post the key to a named window's focused control without
+    // taking the foreground (see key_in_background for what a combo does).
     if p["background"].as_bool() == Some(true) {
         let window = p["window"].as_str()
             .ok_or("ghost_key background=true requires 'window' (the target app)")?;
-        let (mods, key) = parse_key_combo(keys)?;
-        if !mods.is_empty() {
-            // The common Ctrl+ editing shortcuts map to semantic messages that DO
-            // work in the background (WM_COPY/CUT/PASTE/UNDO, EM_SETSEL) - route
-            // those. Any other combo can't be posted reliably and is rejected.
-            let is_ctrl_only = mods.len() == 1
-                && matches!(mods[0].to_lowercase().as_str(), "ctrl" | "control");
-            if is_ctrl_only {
-                if let Some(cmd) = ghost_session::EditCommand::from_ctrl_key(&key) {
-                    let cmd_name = match cmd {
-                        ghost_session::EditCommand::Copy => "copy",
-                        ghost_session::EditCommand::Cut => "cut",
-                        ghost_session::EditCommand::Paste => "paste",
-                        ghost_session::EditCommand::Undo => "undo",
-                        ghost_session::EditCommand::SelectAll => "select_all",
-                    };
-                    return session.edit_command_background(window, cmd_name, hint).await.map_err(|e| e.to_string());
-                }
-            }
-            return Err(format!(
-                "ghost_key background: combo '{keys}' can't be posted reliably (apps read real \
-                 keyboard state for modifiers). Supported background shortcuts: Ctrl+C/X/V/A/Z. \
-                 Use foreground for other combos"
-            ));
-        }
-        return session.key_background(window, &key, hint).await.map_err(|e| e.to_string());
+        return key_in_background(session, window, keys, hint).await;
     }
 
     // Keyboard SendInput routes to whichever window owns OS focus - which between
@@ -2675,12 +2649,11 @@ async fn handle_ghost_key(
     // of silently typing into the wrong app.
     if let Some(window) = p.get("window").and_then(|v| v.as_str()) {
         if session.is_background_only() {
-            // Background policy: a SINGLE key posts to the window without focus
-            // (README: ghost_key background=true). Modifier combos have no honest
-            // background path - refuse naming the action and the unblocking
-            // policy, exactly like every other foreground-only primitive.
-            let (_, key_only) = parse_key_combo(keys)?;
-            return session.key_background(window, &key_only, hint).await.map_err(|e| e.to_string());
+            // Background policy: exactly what background=true does. This path
+            // used to drop a combo's modifiers and post the bare key, so
+            // "Ctrl+S" typed an "S" into the document (40/40,
+            // docs/benches/2026-11-26-stage-6b/c10-before).
+            return key_in_background(session, window, keys, hint).await;
         }
         session.ensure_window_foreground(window).await.map_err(|e| {
             format!("ghost_key: could not confirm '{window}' as foreground before sending keys: {e}")
@@ -2709,6 +2682,63 @@ async fn handle_ghost_key(
 /// (e.g. "Ctrl++" = Ctrl+Plus): a trailing '+' is taken as the literal key, and
 /// exactly one more '+' before it is the separator. Otherwise the last '+'
 /// segment is the key and the rest are modifiers. Pure + unit-tested.
+/// What a background `ghost_key` does with a parsed key: post it, send the
+/// equivalent semantic edit message, or refuse. Posted keystrokes cannot carry
+/// modifiers (apps read the real keyboard state), so a combo is never posted as
+/// its bare key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BackgroundKey {
+    /// No modifiers: post the key itself.
+    Key,
+    /// Ctrl+C/X/V/A/Z: WM_COPY/CUT/PASTE/UNDO or EM_SETSEL, which need no
+    /// modifier state.
+    EditCommand(ghost_session::EditCommand),
+    /// Any other combo has no honest background path.
+    Refuse,
+}
+
+fn background_key_plan(mods: &[String], key: &str) -> BackgroundKey {
+    if mods.is_empty() {
+        return BackgroundKey::Key;
+    }
+    let ctrl_only = mods.len() == 1 && matches!(mods[0].to_lowercase().as_str(), "ctrl" | "control");
+    match ghost_session::EditCommand::from_ctrl_key(key) {
+        Some(cmd) if ctrl_only => BackgroundKey::EditCommand(cmd),
+        _ => BackgroundKey::Refuse,
+    }
+}
+
+/// `ghost_key` delivered to `window` without the foreground: shared by
+/// `background=true` and by the background focus policy, so the two cannot
+/// disagree about a combo.
+async fn key_in_background(
+    session: &GhostSession,
+    window: &str,
+    keys: &str,
+    hint: Option<isize>,
+) -> std::result::Result<Value, String> {
+    let (mods, key) = parse_key_combo(keys)?;
+    match background_key_plan(&mods, &key) {
+        BackgroundKey::Key => session.key_background(window, &key, hint).await.map_err(|e| e.to_string()),
+        BackgroundKey::EditCommand(cmd) => {
+            let cmd_name = match cmd {
+                ghost_session::EditCommand::Copy => "copy",
+                ghost_session::EditCommand::Cut => "cut",
+                ghost_session::EditCommand::Paste => "paste",
+                ghost_session::EditCommand::Undo => "undo",
+                ghost_session::EditCommand::SelectAll => "select_all",
+            };
+            session.edit_command_background(window, cmd_name, hint).await.map_err(|e| e.to_string())
+        }
+        BackgroundKey::Refuse => Err(format!(
+            "ghost_key background: combo '{keys}' was not sent. A posted keystroke cannot carry \
+             modifiers (apps read the real keyboard state), so it would arrive as the bare key. \
+             Background shortcuts that work: Ctrl+C/X/V/A/Z. Other combos need the foreground \
+             policy, which only the operator can unlock"
+        )),
+    }
+}
+
 fn parse_key_combo(keys: &str) -> std::result::Result<(Vec<String>, String), String> {
     // "+" as the literal key requires DOUBLING it: "Ctrl++" = Ctrl+Plus. A single
     // trailing "+" (e.g. "Ctrl+") is a truncated combo with the key forgotten and
@@ -3848,6 +3878,37 @@ fn base64_encode(data: &[u8]) -> String {
         out.push(if chunk.len() > 2 { TABLE[b2 & 0x3f] as char } else { '=' });
     }
     out
+}
+
+#[cfg(test)]
+mod background_key_tests {
+    use super::{background_key_plan, parse_key_combo, BackgroundKey};
+    use ghost_session::EditCommand;
+
+    fn plan(keys: &str) -> BackgroundKey {
+        let (mods, key) = parse_key_combo(keys).expect("parses");
+        background_key_plan(&mods, &key)
+    }
+
+    #[test]
+    fn a_single_key_is_posted() {
+        assert_eq!(plan("q"), BackgroundKey::Key);
+        assert_eq!(plan("Enter"), BackgroundKey::Key);
+    }
+
+    #[test]
+    fn ctrl_editing_shortcuts_become_semantic_edit_commands() {
+        assert_eq!(plan("Ctrl+A"), BackgroundKey::EditCommand(EditCommand::SelectAll));
+        assert_eq!(plan("ctrl+c"), BackgroundKey::EditCommand(EditCommand::Copy));
+        assert_eq!(plan("Control+V"), BackgroundKey::EditCommand(EditCommand::Paste));
+    }
+
+    #[test]
+    fn every_other_combo_is_refused_never_posted_as_its_bare_key() {
+        for keys in ["Ctrl+S", "Ctrl+Shift+K", "Alt+X", "Alt+F4", "Shift+Tab", "Ctrl+Shift+A", "Win+R"] {
+            assert_eq!(plan(keys), BackgroundKey::Refuse, "{keys}");
+        }
+    }
 }
 
 #[cfg(test)]
