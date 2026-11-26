@@ -16,7 +16,7 @@
 
 #![cfg(windows)]
 
-use crate::engine::capture::{capture_window_printwindow, compute_verification};
+use crate::engine::capture::capture_window_printwindow;
 use crate::engine::input::BackgroundClicker;
 use crate::engine::uia::{patterns, tree::UiaTree, ElementDescriptor, UiaElement};
 use crate::error::{GhostError, Result};
@@ -226,20 +226,6 @@ pub(crate) fn element_value(el: &UiaElement) -> String {
         }
     }
     v
-}
-
-/// PrintWindow before/after delta of the whole window. `None` when it cannot
-/// be judged (capture failed, size changed, blank surface).
-fn pixels_changed(hwnd: isize, before: Option<(Vec<u8>, usize, usize)>) -> Option<bool> {
-    let (b, bw, bh) = before?;
-    let (a, aw, ah) = capture_window_printwindow(hwnd).ok()?;
-    if bw != aw || bh != ah || b.is_empty() {
-        return None;
-    }
-    if a.iter().all(|&p| p == 0) || b.iter().all(|&p| p == 0) {
-        return None;
-    }
-    Some(compute_verification(&b, &a, bw, bh, true).changed)
 }
 
 /// [`crate::session`]'s `poll_click_effect` for the hidden desktop's worker
@@ -717,14 +703,41 @@ impl GhostSession {
     pub async fn hidden_click_at(&self, t: &WindowTarget, x: i32, y: i32) -> Result<Value> {
         let d = self.desktop_for(t).await?;
         let hwnd = t.hwnd;
-        let changed: Option<bool> = core(d.exec(move || -> Result<Option<bool>> {
-            let composited = ghost_core::input::window_class(hwnd).starts_with("chrome_");
-            let before = if composited { None } else { capture_window_printwindow(hwnd).ok() };
-            core(BackgroundClicker::click_screen(hwnd, x, y))?;
-            std::thread::sleep(Duration::from_millis(80));
-            Ok(if composited { None } else { pixels_changed(hwnd, before) })
-        }))??;
-        Ok(json!({
+        // Posted to the deepest child window under the point, not the
+        // top-level window: a child control never sees a click posted to its
+        // parent, and this path clicked nothing at all - Increment and Note
+        // 0/20 (docs/benches/2026-11-26-stage-8, c7-measure). Verified like
+        // the user-desktop click_at: the window's and its owner's titles every
+        // poll, whole-window persisting pixels at 80 ms.
+        let (changed, by): (Option<bool>, Option<crate::click_verify::Signal>) =
+            core(d.exec(move || -> Result<(Option<bool>, Option<crate::click_verify::Signal>)> {
+                let composited = ghost_core::input::window_class(hwnd).starts_with("chrome_");
+                let before = if composited { None } else { capture_window_printwindow(hwnd).ok() };
+                let titles_before = crate::session::titles_of(hwnd);
+                let dispatch = crate::session::deepest_child_at(hwnd, x, y);
+                core(BackgroundClicker::click_screen(dispatch, x, y))?;
+                if composited {
+                    std::thread::sleep(Duration::from_millis(80));
+                    return Ok((None, None));
+                }
+                let mut outcome = (None, None);
+                let dispatched = Instant::now();
+                for (i, at) in crate::click_verify::POLL_AT_MS.into_iter().enumerate() {
+                    let due = dispatched + Duration::from_millis(at);
+                    std::thread::sleep(due.saturating_duration_since(Instant::now()));
+                    let slow = crate::click_verify::slow_signals_due(i);
+                    outcome = crate::click_verify::decide(
+                        crate::session::titles_of(hwnd) != titles_before,
+                        false,
+                        if slow { crate::click_verify::pixel_effect(hwnd, &before) } else { None },
+                    );
+                    if outcome.0 == Some(true) {
+                        break;
+                    }
+                }
+                Ok(outcome)
+            }))??;
+        let mut out = json!({
             "ok": true,
             "mode": "hidden",
             "action": "click_at",
@@ -734,7 +747,17 @@ impl GhostSession {
             "verified": changed,
             "focus_preserved": true,
             "cursor_preserved": true,
-        }))
+        });
+        if let Some(by) = by {
+            out["verified_by"] = Value::String(by.as_str().into());
+        }
+        if changed == Some(false) {
+            out["note"] = Value::String(
+                "click posted to the control under the point; within 80 ms neither the window title nor its                  pixels changed - read state to confirm"
+                    .into(),
+            );
+        }
+        Ok(out)
     }
 
     /// `ghost_scroll` on a hidden-desktop window (posted wheel messages).

@@ -65,3 +65,36 @@ needs a `--no-capture` loop.
 Not live-reproducible: making a Ghost-driven window take the foreground while a
 human types would need synthetic typing into the human's session, which the
 probe-safety rule excludes. The unit tests carry the proof.
+
+## 3a. C7 - hidden-desktop click_at did not click at all
+
+**Measured** (`c7-measure-run*`, hidden desktop, testbed launched there with
+`ghost_window op=launch`): `ghost_click_at` on the Increment button and on the
+Note button changed NOTHING - correct 0/20 and 0/20 in both runs - and reported
+verified=false 19-20/20 (one pixel-noise true per run). The static-label control
+read false 20/20. Hidden `double_click` was already fixed in stage 6 (C3) and
+re-measured 20/20 / 20/20 here.
+
+**Cause.** `hidden_click_at` posted the click to the top-level window, which a
+child control never sees - the same defect C4 fixed on the user desktop - and
+then took one whole-window diff after a fixed 80 ms.
+
+**Change** (`crates/ghost-session/src/hidden.rs`). Post to the deepest visible
+child under the point (`session::deepest_child_at`, now `pub(crate)`); verify
+with the window's and its owner's titles every poll and whole-window persisting
+pixels at 80 ms (`session::titles_of`); `verified_by` and a note when nothing
+changed. The last user of the old single-diff `pixels_changed` is gone, so it
+and an unused import are removed.
+
+| Criterion | Target | Before (`c7-measure-run*`) | After run 1 / run 2 (`c7-after-run*`) |
+|---|---|---|---|
+| click_at on Increment lands (+1) | 20/20 | **0/20 / 0/20** | 20/20 / 20/20 |
+| ... verified | 20/20 | 1/20 / 1/20 | 20/20 / 20/20 (`title`), median 22.5 / 21.8 ms |
+| click_at on Note (effect elsewhere) lands and verifies | 20/20 | 0/20 / 0/20 | 20/20 / 20/20 (`pixels`) |
+| click_at on the static label: verified=false | >= 19/20 | 20/20 | 20/20 / 20/20 |
+| double_click on Increment (+2, verified) | 20/20 | 20/20 | 20/20 / 20/20 |
+| `cargo test --workspace` | 0 failed | 610 / 0 / 27 | 610 / 0 / 27, both runs |
+| clippy, build warnings, vibecode lint | 0 / 0 / 0 HIGH | - | 0 / 0 / 0 findings |
+
+No new unit test: the decision is `click_verify::decide` and the hit test is C4's
+`deepest_child_at`; the probe (before 0/20) is the test.

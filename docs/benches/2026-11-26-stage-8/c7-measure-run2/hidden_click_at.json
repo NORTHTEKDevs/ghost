@@ -1,0 +1,570 @@
+{
+ "increment": [
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 101.1
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 102.8
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 102.7
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 102.6
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 103.9
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 101.1
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 103.1
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 103.1
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 103.3
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 98.3
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 102.8
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 101.7
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 97.5
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 99.4
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 101.7
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 103.6
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 102.4
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 103.5
+  },
+  {
+   "correct": false,
+   "verified": true,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 101.3
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 104.6
+  }
+ ],
+ "note": [
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 99.6
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 103.0
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 104.0
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 102.7
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 100.4
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 101.1
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 100.5
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 103.1
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 98.5
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 99.3
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 106.4
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 98.6
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 103.2
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 104.7
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 104.4
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 100.7
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 100.3
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 104.1
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 98.2
+  },
+  {
+   "correct": false,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 102.6
+  }
+ ],
+ "label": [
+  {
+   "correct": true,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 100.5
+  },
+  {
+   "correct": true,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 102.3
+  },
+  {
+   "correct": true,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 103.6
+  },
+  {
+   "correct": true,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 102.0
+  },
+  {
+   "correct": true,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 102.2
+  },
+  {
+   "correct": true,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 104.0
+  },
+  {
+   "correct": true,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 102.0
+  },
+  {
+   "correct": true,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 100.9
+  },
+  {
+   "correct": true,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 103.7
+  },
+  {
+   "correct": true,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 102.5
+  },
+  {
+   "correct": true,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 102.2
+  },
+  {
+   "correct": true,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 103.7
+  },
+  {
+   "correct": true,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 103.6
+  },
+  {
+   "correct": true,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 103.5
+  },
+  {
+   "correct": true,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 102.2
+  },
+  {
+   "correct": true,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 103.7
+  },
+  {
+   "correct": true,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 102.9
+  },
+  {
+   "correct": true,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 103.3
+  },
+  {
+   "correct": true,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 104.2
+  },
+  {
+   "correct": true,
+   "verified": false,
+   "verified_by": null,
+   "is_error": false,
+   "ms": 105.0
+  }
+ ],
+ "dbl": [
+  {
+   "correct": true,
+   "verified": true,
+   "verified_by": "title",
+   "is_error": false,
+   "ms": 34.3
+  },
+  {
+   "correct": true,
+   "verified": true,
+   "verified_by": "title",
+   "is_error": false,
+   "ms": 32.3
+  },
+  {
+   "correct": true,
+   "verified": true,
+   "verified_by": "title",
+   "is_error": false,
+   "ms": 37.8
+  },
+  {
+   "correct": true,
+   "verified": true,
+   "verified_by": "title",
+   "is_error": false,
+   "ms": 38.6
+  },
+  {
+   "correct": true,
+   "verified": true,
+   "verified_by": "title",
+   "is_error": false,
+   "ms": 37.1
+  },
+  {
+   "correct": true,
+   "verified": true,
+   "verified_by": "title",
+   "is_error": false,
+   "ms": 39.3
+  },
+  {
+   "correct": true,
+   "verified": true,
+   "verified_by": "title",
+   "is_error": false,
+   "ms": 51.9
+  },
+  {
+   "correct": true,
+   "verified": true,
+   "verified_by": "title",
+   "is_error": false,
+   "ms": 37.5
+  },
+  {
+   "correct": true,
+   "verified": true,
+   "verified_by": "title",
+   "is_error": false,
+   "ms": 41.6
+  },
+  {
+   "correct": true,
+   "verified": true,
+   "verified_by": "title",
+   "is_error": false,
+   "ms": 36.6
+  },
+  {
+   "correct": true,
+   "verified": true,
+   "verified_by": "title",
+   "is_error": false,
+   "ms": 38.7
+  },
+  {
+   "correct": true,
+   "verified": true,
+   "verified_by": "title",
+   "is_error": false,
+   "ms": 36.4
+  },
+  {
+   "correct": true,
+   "verified": true,
+   "verified_by": "title",
+   "is_error": false,
+   "ms": 42.3
+  },
+  {
+   "correct": true,
+   "verified": true,
+   "verified_by": "title",
+   "is_error": false,
+   "ms": 40.0
+  },
+  {
+   "correct": true,
+   "verified": true,
+   "verified_by": "title",
+   "is_error": false,
+   "ms": 37.0
+  },
+  {
+   "correct": true,
+   "verified": true,
+   "verified_by": "title",
+   "is_error": false,
+   "ms": 37.8
+  },
+  {
+   "correct": true,
+   "verified": true,
+   "verified_by": "title",
+   "is_error": false,
+   "ms": 37.4
+  },
+  {
+   "correct": true,
+   "verified": true,
+   "verified_by": "title",
+   "is_error": false,
+   "ms": 36.7
+  },
+  {
+   "correct": true,
+   "verified": true,
+   "verified_by": "title",
+   "is_error": false,
+   "ms": 39.2
+  },
+  {
+   "correct": true,
+   "verified": true,
+   "verified_by": "title",
+   "is_error": false,
+   "ms": 36.9
+  }
+ ]
+}
