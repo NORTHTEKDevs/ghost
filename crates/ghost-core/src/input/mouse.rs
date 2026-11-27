@@ -468,3 +468,33 @@ mod tests {
         }
     }
 }
+
+/// C5 wiring: every SendInput mouse verb refuses an off-monitor point before
+/// it dispatches. Read from the source: calling them would move the human's
+/// real cursor.
+#[cfg(test)]
+mod monitor_gate_wiring {
+    fn body<'a>(src: &'a str, sig: &str) -> &'a str {
+        let start = src.find(sig).unwrap_or_else(|| panic!("{sig} not found"));
+        &src[start..start + src[start..].find("\n}\n").expect("end of fn")]
+    }
+
+    #[test]
+    fn every_mouse_verb_checks_the_monitor_before_sendinput() {
+        let src = include_str!("mouse.rs");
+        for (sig, points) in [
+            ("pub fn click(", 1),
+            ("pub fn move_to(", 1),
+            ("pub fn hover(", 1),
+            ("pub fn right_click(", 1),
+            ("pub fn double_click(", 1),
+            ("pub fn drag(", 2),
+            ("pub fn scroll(", 1),
+        ] {
+            let b = body(src, sig);
+            let send = b.find("SendInput(").unwrap_or_else(|| panic!("{sig}: no SendInput"));
+            let gates = b[..send].matches("ensure_on_a_monitor(").count();
+            assert_eq!(gates, points, "{sig}: every point must be checked before SendInput:\n{b}");
+        }
+    }
+}

@@ -3830,6 +3830,57 @@ mod abort_cleanup_tests {
     }
 }
 
+/// Wiring of round-1 fixes that are otherwise only tested through pure
+/// helpers. Read from the source: exercising them needs the real desktop.
+#[cfg(test)]
+mod wiring_tests {
+    fn method<'a>(src: &'a str, sig: &str) -> &'a str {
+        let start = src.find(sig).unwrap_or_else(|| panic!("{sig} not found"));
+        &src[start..start + src[start..].find("\n    }\n").expect("end of method")]
+    }
+
+    /// C2: WM_SETTEXT on a label or button rewrites its caption, which then
+    /// reads back as typed text. The text-control gate must precede it.
+    #[test]
+    fn act_background_type_gates_wm_settext_on_a_text_control() {
+        let src = include_str!("session.rs");
+        let act = method(src, "pub async fn act_background(");
+        let ty = &act[act.find("\"type\" => {").expect("type arm")..];
+        let gate = ty.find("!settext_ok(ctrl_hwnd, ").expect("no text-control gate in act_background type");
+        let send = ty.find("BackgroundClicker::set_text(ctrl_hwnd, ").expect("no WM_SETTEXT");
+        assert!(gate < send, "the gate must come before WM_SETTEXT:\n{ty}");
+    }
+
+    #[test]
+    fn hidden_act_type_gates_wm_settext_on_a_text_control() {
+        let src = include_str!("hidden.rs");
+        let act = method(src, "pub async fn hidden_act(");
+        let ty = &act[act.find("\"type\" => {").expect("type arm")..];
+        let gate = ty.find("may_settext(info.ctrl, ").expect("no text-control gate in hidden act type");
+        let send = ty.find("BackgroundClicker::set_text(info.ctrl, ").expect("no WM_SETTEXT");
+        assert!(gate < send, "the gate must come before WM_SETTEXT:\n{ty}");
+    }
+
+    /// F1: the waits search only the resolved window, never the whole desktop
+    /// (a decoy window's element would satisfy them).
+    #[test]
+    fn the_waits_search_only_their_window() {
+        let src = include_str!("session.rs");
+        for sig in [
+            "pub async fn wait_for_element(",
+            "pub async fn wait_for_value(",
+            "pub async fn click_and_wait_for_text(",
+        ] {
+            let b = method(src, sig);
+            assert!(b.contains("hwnd: isize"), "{sig} takes no window");
+            assert!(b.contains("_in_hwnd("), "{sig}: no window-scoped lookup:\n{b}");
+            for global in ["find_by_name_fast(", "find_by_role_fast(", "find_by_name(", "find_by_role("] {
+                assert!(!b.contains(global), "{sig} searches the whole desktop via {global}:\n{b}");
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod wait_vanish_tests {
     use super::closed_window_is_vanished;

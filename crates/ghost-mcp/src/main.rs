@@ -4313,6 +4313,39 @@ fn base64_encode(data: &[u8]) -> String {
     out
 }
 
+/// F1 wiring: every ghost_wait search arm resolves its window through
+/// `wait_scope_hwnd` and hands that handle to the session, never a
+/// whole-desktop lookup. Read from the source.
+#[cfg(test)]
+mod wait_scope_wiring {
+    #[test]
+    fn every_wait_search_arm_is_scoped_to_a_window() {
+        let src = include_str!("main.rs");
+        for (arm, call) in [
+            ("\"ghost_wait_for_element\" => {", "session.wait_for_element(hwnd, "),
+            ("\"ghost_wait_for_value\" => {", "session.wait_for_value(hwnd, "),
+            ("\"ghost_click_and_wait_for_text\" => {", "session.click_and_wait_for_text(hwnd, "),
+        ] {
+            let start = src.find(arm).unwrap_or_else(|| panic!("{arm} not found"));
+            let body = &src[start..start + src[start..].find("\n        }\n").expect("end of arm")];
+            let scope = body.find("wait_scope_hwnd(session, p)").unwrap_or_else(|| panic!("{arm}: unscoped:\n{body}"));
+            let used = body.find(call).unwrap_or_else(|| panic!("{arm}: does not pass the scoped hwnd:\n{body}"));
+            assert!(scope < used, "{body}");
+            assert!(!body.contains("_fast("), "{arm}: whole-desktop lookup:\n{body}");
+        }
+        // The ghost_wait verb routes for=text|element|value to exactly those arms.
+        let start = src.find("async fn handle_ghost_wait(").expect("handle_ghost_wait");
+        let wait = &src[start..start + src[start..].find("\n}\n").expect("end")];
+        for route in [
+            "\"text\" => handle_tool(session, \"ghost_click_and_wait_for_text\", p)",
+            "\"element\" => handle_tool(session, \"ghost_wait_for_element\", p)",
+            "\"value\" => handle_tool(session, \"ghost_wait_for_value\", p)",
+        ] {
+            assert!(wait.contains(route), "ghost_wait no longer routes {route}");
+        }
+    }
+}
+
 #[cfg(test)]
 mod stop_gate_tests {
     //! The emergency-stop gate at the MCP choke point. Pure: `stop_gate` takes
