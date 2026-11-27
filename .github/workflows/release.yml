@@ -12,6 +12,10 @@ env:
 # containing both archives. Splitting the publish out means a Linux build
 # failure cannot leave a half-populated release behind.
 
+# Read-only by default; a job that writes says so itself.
+permissions:
+  contents: read
+
 jobs:
   windows:
     name: Build Windows binaries
@@ -25,12 +29,14 @@ jobs:
       # which the README says plainly.
       SIGNING_ENABLED: ${{ secrets.WINDOWS_PFX_BASE64 != '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Build release binaries
         run: cargo build --release --bin ghost --bin ghost-http --bin ghost-mcp
@@ -121,7 +127,7 @@ jobs:
             + "  ghost-windows-x64.mcpb" | Out-File -Encoding ascii ghost-windows-x64.mcpb.sha256
           Get-Item ghost-windows-x64.mcpb | Select-Object Name, Length
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ghost-windows-x64
           path: |
@@ -134,12 +140,14 @@ jobs:
     name: Build Linux binaries
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       # The engine is pure Rust, so nothing is needed to BUILD. at-spi2-core is
       # installed only so the smoke test below can start the server.
@@ -191,7 +199,7 @@ jobs:
           sha256sum ghost-linux-x86_64.mcpb > ghost-linux-x86_64.mcpb.sha256
           ls -l ghost-linux-x86_64.mcpb
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ghost-linux-x86_64
           path: |
@@ -211,9 +219,9 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: artifacts
 
@@ -233,7 +241,7 @@ jobs:
         # does not quiet SmartScreen - only a CA certificate does that - but it
         # is the stronger claim about origin, and it holds for the Linux
         # artifacts too, which Authenticode never covers.
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
         with:
           subject-path: |
             release/*.zip
@@ -241,7 +249,7 @@ jobs:
             release/*.mcpb
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: release/*
           generate_release_notes: true

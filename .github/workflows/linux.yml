@@ -16,19 +16,24 @@ env:
 # GTK only exposes an accessible tree when accessibility is enabled, which is
 # exactly the condition docs/linux-fedora.md tells users to set.
 
+# Read-only by default; a job that writes says so itself.
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Build and unit test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
+          toolchain: stable
           components: clippy
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       # The Linux engine is pure Rust (atspi/zbus, x11rb, ashpd, evdev), so no
       # -devel packages are needed to BUILD. These are runtime components.
@@ -57,9 +62,11 @@ jobs:
     name: Live suite (engine + MCP + CLI)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Install accessibility + display stack
         run: |
@@ -146,7 +153,7 @@ jobs:
     runs-on: ubuntu-latest
     container: fedora:41
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # Exactly the packages docs/linux-fedora.md tells a user to install, so
       # this job fails if those instructions are ever wrong or incomplete.
@@ -222,9 +229,11 @@ jobs:
     name: Installer script
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Install runtime deps
         run: |
@@ -252,9 +261,11 @@ jobs:
     name: Release binaries
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Release build
         run: cargo build --release --bin ghost --bin ghost-http --bin ghost-mcp
@@ -279,7 +290,7 @@ jobs:
           grep -q '"ghost_shell"' mcp-out.json
 
       - name: Upload binary artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ghost-linux-x86_64
           path: |
