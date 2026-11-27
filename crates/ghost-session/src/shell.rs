@@ -6,8 +6,9 @@
 //!     process whose variables, cwd and env persist across commands.
 //!
 //! Persistent framing: the driver reads `<nonce> <base64(utf8 cmd)>` lines from
-//! stdin, `Invoke-Expression`s the decoded command with stderr merged, then emits
-//! a sentinel line `__GHOST_DONE_<nonce>__ <exitcode>`, where `<nonce>` is an
+//! stdin, dot-sources the decoded command with its error stream merged, then emits
+//! a sentinel line `__GHOST_DONE_<nonce>__ <exitcode>` (the native exit code, or
+//! 1 when the command threw or wrote a PowerShell error record), where `<nonce>` is an
 //! unguessable per-session secret plus a counter, so command output cannot
 //! forge a completion. base64 makes any command
 //! text injection-safe; the per-session nonce means a late sentinel from a
@@ -1193,8 +1194,10 @@ while($true){
   $b64=$line.Substring($sp+1)
   $cmd=[System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b64))
   $global:LASTEXITCODE=0
-  try{$o=Invoke-Expression $cmd 2>&1|Out-String;[Console]::Out.Write($o)}catch{[Console]::Out.Write(($_|Out-String))}
+  $fail=[System.Collections.Generic.List[object]]::new()
+  try{$o=. ([ScriptBlock]::Create($cmd)) 2>&1|ForEach-Object{if($_ -is [System.Management.Automation.ErrorRecord] -and $_.FullyQualifiedErrorId -notlike 'NativeCommandError*'){$fail.Add($_)};$_}|Out-String;[Console]::Out.Write($o)}catch{$fail.Add($_);[Console]::Out.Write(($_|Out-String))}
   $code=$LASTEXITCODE; if($null -eq $code){$code=0}
+  if($code -eq 0 -and $fail.Count -gt 0){$code=1}
   [Console]::Out.WriteLine("__GHOST_DONE_${nonce}__ $code")
   [Console]::Out.Flush()
 }
@@ -2735,6 +2738,68 @@ mod session_tests {
             let ping = ping.expect("cmd never started ping");
             assert!(in_job, "ping {ping} started before its shell was adopted, outside the stop job");
         });
+    }
+
+    /// M3: the PowerShell driver reports a failed command as failed, with its
+    /// error text, like a cold `powershell -Command` does - while native exit
+    /// codes, native stderr on success and errors the command chose to
+    /// silence keep their meaning.
+    #[cfg(windows)]
+    #[test]
+    fn the_powershell_driver_reports_errors_as_a_nonzero_exit() {
+        let cases: &[(&str, i64, &str)] = &[
+            ("throw 'boom-x'", 1, "boom-x"),
+            ("nosuchcmd_xyz", 1, "nosuchcmd_xyz"),
+            ("Get-Item nosuchfile_xyz", 1, "nosuchfile_xyz"),
+            ("Write-Output (", 1, "Missing"),
+            ("Write-Error werr-x; 'after'", 1, "werr-x"),
+            ("cmd /c exit 7", 7, ""),
+            ("Write-Output fine-x", 0, "fine-x"),
+            ("Get-Item nosuch_xyz -ErrorAction SilentlyContinue; 'quiet-x'", 0, "quiet-x"),
+            ("cmd /c \"echo native-warn 1>&2\"", 0, ""),
+            ("try { throw 'caught' } catch { 'handled-x' }", 0, "handled-x"),
+            // Session state still persists between commands.
+            ("$persist_x = 'kept-x'", 0, ""),
+            ("$persist_x", 0, "kept-x"),
+        ];
+        let results = rt().block_on(async {
+            let mut sess = warm_driver().await;
+            let mut out = Vec::new();
+            for (cmd, _, _) in cases {
+                let token = frame(&mut sess, cmd).await;
+                out.push(match read_until_sentinel(&mut sess, &token, Duration::from_secs(20)).await {
+                    ReadOutcome::Done { output, exit_code } => (output, exit_code),
+                    _ => (String::from("<no answer>"), None),
+                });
+            }
+            let _ = sess.child.start_kill();
+            out
+        });
+        let mut wrong = Vec::new();
+        for ((cmd, code, text), (output, exit)) in cases.iter().zip(&results) {
+            if *exit != Some(*code) || !output.contains(text) {
+                wrong.push(format!("{cmd:?}: exit {exit:?} (want {code}), output {output:?} (want {text:?})"));
+            }
+        }
+        assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+    }
+
+    /// `exit N` in a command still ends the driver with N: the warm `op=run`
+    /// path reports that as the command's exit code.
+    #[cfg(windows)]
+    #[test]
+    fn exit_in_a_command_still_ends_the_driver_with_its_code() {
+        let code = rt().block_on(async {
+            let mut sess = warm_driver().await;
+            let token = frame(&mut sess, "exit 5").await;
+            let outcome = read_until_sentinel(&mut sess, &token, Duration::from_secs(20)).await;
+            let eof = matches!(outcome, ReadOutcome::Eof { .. });
+            let status = tokio::time::timeout(Duration::from_secs(10), sess.child.wait()).await;
+            let _ = sess.child.start_kill();
+            assert!(eof, "the driver kept running after exit 5");
+            status.ok().and_then(|s| s.ok()).and_then(|s| s.code())
+        });
+        assert_eq!(code, Some(5));
     }
 
     /// M2: a session stays visible while a command runs in it. list shows it
