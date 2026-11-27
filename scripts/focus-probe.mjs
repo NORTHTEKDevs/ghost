@@ -21,7 +21,7 @@ server.stdout.on('data', d => {
   while ((i = buf.indexOf('\n')) >= 0) {
     const line = buf.slice(0, i); buf = buf.slice(i + 1);
     if (!line.trim()) continue;
-    try { const m = JSON.parse(line); if (m.id != null && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); } } catch {}
+    try { const m = JSON.parse(line); if (m.id != null && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); } } catch { process.stderr.write(`ghost-mcp stdout line is not JSON-RPC: ${line}\n`); }
   }
 });
 server.stderr.on('data', d => { const s = d.toString(); if (/panick/i.test(s)) process.stderr.write(s); });
@@ -141,7 +141,7 @@ await call('ghost_window', { op: 'state', name: W, state: 'close' });
 {
   const { execFileSync } = await import('node:child_process');
   const ps = `Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Where-Object { $_.CommandLine -match 'ghost-focus-probe' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`;
-  try { execFileSync('powershell.exe', ['-NoProfile', '-Command', ps], { windowsHide: true }); } catch {}
+  try { execFileSync('powershell.exe', ['-NoProfile', '-Command', ps], { windowsHide: true }); } catch (e) { console.error(`cleanup failed: ${e.message}`); }
 }
 server.stdin.end();
 setTimeout(() => process.exit(0), 500);

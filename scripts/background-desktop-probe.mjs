@@ -61,7 +61,7 @@ const watcher = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypa
 for (let i = 0; i < 40; i++) { await sleep(250); if (existsSync(watchLog) && /"kind":"started"/.test(readFileSync(watchLog, 'utf8'))) break; }
 // A separate file: the observer holds its log open without sharing writes.
 const markLog = watchLog.replace(/\.jsonl$/, '.marks.jsonl');
-appendMark = (label) => { try { require$fs.appendFileSync(markLog, JSON.stringify({ t: Date.now(), kind: 'mark', label }) + '\n'); } catch {} };
+appendMark = (label) => { try { require$fs.appendFileSync(markLog, JSON.stringify({ t: Date.now(), kind: 'mark', label }) + '\n'); } catch (e) { console.error(`mark log write failed: ${e.message}`); } };
 const started = JSON.parse(readFileSync(watchLog, 'utf8').split('\n').find(l => /"started"/.test(l)) ?? '{}');
 console.log(`${stamp()} observer up: hooks=${JSON.stringify(started.hooks)} user foreground=${started.fg}`);
 if (!started.hooks || started.hooks.some(h => !h)) { console.log('observer hooks did not install; aborting'); process.exit(3); }
@@ -76,7 +76,7 @@ server.stdout.on('data', d => {
   while ((i = buf.indexOf('\n')) >= 0) {
     const line = buf.slice(0, i); buf = buf.slice(i + 1);
     if (!line.trim()) continue;
-    try { const m = JSON.parse(line); if (m.id != null && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); } } catch {}
+    try { const m = JSON.parse(line); if (m.id != null && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); } } catch { process.stderr.write(`ghost-mcp stdout line is not JSON-RPC: ${line}\n`); }
   }
 });
 let serverErr = '';
@@ -271,7 +271,7 @@ if (simulate) {
     const web = await call('ghost_see', { ...on, mode: 'text', limit: 400 });
     notes.push(`browser page text after the run: ${(web.data.text ?? '').replace(/\s+/g, ' ').slice(0, 220)}`);
     if (savedClip && typeof savedClip.text === 'string') await call('ghost_clipboard', { op: 'set', text: savedClip.text });
-    try { ps(`Stop-Process -Id ${notepad.pid} -Force -ErrorAction SilentlyContinue`); } catch {}
+    try { ps(`Stop-Process -Id ${notepad.pid} -Force -ErrorAction SilentlyContinue`); } catch (e) { console.error(`cleanup failed: ${e.message}`); }
   }
 }
 
@@ -280,7 +280,7 @@ mark('measure_end');
 { const live = (await call('ghost_window', { op: 'anchor' })).data.anchor?.title ?? W;
   await call('ghost_window', { op: 'state', name: live, state: 'close' }); }
 await sleep(800);
-try { ps(`Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Where-Object { $_.CommandLine -match 'ghost-bg-probe-${runId}' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`); } catch {}
+try { ps(`Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Where-Object { $_.CommandLine -match 'ghost-bg-probe-${runId}' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`); } catch (e) { console.error(`cleanup failed: ${e.message}`); }
 writeFileSync(watchStop, '');
 for (let i = 0; i < 40; i++) { await sleep(250); if (/"kind":"summary"/.test(readFileSync(watchLog, 'utf8'))) break; }
 // Ghost's own account of the run, read while the server is still alive.

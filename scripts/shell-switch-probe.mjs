@@ -22,7 +22,7 @@ function server(env) {
     while ((i = buf.indexOf('\n')) >= 0) {
       const l = buf.slice(0, i); buf = buf.slice(i + 1);
       if (!l.trim()) continue;
-      try { const m = JSON.parse(l); if (m.id != null && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); } } catch {}
+      try { const m = JSON.parse(l); if (m.id != null && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); } } catch { process.stderr.write(`ghost-mcp stdout line is not JSON-RPC: ${l}\n`); }
     }
   });
   s.stderr.on('data', d => { err += d.toString(); });
