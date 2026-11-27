@@ -397,6 +397,9 @@ struct ShellSession {
 #[derive(Clone)]
 struct SessionSlot {
     pid: Option<u32>,
+    /// The shell's process group (Linux), so `kill` can end it without
+    /// waiting for a call that holds `shell`.
+    group: Option<(u32, u64)>,
     created: Instant,
     killed: Arc<AtomicBool>,
     shell: Arc<tokio::sync::Mutex<ShellSession>>,
@@ -1548,6 +1551,7 @@ async fn shell_open(shells: &Mutex<ShellRegistry>, args: &Value) -> Result<Value
     let pid = session.pid;
     let slot = SessionSlot {
         pid,
+        group: session.group,
         created: session.created,
         killed: session.killed.clone(),
         shell: Arc::new(tokio::sync::Mutex::new(session)),
@@ -1754,6 +1758,14 @@ async fn shell_kill(shells: &Mutex<ShellRegistry>, args: &Value) -> Result<Value
         .ok_or_else(|| GhostError::Config(format!("ghost_shell: no session '{id}'")))?;
     // A call running a command in it notices within one read slice and lets go.
     slot.killed.store(true, Ordering::Release);
+    // End the process first: a call holding the session (a send blocked in a
+    // read) must not keep the shell running while kill waits for the lock.
+    // The pid cannot have been reused - the session still owns the child.
+    end_group(slot.group);
+    #[cfg(windows)]
+    if let Some(pid) = slot.pid {
+        let _ = ghost_core::process::kill(pid);
+    }
     let mut sess = slot.shell.lock().await;
     let group = sess.group;
     end_shell(&mut sess.child, group);
@@ -1815,6 +1827,9 @@ async fn read_until_sentinel(sess: &mut ShellSession, token: &str, dur: Duration
         }
         let slice = (hard_end - now).min(Duration::from_millis(POLL_MS));
         match tokio::time::timeout(slice, sess.reader.read_until(b'\n', &mut sess.partial)).await {
+            // op=kill ends the process before it can take the session, so an
+            // EOF after a kill is that kill, not the shell exiting.
+            Ok(Ok(0)) | Ok(Err(_)) if sess.killed.load(Ordering::Acquire) => return ReadOutcome::Killed,
             Ok(Ok(0)) => {
                 // EOF: the driver exited. A last line with no newline is output too.
                 output.push_str(&String::from_utf8_lossy(&std::mem::take(&mut sess.partial)));
@@ -2988,6 +3003,40 @@ mod session_tests {
         ));
         let e = format!("{:?}", opened.expect_err("open in a missing cwd"));
         assert!(e.contains("is not an existing directory"), "{e}");
+    }
+
+    /// L8: kill ends the shell process at once, even while another call holds
+    /// the session (a send blocked in a read); it does not wait for the lock
+    /// before ending the process.
+    #[test]
+    fn kill_ends_the_shell_before_taking_the_session_lock() {
+        let _groups = hold_groups();
+        rt().block_on(async {
+            let reg = std::sync::Arc::new(Mutex::new(ShellRegistry::new()));
+            shell_open(&reg, &json!({"id": "l8"})).await.expect("open");
+            let shell = reg.lock().unwrap().sessions["l8"].shell.clone();
+            let mut held = shell.lock().await;
+            let killer = tokio::spawn({
+                let reg = reg.clone();
+                async move { shell_kill(&reg, &json!({"id": "l8"})).await }
+            });
+            let deadline = Instant::now() + Duration::from_secs(3);
+            let mut exited = false;
+            while Instant::now() < deadline {
+                if matches!(held.child.try_wait(), Ok(Some(_))) {
+                    exited = true;
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            if !exited {
+                let _ = held.child.start_kill();
+            }
+            drop(held);
+            let r = tokio::time::timeout(Duration::from_secs(10), killer).await;
+            assert!(exited, "the shell still ran while kill waited on the session lock");
+            assert!(matches!(r, Ok(Ok(Ok(_)))), "kill did not finish: {r:?}");
+        });
     }
 
     /// M2: a session stays visible while a command runs in it. list shows it
