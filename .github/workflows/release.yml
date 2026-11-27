@@ -4,6 +4,11 @@ on:
   push:
     tags:
       - 'v*'
+  # A dry run: builds, packs, installs from the archive, attests and collects
+  # exactly as a tag does, then stops before creating a release. Run it after
+  # changing this workflow or bumping an action, so the first run of the new
+  # version is not the real tag.
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -112,7 +117,7 @@ jobs:
         # bundle schema before it is packed. The registry lists this file.
         shell: pwsh
         run: |
-          $version = "${env:GITHUB_REF}" -replace '^refs/tags/v', ''
+          $version = if ("${env:GITHUB_REF}" -like 'refs/tags/v*') { "${env:GITHUB_REF}" -replace '^refs/tags/v', '' } else { (Get-Content server.json -Raw | ConvertFrom-Json).version }
           New-Item -ItemType Directory -Force -Path bundle | Out-Null
           jq --arg v $version --arg e 'ghost-mcp.exe' --arg p 'win32' `
             '.version = $v | .server.entry_point = $e | .server.mcp_config.command = ("${__dirname}/" + $e) | .compatibility.platforms = [$p]' `
@@ -186,21 +191,20 @@ jobs:
 
       # Run the installer from the exact archive that ships, with cargo off
       # PATH: it must install the binaries beside it, never try to build.
-      # doctor may FAIL on a runner with no desktop, so the exit code is not
-      # the check; the installed binaries are.
+      # --no-doctor because a runner has no desktop for doctor to pass on.
       - name: Install from the archive
         run: |
           set -euo pipefail
           t="$(mktemp -d)"
           tar -xzf ghost-linux-x86_64.tar.gz -C "$t"
           env -i HOME="$t/home" PATH=/usr/bin:/bin \
-            bash "$t/install.sh" --no-register --prefix "$t/bin" || true
+            bash "$t/install.sh" --no-register --no-doctor --prefix "$t/bin"
           for b in ghost ghost-mcp ghost-http; do "$t/bin/$b" --version; done
 
       - name: Pack the MCP Bundle (.mcpb)
         run: |
           set -euo pipefail
-          version="${GITHUB_REF#refs/tags/v}"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then version="${GITHUB_REF#refs/tags/v}"; else version="$(jq -r .version server.json)"; fi
           mkdir -p bundle
           jq --arg v "$version" --arg e 'ghost-mcp' --arg p 'linux' \
             '.version = $v | .server.entry_point = $e | .server.mcp_config.command = ("${__dirname}/" + $e) | .compatibility.platforms = [$p]' \
@@ -262,6 +266,7 @@ jobs:
             release/*.mcpb
 
       - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           files: release/*

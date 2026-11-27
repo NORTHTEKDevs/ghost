@@ -42,7 +42,12 @@ fn param_type(spec: &Value) -> String {
             let names: Vec<String> = values.iter().map(|v| format!("`{}`", v.as_str().unwrap_or_default())).collect();
             format!("{base}: {}", names.join(", "))
         }
-        None => base,
+        None => match (spec["minimum"].as_i64(), spec["maximum"].as_i64()) {
+            (Some(lo), Some(hi)) => format!("{base}, {lo} to {hi}"),
+            (Some(lo), None) => format!("{base}, at least {lo}"),
+            (None, Some(hi)) => format!("{base}, at most {hi}"),
+            (None, None) => base,
+        },
     }
 }
 

@@ -11,6 +11,7 @@
 #   ./scripts/install.sh                 # source checkout: build first
 #   ./install.sh --no-register           # skip the Claude Code MCP registration
 #   ./install.sh --prefix ~/bin          # install somewhere else
+#   ./install.sh --no-doctor             # skip the closing `ghost doctor`
 #
 # Deliberately does not use sudo. Everything lands under $HOME.
 
@@ -18,12 +19,16 @@ set -euo pipefail
 
 PREFIX="${HOME}/.local/bin"
 REGISTER=1
+DOCTOR=1
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --prefix) PREFIX="$2"; shift 2 ;;
+    --prefix)
+      [[ $# -ge 2 && -n "$2" ]] || { echo "--prefix needs a directory" >&2; exit 2; }
+      PREFIX="$2"; shift 2 ;;
     --no-register) REGISTER=0; shift ;;
-    -h|--help) sed -n '2,16p' "$0" | sed 's|^# \{0,1\}||'; exit 0 ;;
+    --no-doctor) DOCTOR=0; shift ;;
+    -h|--help) sed -n '2,17p' "$0" | sed 's|^# \{0,1\}||'; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -32,14 +37,19 @@ say()  { printf '\033[1m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[33mwarning:\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 
+# The prefix is registered with Claude Code, so it must be absolute.
+[[ "$PREFIX" == /* ]] || PREFIX="$PWD/$PREFIX"
+
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BINS=(ghost ghost-mcp ghost-http)
 
 # A release archive ships the binaries beside this script; a source checkout
-# keeps the script in scripts/ with the workspace one level up.
+# keeps the script in scripts/ with the workspace one level up. -f, not -x:
+# an extractor that drops the exec bit still leaves the binaries, and install
+# sets the mode anyway.
 prebuilt=1
 for b in "${BINS[@]}"; do
-  [[ -x "$HERE/$b" ]] || prebuilt=0
+  [[ -f "$HERE/$b" ]] || prebuilt=0
 done
 
 # --------------------------------------------------------------- preflight
@@ -81,7 +91,11 @@ fi
 
 mkdir -p "$PREFIX"
 for b in "${BINS[@]}"; do
-  install -m 0755 "$SRC/$b" "$PREFIX/$b"
+  if [[ "$SRC/$b" -ef "$PREFIX/$b" ]]; then
+    chmod 0755 "$PREFIX/$b"
+  else
+    install -m 0755 "$SRC/$b" "$PREFIX/$b"
+  fi
   say "installed $PREFIX/$b"
 done
 
@@ -120,6 +134,11 @@ if [[ $REGISTER -eq 1 ]]; then
 fi
 
 # --------------------------------------------------------------- verify
+
+if [[ $DOCTOR -eq 0 ]]; then
+  say "Ghost is installed. Run $PREFIX/ghost doctor to check this machine."
+  exit 0
+fi
 
 say "Running diagnostics"
 set +e

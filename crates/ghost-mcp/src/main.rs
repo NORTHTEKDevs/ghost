@@ -2203,7 +2203,7 @@ async fn handle_tool(
                     let png = session.screenshot(ghost_session::session::Region::full()).await.map_err(|e| e.to_string())?;
                     return Ok(json!({ "png_base64": base64_encode(&png), "size_bytes": png.len() }));
                 }
-                let max_dim = p.get("max_dim").and_then(|v| v.as_u64()).unwrap_or(1280) as u32;
+                let max_dim = max_dim_arg(p).unwrap_or(1280);
                 let quality = p.get("jpeg_quality").and_then(|v| v.as_u64()).map(|q| q.min(100) as u8).unwrap_or(75);
                 let bytes = session.screenshot_region(None, Some(max_dim), Some(quality)).await.map_err(|e| e.to_string())?;
                 Ok(json!({ "jpeg_base64": base64_encode(&bytes), "size_bytes": bytes.len() }))
@@ -2283,7 +2283,7 @@ async fn handle_tool(
             } else {
                 None
             };
-            let max_dim = p["max_dim"].as_u64().map(|n| n as u32);
+            let max_dim = max_dim_arg(p);
             let jpeg_quality = p["jpeg_quality"].as_u64().map(|n| n.min(100) as u8);
             let bytes = session.screenshot_region(rect, max_dim, jpeg_quality).await.map_err(|e| e.to_string())?;
             let key = if jpeg_quality.is_some() { "jpeg_base64" } else { "png_base64" };
@@ -3209,11 +3209,17 @@ async fn handle_ghost_snapshot(session: &GhostSession, args: &Value) -> std::res
     Ok(snapshot_response(&elements, p))
 }
 
+/// `max_dim` as a u32. A value past u32 saturates: `as u32` wrapped 2^32 to
+/// 0, which means "no resize" rather than "as large as possible".
+fn max_dim_arg(p: &Value) -> Option<u32> {
+    p.get("max_dim").and_then(|v| v.as_u64()).map(|n| u32::try_from(n).unwrap_or(u32::MAX))
+}
+
 /// Returns (foreground_mode, max_dim, jpeg_quality) for ghost_screenshot default behaviour.
 /// Exposed as a pure function so it can be unit-tested without a live session.
 fn screenshot_default_opts(p: &Value) -> (bool, u32, u8) {
     let foreground = p.get("foreground").and_then(|v| v.as_bool()).unwrap_or(true);
-    let max_dim = p.get("max_dim").and_then(|v| v.as_u64()).unwrap_or(768) as u32;
+    let max_dim = max_dim_arg(p).unwrap_or(768);
     let quality = p.get("jpeg_quality").and_then(|v| v.as_u64()).map(|q| q.min(100) as u8).unwrap_or(75);
     (foreground, max_dim, quality)
 }
@@ -5729,6 +5735,17 @@ mod tests {
         assert!(fg, "default should be foreground=true");
         assert_eq!(dim, 768);
         assert_eq!(qual, 75);
+    }
+
+    /// `as u32` wrapped 2^32 to 0, which means "no resize"; a value past u32
+    /// now saturates, so it still never shrinks the image.
+    #[test]
+    fn screenshot_max_dim_past_u32_saturates_instead_of_wrapping() {
+        let (_, dim, _) = screenshot_default_opts(&json!({ "max_dim": 4_294_967_296u64 }));
+        assert_eq!(dim, u32::MAX);
+        assert_eq!(max_dim_arg(&json!({ "max_dim": 4_294_967_297u64 })), Some(u32::MAX));
+        assert_eq!(max_dim_arg(&json!({ "max_dim": 0 })), Some(0));
+        assert_eq!(max_dim_arg(&json!({})), None);
     }
 
     #[test]

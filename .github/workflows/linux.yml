@@ -263,7 +263,8 @@ jobs:
 
       # The release archive puts install.sh beside prebuilt binaries. Rebuild
       # that layout from the binaries just built and run it with cargo off
-      # PATH: it must install what is there, never try to build.
+      # PATH: it must install what is there, never try to build. The prefix is
+      # relative on purpose: the installer must make it absolute.
       - name: Run the installer from the release archive layout
         run: |
           set -euo pipefail
@@ -272,8 +273,9 @@ jobs:
           cp target/release/ghost target/release/ghost-mcp target/release/ghost-http scripts/install.sh "$t/dist/"
           tar -czf "$t/ghost.tar.gz" -C "$t/dist" .
           tar -xzf "$t/ghost.tar.gz" -C "$t/x"
+          cd "$t"
           env -i HOME="$t/home" PATH=/usr/bin:/bin \
-            bash "$t/x/install.sh" --no-register --prefix "$t/bin" || true
+            bash "$t/x/install.sh" --no-register --no-doctor --prefix bin
           for b in ghost ghost-mcp ghost-http; do "$t/bin/$b" --version; done
 
   release:

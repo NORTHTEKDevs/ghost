@@ -188,7 +188,7 @@ Capture a screenshot of the window the agent is working in. Target = window= or 
 | --- | --- | --- | --- |
 | `foreground` | boolean |  | Only without a window/anchor: crop to the foreground window (default true) |
 | `full` | boolean |  | Full-screen capture (default false) |
-| `jpeg_quality` | integer |  |  |
+| `jpeg_quality` | integer, 0 to 100 |  |  |
 | `max_dim` | integer |  | Longest-edge resize (default 768; 1280 with full=true; 0 = no resize, and with full=true a lossless PNG) |
 | `name` | string |  | Crop to the element with this accessible name |
 | `rect` | array |  | Crop to [left,top,right,bottom] region |
@@ -350,7 +350,7 @@ Open a new background tab (never brings the tab or window to the front). Returns
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `browser` | string |  |  |
-| `timeout_ms` | integer |  | Load timeout when waiting, default 30000, max 600000 |
+| `timeout_ms` | integer, 1 to 600000 |  | Load timeout when waiting, default 30000, max 600000 |
 | `url` | string |  |  |
 | `wait` | boolean |  | Wait for the page to load (default true; about:blank never waits) |
 
@@ -362,7 +362,7 @@ Navigate a tab and wait for load. Runs in a background tab; the user's view neve
 | --- | --- | --- | --- |
 | `browser` | string |  |  |
 | `tab` | string | yes |  |
-| `timeout_ms` | integer |  | Load timeout, default 30000, max 600000 |
+| `timeout_ms` | integer, 1 to 600000 |  | Load timeout, default 30000, max 600000 |
 | `url` | string | yes |  |
 
 ### `ghost_tab_click`
@@ -374,7 +374,7 @@ Click an element by CSS selector via a trusted synthetic mouse event inside the 
 | `browser` | string |  |  |
 | `selector` | string | yes |  |
 | `tab` | string | yes |  |
-| `timeout_ms` | integer |  |  |
+| `timeout_ms` | integer, 1 to 600000 |  |  |
 
 ### `ghost_tab_type`
 
@@ -473,7 +473,7 @@ Wait until a CSS selector matches an element in the tab.
 | `browser` | string |  |  |
 | `selector` | string | yes |  |
 | `tab` | string | yes |  |
-| `timeout_ms` | integer |  |  |
+| `timeout_ms` | integer, 1 to 600000 |  |  |
 
 ### `ghost_tab_close`
 
@@ -566,7 +566,7 @@ Wait for a window with a matching title to appear on an isolated desktop.
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `desktop` | string |  |  |
-| `timeout_ms` | integer |  |  |
+| `timeout_ms` | integer, 1 to 600000 |  |  |
 | `title` | string | yes |  |
 
 ### `ghost_desktop_click`
