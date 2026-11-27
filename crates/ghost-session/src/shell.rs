@@ -256,10 +256,26 @@ pub fn launch_allowed_with_shell_off(
         }
     }
 
+    // Only reached by an allowlisted program when it is itself one of these.
+    let interpreter = std::iter::once(program).chain(resolved.as_deref()).any(|name| {
+        let (_, stem, ext) = name_parts(name);
+        SCRIPT_EXTS.contains(&ext.as_str())
+            || is_python(&stem)
+            || INTERPRETERS.contains(&stem.as_str())
+            || LAUNCHERS.contains(&stem.as_str())
+    });
+    // The operator vouched for this program: its arguments are its own.
+    if allow.is_some() && !interpreter {
+        return Ok(());
+    }
+    // A program that resolved to a plain application gives `-c`, `/k`, `-C`
+    // its own meaning (ffmpeg, gcc, git); the switch scan is for interpreters
+    // and programs Ghost cannot see.
+    let scan_switches = resolved.is_none() || interpreter;
     let strict = resolved.is_none();
     for tok in args.split_whitespace() {
         let t = tok.trim_matches(['"', '\'']);
-        if is_ps_script_switch(t, strict) || is_cmd_switch(t, strict) {
+        if scan_switches && (is_ps_script_switch(t, strict) || is_cmd_switch(t, strict)) {
             return refuse(&format!("the argument '{tok}' looks like inline script"));
         }
         if !t.contains("://") {
@@ -2144,11 +2160,39 @@ mod launch_gate_tests {
         for c in ["notepad", r"notepad C:\x.txt", "NOTEPAD.EXE", r"C:\Tools\viewer.exe", r#""c:\tools\VIEWER.exe" a.png"#] {
             assert!(ok(c).is_ok(), "{c}: {:?}", ok(c));
         }
-        for c in ["mspaint", "calc", r"C:\Other\viewer.exe", r"C:\Tools\viewer2.exe", "cmd /c x", "notepad -command x"] {
+        for c in ["mspaint", "calc", r"C:\Other\viewer.exe", r"C:\Tools\viewer2.exe", "cmd /c x"] {
             let e = ok(c).expect_err(c);
             assert!(e.contains("GHOST_LAUNCH_ALLOW") || e.contains("inline script"), "{c}: {e}");
         }
         assert!(ok("mspaint").unwrap_err().contains("GHOST_LAUNCH_ALLOW"));
+    }
+
+    /// The PowerShell/cmd switch scan exists for interpreters and programs it
+    /// cannot see. A program that resolved to a plain application, or one the
+    /// operator allowlisted, keeps its own `-c` / `/k` / `-C` meanings.
+    #[test]
+    fn switches_of_resolved_plain_programs_and_allowlisted_ones_are_not_script() {
+        let resolve = |p: &str| {
+            let stem = p.to_ascii_lowercase();
+            ["ffmpeg", "gcc", "git", "tar", "vim", "robocopy", "app", "notepad"]
+                .contains(&stem.as_str())
+                .then(|| format!(r"C:\t\{stem}.exe"))
+        };
+        assert_eq!(launch_allowed_with_shell_off("ffmpeg -c:v x", Some(&["ffmpeg".into()]), &|_| Some(r"C:\t\ffmpeg.exe".into())), Ok(()));
+        assert_eq!(launch_allowed_with_shell_off("notepad -command x", Some(&["notepad".into()]), &resolve), Ok(()));
+        for c in ["ffmpeg -i a.mp4 -c:v libx264 b.mp4", "gcc -c x.c", "git -C dir status", "tar -c -f x.tar d", "vim -c q",
+                  "robocopy a b /r:1", "app /k", "app /c x", "app -encodedcommand x", "app -File x"] {
+            assert_eq!(launch_allowed_with_shell_off(c, None, &resolve), Ok(()), "{c}");
+        }
+        // Still refused: an interpreter named as an argument to a program
+        // that resolved (a proxy launcher Ghost does not know about).
+        for c in ["app cmd /c calc", "app powershell -c x", "app pwsh.exe"] {
+            assert!(launch_allowed_with_shell_off(c, None, &resolve).is_err(), "{c}");
+        }
+        // An allowlisted interpreter still may not be handed inline script.
+        let pwsh = |_: &str| Some(r"C:\p\pwsh.exe".to_string());
+        assert!(launch_allowed_with_shell_off("pwsh -c x", Some(&["pwsh".into()]), &pwsh).is_err());
+        assert_eq!(launch_allowed_with_shell_off("pwsh x.txt", Some(&["pwsh".into()]), &pwsh), Ok(()));
     }
 
     /// The body of `fn_sig` in `src`, up to the end of the function.
