@@ -5,6 +5,7 @@ use serde_json::{json, Value};
 use ghost_session::{GhostSession, LocateMode, Target, TargetSource, WindowTarget};
 
 mod audit;
+mod cli;
 mod ext;
 mod realinput;
 use std::io::{BufRead, Write};
@@ -453,6 +454,13 @@ fn _assert_session_shareable() {
 // correlated by JSON-RPC id, which is the protocol's contract; a single writer
 // task owns stdout so two responses can never interleave bytes.
 fn main() {
+    // --version / --help answer before anything starts.
+    // args_os: a non-UTF-8 argument from a host is ignored, never a panic.
+    let args: Vec<String> = std::env::args_os().skip(1).filter_map(|a| a.into_string().ok()).collect();
+    if let Some(out) = cli::cli_answer(&args) {
+        println!("{out}");
+        return;
+    }
     // Physical-pixel coordinates. Must precede any window/DC use. Gated: on
     // macOS `engine` has no `windows`/`linux` arm yet, so this path doesn't
     // exist there (see docs/macos-build.md).
