@@ -10,7 +10,7 @@ pub fn check_nav_url(url: &str) -> Result<(), String> {
     // control character anywhere is refused rather than normalized.
     let ok = !u.chars().any(|c| c.is_control()) && {
         let lower = u.to_ascii_lowercase();
-        lower == "about:blank"
+        lower.strip_prefix("about:blank").is_some_and(|r| r.is_empty() || r.starts_with(['#', '?']))
             || lower.strip_prefix("http://").is_some_and(|r| !r.is_empty())
             || lower.strip_prefix("https://").is_some_and(|r| !r.is_empty())
     };
@@ -162,7 +162,8 @@ mod tests {
 
     #[test]
     fn only_http_https_and_about_blank_navigate() {
-        for ok in ["http://localhost:3000/x", "https://example.com", "HTTP://127.0.0.1/", " https://a.b ", "about:blank"] {
+        for ok in ["http://localhost:3000/x", "https://example.com", "HTTP://127.0.0.1/", " https://a.b ", "about:blank",
+                   "about:blank#x", "about:blank?x", "About:Blank#"] {
             assert!(check_nav_url(ok).is_ok(), "{ok}");
         }
         for bad in [
@@ -170,6 +171,7 @@ mod tests {
             "view-source:https://a.b", "javascript:alert(1)", "data:text/html,hi", "ftp://a.b/x",
             "chrome-extension://abc/p.html", "about:srcdoc", "about:config", "FILE:///etc/passwd",
             "jav\tascript:alert(1)", "\u{0}file:///x", "", "example.com", "//example.com",
+            "about:blankx", "about:blank/x", "about:blank:x",
         ] {
             let e = check_nav_url(bad).expect_err(bad);
             assert!(e.starts_with("invalid params: "), "{e}");
