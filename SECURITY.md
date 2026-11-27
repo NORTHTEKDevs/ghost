@@ -20,9 +20,11 @@ So the security boundary is the transport, not the verbs:
 - `ghost-mcp` speaks JSON-RPC over **stdio** only. It has no network listener.
   Whoever spawns the process is already trusted with that user's session.
 - `ghost-http` binds **127.0.0.1:7878 by default** and has **no
-  authentication**. `--addr` will happily bind anything you tell it to, so do
-  not point it at `0.0.0.0` or expose it to a network. It is a local
-  convenience for scripts, not a service.
+  authentication**. It refuses to start on a non-loopback `--addr`, answers 403
+  to any request whose Host is not its own loopback name and port (DNS
+  rebinding) or that carries an Origin header (browser CSRF), and `/run` only
+  takes `application/json`. It is a local convenience for scripts, not a
+  service: any local process can still call it.
 - `ghost_shell` runs arbitrary commands. `GHOST_SHELL=off` disables that verb
   entirely, and the launch verbs then refuse command interpreters and script
   hosts. It is not a sandbox: keyboard input and clicks can still start

@@ -391,6 +391,11 @@ Start the server:
 ghost-http --addr 127.0.0.1:7878
 ```
 
+`--addr` must be a loopback address. The server answers 403 to requests whose
+Host is not `127.0.0.1`, `localhost` or `[::1]` with its own port, and to any
+request carrying an `Origin` header (browsers), so a web page cannot drive it;
+scripts such as curl are unaffected. `/run` needs `Content-Type: application/json`.
+
 Then from **any language**:
 
 ```bash

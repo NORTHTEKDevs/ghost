@@ -9,7 +9,7 @@
 //! GhostSession holds !Send COM handles, so it runs on a dedicated OS thread
 //! and we dispatch requests to it via a channel actor.
 
-use axum::{extract::State, http::StatusCode, response::Json, routing::{get, post}, Router};
+use axum::{extract::State, http::StatusCode, response::{IntoResponse, Json}, routing::{get, post}, Router};
 use clap::Parser;
 use ghost_session::{By, GhostSession, Region};
 use serde::Deserialize;
@@ -270,9 +270,9 @@ async fn h_set_clip(State(s): State<AppState>, Json(r): Json<ClipReq>) -> Result
     refuse_if_stopped()?;
     send(&s.tx, |reply| Cmd::SetClipboard { text: r.text, reply }).await.map(Json).map_err(json_err)
 }
-async fn h_run(State(s): State<AppState>, body: String) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+async fn h_run(State(s): State<AppState>, Json(body): Json<Value>) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     refuse_if_stopped()?;
-    send(&s.tx, |reply| Cmd::Run { json: body, reply }).await.map(Json).map_err(json_err)
+    send(&s.tx, |reply| Cmd::Run { json: body.to_string(), reply }).await.map(Json).map_err(json_err)
 }
 
 async fn h_health() -> Json<Value> {
@@ -312,10 +312,74 @@ async fn main() {
     tracing_subscriber::fmt().with_writer(std::io::stderr).init();
     let cli = Cli::parse();
 
-    let tx = spawn_session_thread(cli.timeout_ms);
-    let state = AppState { tx };
+    let addr = match loopback_addr(&cli.addr) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("ghost-http: {e}");
+            std::process::exit(2);
+        }
+    };
 
-    let app = Router::new()
+    let tx = spawn_session_thread(cli.timeout_ms);
+    let listener = tokio::net::TcpListener::bind(addr).await
+        .expect("bind failed");
+    let port = listener.local_addr().expect("local addr").port();
+    let app = build_router(tx, port);
+    eprintln!("ghost-http listening on http://{}", addr);
+    eprintln!("  curl http://{}/tools  for endpoint docs", addr);
+    axum::serve(listener, app).await.expect("serve failed");
+}
+
+/// `--addr` must be a loopback address. The Host check refuses every remote
+/// request anyway, so a non-loopback bind could only ever be a misconfiguration.
+fn loopback_addr(raw: &str) -> Result<std::net::SocketAddr, String> {
+    let fixed = match raw.strip_prefix("localhost:") {
+        Some(port) => format!("127.0.0.1:{port}"),
+        None => raw.to_string(),
+    };
+    let addr: std::net::SocketAddr = fixed.parse().map_err(|_| {
+        format!("--addr '{raw}' is not a loopback IP:port (use 127.0.0.1:PORT, [::1]:PORT or localhost:PORT)")
+    })?;
+    if !addr.ip().is_loopback() {
+        return Err(format!(
+            "--addr '{raw}' is not a loopback address. ghost-http has no authentication and only serves local clients; bind 127.0.0.1, [::1] or localhost"
+        ));
+    }
+    if addr.port() == 0 {
+        return Err(format!("--addr '{raw}': port 0 is not allowed, pick a fixed loopback port"));
+    }
+    Ok(addr)
+}
+
+/// Accept only requests a local script sends: Host is this server's own
+/// loopback name and port (DNS rebinding sends the attacker's name), and no
+/// Origin header (browsers attach one to every cross-origin POST, including
+/// `text/plain` "simple" requests that skip the CORS preflight).
+async fn guard_request(
+    State(port): State<u16>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let host_ok = req
+        .headers()
+        .get(axum::http::header::HOST)
+        .and_then(|h| h.to_str().ok())
+        .is_some_and(|h| {
+            let h = h.to_ascii_lowercase();
+            [format!("127.0.0.1:{port}"), format!("localhost:{port}"), format!("[::1]:{port}")].contains(&h)
+        });
+    if !host_ok {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "forbidden: Host must be 127.0.0.1, localhost or [::1] with this server's port"}))).into_response();
+    }
+    if req.headers().contains_key(axum::http::header::ORIGIN) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "forbidden: browser requests (Origin header) are not accepted"}))).into_response();
+    }
+    next.run(req).await
+}
+
+fn build_router(tx: mpsc::UnboundedSender<Cmd>, port: u16) -> Router {
+    let state = AppState { tx };
+    Router::new()
         .route("/health", get(h_health))
         .route("/", get(h_tools))
         .route("/tools", get(h_tools))
@@ -332,16 +396,12 @@ async fn main() {
         .route("/describe", post(h_describe))
         .route("/clipboard", get(h_get_clip).post(h_set_clip))
         .route("/run", post(h_run))
-        // MEDIUM-5: removed CorsLayer::permissive() - it allowed any web page on the same
-        // machine to POST to ghost-http via fetch() (localhost CSRF). Callers are curl/local
-        // scripts, not browsers. No CORS headers = browsers block cross-origin requests.
-        .with_state(state);
-
-    let listener = tokio::net::TcpListener::bind(&cli.addr).await
-        .expect("bind failed");
-    eprintln!("ghost-http listening on http://{}", cli.addr);
-    eprintln!("  curl http://{}/tools  for endpoint docs", cli.addr);
-    axum::serve(listener, app).await.expect("serve failed");
+        .with_state(state)
+        // Removing CORS headers alone is not enough: a cross-origin POST with a
+        // simple content type is sent (and acted on) without a preflight, and
+        // DNS rebinding makes the page same-origin. So every route checks Host
+        // and Origin, and /run only takes JSON.
+        .layer(axum::middleware::from_fn_with_state(port, guard_request))
 }
 
 #[cfg(all(test, windows))]
@@ -363,5 +423,84 @@ mod tests {
         let error = body.0["error"].as_str().unwrap();
         assert!(error.contains("stopped") && !error.contains("ghost_reset"), "{error}");
         assert!(refuse_if_stopped().is_ok());
+    }
+}
+
+#[cfg(test)]
+mod guard_tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::{header, Request};
+    use tower::ServiceExt;
+
+    /// A session stand-in: answers ListWindows, refuses everything else, never
+    /// touches the desktop.
+    fn fake_router(port: u16) -> Router {
+        let (tx, mut rx) = mpsc::unbounded_channel::<Cmd>();
+        tokio::spawn(async move {
+            while let Some(cmd) = rx.recv().await {
+                match cmd {
+                    Cmd::ListWindows { reply } => { let _ = reply.send(Ok(json!({"windows": []}))); }
+                    Cmd::Run { reply, .. } => { let _ = reply.send(Ok(json!({"ran": true}))); }
+                    _ => {}
+                }
+            }
+        });
+        build_router(tx, port)
+    }
+
+    async fn status(app: Router, req: Request<Body>) -> StatusCode {
+        app.oneshot(req).await.unwrap().status()
+    }
+
+    fn get_req(host: Option<&str>, origin: Option<&str>) -> Request<Body> {
+        let mut b = Request::builder().uri("/list-windows");
+        if let Some(h) = host { b = b.header(header::HOST, h); }
+        if let Some(o) = origin { b = b.header(header::ORIGIN, o); }
+        b.body(Body::empty()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn good_host_passes() {
+        for h in ["127.0.0.1:7878", "localhost:7878", "[::1]:7878", "LocalHost:7878"] {
+            assert_eq!(status(fake_router(7878), get_req(Some(h), None)).await, StatusCode::OK, "{h}");
+        }
+    }
+
+    #[tokio::test]
+    async fn bad_or_missing_host_is_403() {
+        for h in [Some("evil.example:7878"), Some("127.0.0.1:9999"), Some("127.0.0.1"), Some("localhost.evil.com:7878"), None] {
+            assert_eq!(status(fake_router(7878), get_req(h, None)).await, StatusCode::FORBIDDEN, "{h:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn any_origin_is_403() {
+        for o in ["http://evil.example", "http://127.0.0.1:7878", "null"] {
+            assert_eq!(status(fake_router(7878), get_req(Some("127.0.0.1:7878"), Some(o))).await, StatusCode::FORBIDDEN, "{o}");
+        }
+    }
+
+    #[tokio::test]
+    async fn run_requires_json_content_type() {
+        let req = |ct: Option<&str>| {
+            let mut b = Request::builder().method("POST").uri("/run").header(header::HOST, "127.0.0.1:7878");
+            if let Some(c) = ct { b = b.header(header::CONTENT_TYPE, c); }
+            b.body(Body::from(r#"{"steps":[]}"#)).unwrap()
+        };
+        assert_eq!(status(fake_router(7878), req(Some("text/plain"))).await, StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        assert_eq!(status(fake_router(7878), req(None)).await, StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        assert_eq!(status(fake_router(7878), req(Some("application/json"))).await, StatusCode::OK);
+    }
+
+    #[test]
+    fn addr_must_be_loopback() {
+        for ok in ["127.0.0.1:7878", "[::1]:7878", "localhost:7878", "127.0.0.2:80"] {
+            assert!(loopback_addr(ok).is_ok(), "{ok}");
+        }
+        for bad in ["0.0.0.0:7878", "192.168.1.5:7878", "[::]:7878", "example.com:80", "7878", "127.0.0.1:0", ""] {
+            let e = loopback_addr(bad).expect_err(bad);
+            assert!(e.contains("loopback"), "{bad}: {e}");
+        }
     }
 }
