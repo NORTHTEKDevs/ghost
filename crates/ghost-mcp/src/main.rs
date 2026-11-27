@@ -4142,7 +4142,7 @@ fn lean_tools_schema() -> Value {
               "name": { "type": "string", "description": "Crop to the element with this accessible name" },
               "role": { "type": "string", "description": "Crop to the element with this role" },
               "rect": { "type": "array", "items": { "type": "integer" }, "minItems": 4, "maxItems": 4, "description": "Crop to [left,top,right,bottom] region" },
-              "max_dim": { "type": "integer", "description": "Longest-edge resize (default 768; 1280 with full=true; 0 = no resize, lossless PNG)" },
+              "max_dim": { "type": "integer", "description": "Longest-edge resize (default 768; 1280 with full=true; 0 = no resize, and with full=true a lossless PNG)" },
               "jpeg_quality": { "type": "integer", "minimum": 0, "maximum": 100 }
           }}},
         // --- Window management ---
@@ -6305,3 +6305,6 @@ mod tests {
 
 #[cfg(test)]
 mod arg_validation_tests;
+
+#[cfg(test)]
+mod tool_reference_tests;
