@@ -500,6 +500,14 @@ mod stop_kill {
         (now && !was) || (human && !was_human)
     }
 
+    /// End this server's own shells now, as the watcher would on its next
+    /// tick. The generation moves first so a shell ended here reads as ended
+    /// by the stop.
+    pub(super) fn end_own_now() {
+        STOP_GEN.fetch_add(1, Ordering::AcqRel);
+        super::platform::end_own();
+    }
+
     /// Start the watcher once: on each rise of the stop, end shells.
     pub(super) fn ensure_watcher() {
         static STARTED: std::sync::Once = std::sync::Once::new();
@@ -592,6 +600,12 @@ mod platform {
                 tracing::warn!(pid, "could not put the shell in the stop job: {e}");
             }
         }
+    }
+
+    /// The processes in this server's stop job.
+    #[cfg(test)]
+    pub(super) fn job_members() -> Vec<u32> {
+        job().map(|j| j.process_ids()).unwrap_or_default()
     }
 
     /// Creation time of a process (FILETIME ticks), to tell it from a later
@@ -726,9 +740,48 @@ mod platform {
         }
         // This server's own job, in every case (a `scope: "process"` stop
         // reaches only this one).
+        end_own();
+    }
+
+    /// End this server's own job: every shell it started and their programs.
+    pub(super) fn end_own() {
         if let Some((job, _)) = JOB.get().and_then(|j| j.as_ref()) {
-            let _ = job.terminate(code);
+            let _ = job.terminate(crate::engine::process::manager::KILLED_EXIT_CODE);
         }
+    }
+
+    /// Resume every thread of a process started suspended.
+    pub(super) fn resume(pid: u32) -> Result<(), String> {
+        use windows::Win32::Foundation::CloseHandle;
+        use windows::Win32::System::Diagnostics::ToolHelp::{
+            CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
+        };
+        use windows::Win32::System::Threading::{OpenThread, ResumeThread, THREAD_SUSPEND_RESUME};
+        let mut resumed = 0;
+        unsafe {
+            let snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0).map_err(|e| e.to_string())?;
+            let mut t = THREADENTRY32 { dwSize: std::mem::size_of::<THREADENTRY32>() as u32, ..Default::default() };
+            if Thread32First(snap, &mut t).is_ok() {
+                loop {
+                    if t.th32OwnerProcessID == pid {
+                        if let Ok(h) = OpenThread(THREAD_SUSPEND_RESUME, false, t.th32ThreadID) {
+                            if ResumeThread(h) != u32::MAX {
+                                resumed += 1;
+                            }
+                            let _ = CloseHandle(h);
+                        }
+                    }
+                    if Thread32Next(snap, &mut t).is_err() {
+                        break;
+                    }
+                }
+            }
+            let _ = CloseHandle(snap);
+        }
+        if resumed == 0 {
+            return Err(format!("no thread of process {pid} could be resumed"));
+        }
+        Ok(())
     }
 
     /// End the listed jobs of servers that are still running (by name).
@@ -914,6 +967,11 @@ mod platform {
         groups.iter().filter(|&&(pgid, start)| table.group_still_ours(pgid, start)).map(|&(pgid, _)| pgid).collect()
     }
 
+    /// This server's own shells are exactly what a stop ends here.
+    pub(super) fn end_own() {
+        end_on_stop();
+    }
+
     /// Kill every group this process started that is still ours, then forget
     /// them all.
     pub(super) fn end_on_stop() {
@@ -932,6 +990,42 @@ mod platform {
 }
 
 use platform::confine;
+
+/// Start a shell and put it in the stop job (Windows) or group list (Linux).
+///
+/// Windows: the shell starts suspended and only runs once it is in the job,
+/// so nothing it starts can be born outside the job (under load, a shell
+/// started running could launch a program before adoption, and the stop then
+/// missed it). Also sets CREATE_NO_WINDOW (see `no_console_window`).
+/// `adopt_delay` is zero except in tests, which widen the window between
+/// start and adoption to prove nothing escapes through it.
+fn spawn_confined(command: &mut Command, adopt_delay: Duration) -> std::io::Result<Child> {
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        const CREATE_SUSPENDED: u32 = 0x0000_0004;
+        command.creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED);
+    }
+    #[allow(unused_mut)]
+    let mut child = command.spawn()?;
+    if !adopt_delay.is_zero() {
+        std::thread::sleep(adopt_delay);
+    }
+    confine(child.id());
+    #[cfg(windows)]
+    if let Err(e) = child.id().ok_or_else(|| "no pid".to_string()).and_then(platform::resume) {
+        let _ = child.start_kill();
+        return Err(std::io::Error::other(format!("could not resume the shell: {e}")));
+    }
+    Ok(child)
+}
+
+/// The stop was seen on a shell call's own path: end this server's shells and
+/// what they started now, rather than leave it to the watcher's next tick
+/// (the call could otherwise return while the programs still run).
+fn end_own_on_stop() {
+    stop_kill::end_own_now();
+}
 
 /// The process group a shell leads (Linux) and its leader's start time,
 /// recorded at spawn so a later kill can tell the group from a reused id.
@@ -1033,10 +1127,8 @@ fn spawn_driver(cwd: Option<&str>) -> Result<ShellSession> {
     in_own_group(&mut command);
 
     let born_gen = stop_kill::generation();
-    let mut child = command
-        .spawn()
+    let mut child = spawn_confined(&mut command, Duration::ZERO)
         .map_err(|e| GhostError::Config(format!("failed to start persistent shell: {e}")))?;
-    confine(child.id());
     let stdin = child.stdin.take().unwrap();
     let stdout = child.stdout.take().unwrap();
     let pid = child.id();
@@ -1223,10 +1315,8 @@ impl GhostSession {
         in_own_group(&mut command);
         let started = Instant::now();
         let born_gen = stop_kill::generation();
-        let mut child = command
-            .spawn()
+        let mut child = spawn_confined(&mut command, Duration::ZERO)
             .map_err(|e| GhostError::Config(format!("failed to spawn {shell}: {e}")))?;
-        confine(child.id());
         let group = group_of(child.id());
         let mut guard = GroupGuard(group);
         let mut stdout = child.stdout.take().unwrap();
@@ -1245,6 +1335,9 @@ impl GhostSession {
             _ = collect => {}
             _ = tokio::time::sleep(dur) => { timed_out = true; }
             _ = wait_for_stop() => { stopped = true; }
+        }
+        if stopped {
+            end_own_on_stop();
         }
         if timed_out || stopped {
             end_shell(&mut child, group);
@@ -1338,6 +1431,9 @@ impl GhostSession {
             // A spare is never in the registry, so nothing kills it; treat a
             // kill like a stop if it ever happens.
             ReadOutcome::Stopped | ReadOutcome::Killed => {
+                if crate::engine::input::hotkey::is_stopped() {
+                    end_own_on_stop();
+                }
                 let _ = sess.child.start_kill();
                 Err(GhostError::Stopped)
             }
@@ -1513,6 +1609,7 @@ async fn finish_send(
             }))
         }
         ReadOutcome::Stopped => {
+            end_own_on_stop();
             let _ = sess.child.start_kill();
             forget(shells, &id, slot);
             Err(GhostError::Stopped)
@@ -2297,8 +2394,9 @@ mod stop_reach_tests {
 
     /// The Linux tests that end every group this process started run one at
     /// a time, or one would end the other's groups mid-test.
+    /// `session_tests` hold it too: their shells are confined groups as well.
     #[cfg(target_os = "linux")]
-    static LINUX_GROUPS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    pub(super) static LINUX_GROUPS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     /// A process group of its own running `sleep`, confined as a shell is.
     #[cfg(target_os = "linux")]
@@ -2525,6 +2623,15 @@ mod session_tests {
         tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap()
     }
 
+    /// Linux: the tests that end every group this process started would end
+    /// these tests' shells too, so a test that runs a shell holds their lock.
+    fn hold_groups() -> Option<std::sync::MutexGuard<'static, ()>> {
+        #[cfg(target_os = "linux")]
+        return Some(super::stop_reach_tests::LINUX_GROUPS_LOCK.lock().unwrap_or_else(|e| e.into_inner()));
+        #[cfg(not(target_os = "linux"))]
+        None
+    }
+
     /// Frame one command onto a driver and return its sentinel token.
     async fn frame(sess: &mut ShellSession, cmd: &str) -> String {
         sess.nonce += 1;
@@ -2565,11 +2672,77 @@ mod session_tests {
         all["sessions"].as_array().unwrap().iter().find(|s| s["id"] == id).cloned()
     }
 
+    /// Child processes of `parent` named `exe` (Toolhelp snapshot).
+    #[cfg(windows)]
+    fn children_named(parent: u32, exe: &str) -> Vec<u32> {
+        use windows::Win32::Foundation::CloseHandle;
+        use windows::Win32::System::Diagnostics::ToolHelp::{
+            CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+        };
+        let mut out = Vec::new();
+        unsafe {
+            let Ok(snap) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else { return out };
+            let mut e = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
+            if Process32FirstW(snap, &mut e).is_ok() {
+                loop {
+                    let n = e.szExeFile.iter().position(|&c| c == 0).unwrap_or(e.szExeFile.len());
+                    if e.th32ParentProcessID == parent && String::from_utf16_lossy(&e.szExeFile[..n]).eq_ignore_ascii_case(exe) {
+                        out.push(e.th32ProcessID);
+                    }
+                    if Process32NextW(snap, &mut e).is_err() {
+                        break;
+                    }
+                }
+            }
+            let _ = CloseHandle(snap);
+        }
+        out
+    }
+
+    /// A program a shell starts is in the stop job even when the shell is
+    /// adopted late: the shell must not run anything before it is in the job.
+    /// The delay widens the spawn-to-adopt window that load opened in a
+    /// `cargo test --workspace` run, where a ping escaped the stop.
+    #[cfg(windows)]
+    #[test]
+    fn a_shell_cannot_start_a_program_before_it_is_in_the_stop_job() {
+        rt().block_on(async {
+            let mut cmd = Command::new("cmd");
+            cmd.args(["/S", "/C", "ping -n 30 127.0.0.1 >nul"])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .kill_on_drop(true);
+            no_console_window(&mut cmd);
+            let mut shell = spawn_confined(&mut cmd, Duration::from_millis(1500)).expect("spawn cmd");
+            let shell_pid = shell.id().expect("cmd pid");
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let ping = loop {
+                if let Some(&p) = children_named(shell_pid, "PING.EXE").first() {
+                    break Some(p);
+                }
+                if Instant::now() > deadline {
+                    break None;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            };
+            let in_job = ping.is_some_and(|p| platform::job_members().contains(&p));
+            if let Some(p) = ping {
+                let _ = ghost_core::process::kill(p);
+            }
+            let _ = shell.start_kill();
+            let _ = shell.wait().await;
+            let ping = ping.expect("cmd never started ping");
+            assert!(in_job, "ping {ping} started before its shell was adopted, outside the stop job");
+        });
+    }
+
     /// M2: a session stays visible while a command runs in it. list shows it
     /// busy, a second send or read is refused as busy (not "no session"), and
     /// kill ends it - the running send then reports the kill.
     #[test]
     fn a_session_running_a_command_is_listed_busy_and_can_be_killed() {
+        let _groups = hold_groups();
         rt().block_on(async {
             let reg = std::sync::Arc::new(Mutex::new(ShellRegistry::new()));
             shell_open(&reg, &json!({"id": "m2"})).await.expect("open");
@@ -2620,6 +2793,7 @@ mod session_tests {
     /// has no wait left - the deadline is checked after a drain, not before.
     #[test]
     fn a_read_with_no_wait_left_still_collects_finished_output() {
+        let _groups = hold_groups();
         rt().block_on(async {
             let mut sess = warm_driver().await;
             let token = frame(&mut sess, sleep_then_q()).await;
