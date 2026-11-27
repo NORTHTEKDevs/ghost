@@ -24,7 +24,7 @@ tracing = { workspace = true }
 # rc.12 blocked on this box: VitisAI EP stub references field absent from OrtApi struct.
 # rc.9 blocked: fn-pointer option chain errors (old OrtApiBase ABI).
 [dependencies.ort]
-version = "=2.0.0-rc.10"
+version = "=2.0.0-rc.15"
 optional = true
 default-features = false
 features = ["download-binaries", "load-dynamic"]
