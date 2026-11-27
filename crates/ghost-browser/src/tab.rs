@@ -180,8 +180,11 @@ impl Tab {
     /// Navigate and wait for the document to finish loading.
     pub async fn navigate(&self, url: &str, timeout_ms: u64) -> Result<()> {
         crate::error::ensure_not_stopped()?;
-        self.call("Page.navigate", json!({ "url": url })).await?;
-        self.wait_for_load(timeout_ms).await
+        let r = self.call("Page.navigate", json!({ "url": url })).await?;
+        crate::policy::classify_navigation(&r, None).map_err(BrowserError::Navigation)?;
+        self.wait_for_load(timeout_ms).await?;
+        let landed = self.url().await.unwrap_or_default();
+        crate::policy::classify_navigation(&r, Some(&landed)).map_err(BrowserError::Navigation)
     }
 
     /// Poll `document.readyState` until the page is complete.

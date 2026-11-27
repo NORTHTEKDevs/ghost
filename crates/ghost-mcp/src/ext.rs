@@ -348,7 +348,7 @@ pub fn schemas() -> Vec<Value> {
               "browser": { "type": "string" }, "url": { "type": "string" }
           }}}),
         json!({ "name": "ghost_tab_navigate",
-          "description": "Navigate a tab and wait for load. Runs in a background tab; the user's view never changes. url must be http://, https:// or about:blank; every other scheme (file:, chrome:, data:, javascript:, ftp: ...) is refused. http(s) to any host including localhost is allowed.",
+          "description": "Navigate a tab and wait for load. Runs in a background tab; the user's view never changes. url must be http://, https:// or about:blank; every other scheme (file:, chrome:, data:, javascript:, ftp: ...) is refused. http(s) to any host including localhost is allowed. Returns an error (naming the net:: errorText) when the page fails to load, e.g. DNS failure or refused connection.",
           "inputSchema": { "type": "object", "required": ["tab", "url"], "properties": {
               "browser": { "type": "string" }, "tab": { "type": "string" },
               "url": { "type": "string" }, "timeout_ms": { "type": "integer" }

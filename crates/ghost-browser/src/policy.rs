@@ -54,9 +54,50 @@ pub fn truncate_chars(s: &str, max: usize) -> (String, Option<usize>) {
     }
 }
 
+/// Decide whether a navigation worked, from the `Page.navigate` result and
+/// (once known) the URL the tab landed on. A failed load (DNS error, refused
+/// connection) is a successful CDP call that parks the tab on chrome-error://.
+pub fn classify_navigation(
+    navigate_result: &serde_json::Value,
+    landed_url: Option<&str>,
+) -> Result<(), String> {
+    if let Some(err) = navigate_result.get("errorText").and_then(|e| e.as_str()) {
+        if !err.is_empty() {
+            return Err(format!("navigation failed: {err}"));
+        }
+    }
+    match landed_url {
+        Some(u) if u.starts_with("chrome-error://") => {
+            Err(format!("navigation failed: the page failed to load (tab landed on {u})"))
+        }
+        _ => Ok(()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_failed_navigation_is_an_error_naming_the_cause() {
+        use serde_json::json;
+        let ok = json!({ "frameId": "F", "loaderId": "L" });
+        assert!(classify_navigation(&ok, None).is_ok());
+        assert!(classify_navigation(&ok, Some("https://example.com/")).is_ok());
+        assert!(classify_navigation(&ok, Some("about:blank")).is_ok());
+        // errorText on the Page.navigate result, before any load.
+        let dns = json!({ "frameId": "F", "errorText": "net::ERR_NAME_NOT_RESOLVED" });
+        let e = classify_navigation(&dns, None).expect_err("dns");
+        assert!(e.contains("net::ERR_NAME_NOT_RESOLVED"), "{e}");
+        // Empty errorText is not an error.
+        assert!(classify_navigation(&json!({ "errorText": "" }), None).is_ok());
+        // Landed on the error page with no errorText in hand.
+        let e = classify_navigation(&ok, Some("chrome-error://chromewebdata/")).expect_err("error page");
+        assert!(e.contains("chrome-error://chromewebdata/") && e.contains("failed to load"), "{e}");
+        // errorText wins when both are present.
+        let e = classify_navigation(&dns, Some("chrome-error://chromewebdata/")).unwrap_err();
+        assert!(e.contains("net::ERR_NAME_NOT_RESOLVED"), "{e}");
+    }
 
     #[test]
     fn truncation_is_char_boundary_safe_and_reports_original_length() {

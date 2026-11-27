@@ -30,6 +30,9 @@ pub enum BrowserError {
     #[error("unexpected CDP response shape for '{method}': {detail}")]
     Protocol { method: String, detail: String },
 
+    #[error("{0}")]
+    Navigation(String),
+
     #[error("browser connection is closed")]
     Closed,
 
