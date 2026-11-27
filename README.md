@@ -342,6 +342,11 @@ tools, or launching apps. `op=run` is a one-shot (`powershell`/`pwsh`/`cmd`); `o
 starts a persistent PowerShell whose variables and cwd survive across `op=send` calls.
 Output is merged stdout+stderr, tail-capped for the agent's context window; a timed-out
 command keeps running and is drained with `op=read`; `ghost_stop` kills a runaway.
+`op=kill` ends a session and every program its commands started, as does an `op=run`
+timeout (Windows: a job of the shell's own; Linux: its process group); a program
+left running by a finished command runs on until a stop (or, in a session, `op=kill`),
+unless it still holds the command's output open: then the command has not finished,
+and its timeout ends it too.
 `op=run` with the default `powershell` is served from a pre-spawned spare process, so
 a command costs about 85 ms instead of the 230-450 ms a fresh PowerShell start takes
 (the spare is single-use and replaced immediately; `GHOST_SHELL_WARM=off` disables it).

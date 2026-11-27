@@ -391,8 +391,8 @@ struct ShellSession {
     killed: Arc<AtomicBool>,
     created: Instant,
     pid: Option<u32>,
-    /// The process group this shell leads (Linux), for `end_shell`.
-    group: Option<(u32, u64)>,
+    /// What `end_shell` ends with the shell (see [`Group`]).
+    group: Option<Group>,
     /// The stop generation when this shell started: if a stop ended shells
     /// since, this one was among them (see `ended_by_stop`).
     born_gen: u64,
@@ -404,9 +404,9 @@ struct ShellSession {
 #[derive(Clone)]
 struct SessionSlot {
     pid: Option<u32>,
-    /// The shell's process group (Linux), so `kill` can end it without
-    /// waiting for a call that holds `shell`.
-    group: Option<(u32, u64)>,
+    /// The shell's [`Group`], so `kill` can end it without waiting for a
+    /// call that holds `shell`.
+    group: Option<Group>,
     created: Instant,
     killed: Arc<AtomicBool>,
     shell: Arc<tokio::sync::Mutex<ShellSession>>,
@@ -1026,7 +1026,7 @@ use platform::confine;
 /// missed it). Also sets CREATE_NO_WINDOW (see `no_console_window`).
 /// `adopt_delay` is zero except in tests, which widen the window between
 /// start and adoption to prove nothing escapes through it.
-fn spawn_confined(command: &mut Command, adopt_delay: Duration) -> std::io::Result<Child> {
+fn spawn_confined(command: &mut Command, adopt_delay: Duration) -> std::io::Result<(Child, Option<Group>)> {
     spawn_confined_with(command, adopt_delay, &confine)
 }
 
@@ -1035,7 +1035,7 @@ fn spawn_confined_with(
     command: &mut Command,
     adopt_delay: Duration,
     confine: &dyn Fn(Option<u32>) -> std::result::Result<(), String>,
-) -> std::io::Result<Child> {
+) -> std::io::Result<(Child, Option<Group>)> {
     #[cfg(windows)]
     {
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -1056,12 +1056,15 @@ fn spawn_confined_with(
         }
         return Err(std::io::Error::other(format!("refused to run the shell, the emergency stop could not reach it: {e}")));
     }
+    // Still suspended on Windows: the shell's own job is in place before it
+    // can start anything.
+    let group = group_of(child.id());
     #[cfg(windows)]
     if let Err(e) = child.id().ok_or_else(|| "no pid".to_string()).and_then(platform::resume) {
         let _ = child.start_kill();
         return Err(std::io::Error::other(format!("could not resume the shell: {e}")));
     }
-    Ok(child)
+    Ok((child, group))
 }
 
 /// The stop was seen on a shell call's own path: end this server's shells and
@@ -1071,38 +1074,62 @@ fn end_own_on_stop() {
     stop_kill::end_own_now();
 }
 
-/// The process group a shell leads (Linux) and its leader's start time,
-/// recorded at spawn so a later kill can tell the group from a reused id.
-fn group_of(pid: Option<u32>) -> Option<(u32, u64)> {
+/// What giving up on a shell ends. Linux: the process group the shell leads
+/// and its leader's start time, so a later kill can tell the group from a
+/// reused id. Windows: a job of the shell's own, nested in the stop job, that
+/// holds the shell and everything it starts (even a program whose parent has
+/// exited). Not kill-on-close: dropping it leaves what a finished command
+/// started running, as on Linux; only `end_group` (or a stop) ends them.
+#[cfg(unix)]
+type Group = Arc<(u32, u64)>;
+#[cfg(windows)]
+type Group = Arc<ghost_browser::launch::job::Job>;
+
+/// The shell's [`Group`], made at spawn. On Windows the shell is still
+/// suspended and already in the stop job, so the job it joins here nests in
+/// that one. None when it cannot be made: giving up then ends only the shell
+/// (the stop still reaches everything through the stop job).
+fn group_of(pid: Option<u32>) -> Option<Group> {
     #[cfg(unix)]
-    return pid.and_then(|p| Some((p, platform::start_time(p)?)));
-    #[cfg(not(unix))]
+    return pid.and_then(|p| Some(Arc::new((p, platform::start_time(p)?))));
+    #[cfg(windows)]
     {
-        let _ = pid;
-        None
+        use ghost_browser::launch::job::Job;
+        let pid = pid?;
+        match Job::new_terminable().and_then(|j| j.adopt(pid).map(|()| j)) {
+            Ok(job) => Some(Arc::new(job)),
+            Err(e) => {
+                tracing::warn!("shell {pid} has no job of its own ({e}); op=kill and timeouts end only the shell");
+                None
+            }
+        }
     }
 }
 
-/// End a shell Ghost is giving up on (a timeout, `op=kill`): on Linux its
-/// whole process group, so what its command started ends with it.
-fn end_shell(child: &mut Child, group: Option<(u32, u64)>) {
+/// End a shell Ghost is giving up on (a timeout, `op=kill`, a dropped call):
+/// its whole process group (Linux) or job (Windows), so what its command
+/// started ends with it.
+fn end_shell(child: &mut Child, group: Option<Group>) {
     end_group(group);
     let _ = child.start_kill();
 }
 
-/// Kill a shell's process group while it is still the one Ghost started.
-fn end_group(group: Option<(u32, u64)>) {
+/// End a shell's process group (Linux: while it is still the one Ghost
+/// started) or its job (Windows).
+fn end_group(group: Option<Group>) {
     #[cfg(unix)]
-    if let Some((pgid, leader_start)) = group {
+    if let Some(&(pgid, leader_start)) = group.as_deref() {
         platform::end_group(pgid, leader_start);
     }
-    #[cfg(not(unix))]
-    let _ = group;
+    #[cfg(windows)]
+    if let Some(job) = group {
+        let _ = job.terminate(1);
+    }
 }
 
 /// Ends a one-shot command's group if the call is dropped before the command
 /// finished (the request was cancelled); `disarm` once it has finished.
-struct GroupGuard(Option<(u32, u64)>);
+struct GroupGuard(Option<Group>);
 
 impl GroupGuard {
     fn disarm(&mut self) {
@@ -1171,7 +1198,7 @@ fn spawn_driver(cwd: Option<&str>) -> Result<ShellSession> {
     in_own_group(&mut command);
 
     let born_gen = stop_kill::generation();
-    let mut child = spawn_confined(&mut command, Duration::ZERO)
+    let (mut child, group) = spawn_confined(&mut command, Duration::ZERO)
         .map_err(|e| GhostError::Config(format!("failed to start persistent shell: {e}")))?;
     let stdin = child.stdin.take().unwrap();
     let stdout = child.stdout.take().unwrap();
@@ -1188,7 +1215,7 @@ fn spawn_driver(cwd: Option<&str>) -> Result<ShellSession> {
         created: Instant::now(),
         pid,
         born_gen,
-        group: group_of(pid),
+        group,
     })
 }
 
@@ -1396,10 +1423,9 @@ impl GhostSession {
         in_own_group(&mut command);
         let started = Instant::now();
         let born_gen = stop_kill::generation();
-        let mut child = spawn_confined(&mut command, Duration::ZERO)
+        let (mut child, group) = spawn_confined(&mut command, Duration::ZERO)
             .map_err(|e| GhostError::Config(format!("failed to spawn {shell}: {e}")))?;
-        let group = group_of(child.id());
-        let mut guard = GroupGuard(group);
+        let mut guard = GroupGuard(group.clone());
         let mut stdout = child.stdout.take().unwrap();
         let mut stderr = child.stderr.take().unwrap();
 
@@ -1482,6 +1508,10 @@ impl GhostSession {
         sess.nonce += 1;
         let token = sentinel_token(&sess.secret, sess.nonce);
         let frame = format!("{} {}\n", token, b64_encode(script.as_bytes()));
+        // Armed before the command is sent: a call dropped from here on
+        // (cancelled, or past its deadline) ends the command's programs too,
+        // as on the one-shot path.
+        let mut guard = GroupGuard(sess.group.clone());
         if let Err(e) = sess.stdin.write_all(frame.as_bytes()).await {
             let _ = sess.child.start_kill();
             return Err(GhostError::Config(format!("ghost_shell: warm shell write failed: {e}")));
@@ -1490,6 +1520,9 @@ impl GhostSession {
 
         let outcome = read_until_sentinel(&mut sess, &token, dur).await;
         let duration_ms = started.elapsed().as_millis() as u64;
+        if matches!(outcome, ReadOutcome::Done { .. } | ReadOutcome::Eof { .. }) {
+            guard.disarm();
+        }
         match outcome {
             ReadOutcome::Done { output, exit_code } => {
                 let _ = sess.child.start_kill();
@@ -1501,7 +1534,7 @@ impl GhostSession {
                 }))
             }
             ReadOutcome::TimedOut { output } => {
-                end_shell(&mut sess.child, sess.group);
+                end_shell(&mut sess.child, sess.group.clone());
                 let (output, truncated) = cap_output(output);
                 Ok(json!({
                     "ok": false, "output": output, "exit_code": Value::Null,
@@ -1558,7 +1591,7 @@ async fn shell_open(shells: &Mutex<ShellRegistry>, args: &Value) -> Result<Value
     let pid = session.pid;
     let slot = SessionSlot {
         pid,
-        group: session.group,
+        group: session.group.clone(),
         created: session.created,
         killed: session.killed.clone(),
         shell: Arc::new(tokio::sync::Mutex::new(session)),
@@ -1774,7 +1807,7 @@ async fn shell_kill(shells: &Mutex<ShellRegistry>, args: &Value) -> Result<Value
         let _ = ghost_core::process::kill(pid);
     }
     let mut sess = slot.shell.lock().await;
-    let group = sess.group;
+    let group = sess.group.clone();
     end_shell(&mut sess.child, group);
     let _ = sess.child.wait().await;
     Ok(json!({ "ok": true, "id": id, "killed": true }))
@@ -2572,7 +2605,7 @@ mod stop_reach_tests {
     /// A bash leading its own group with a background `sleep`; returns the
     /// sleep's pid too.
     #[cfg(target_os = "linux")]
-    async fn shell_with_a_child() -> (Child, Option<(u32, u64)>, u32) {
+    async fn shell_with_a_child() -> (Child, Option<Group>, u32) {
         use tokio::io::AsyncBufReadExt;
         let mut cmd = Command::new("bash");
         cmd.args(["-c", "sleep 45 & echo $!; wait"]).stdout(Stdio::piped()).kill_on_drop(true);
@@ -2835,6 +2868,78 @@ mod session_tests {
         out
     }
 
+    /// Whether process `pid` has exited within 3 s.
+    #[cfg(windows)]
+    fn win_ends(pid: u32) -> bool {
+        use windows::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
+        use windows::Win32::System::Threading::{OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE};
+        unsafe {
+            let Ok(h) = OpenProcess(PROCESS_SYNCHRONIZE, false, pid) else { return true };
+            let gone = WaitForSingleObject(h, 3000) == WAIT_OBJECT_0;
+            let _ = CloseHandle(h);
+            gone
+        }
+    }
+
+    /// Windows, like Linux: giving up on a shell (`op=kill`, a timeout, a
+    /// dropped call) ends what its command started, not just the shell.
+    #[cfg(windows)]
+    #[test]
+    fn giving_up_on_a_shell_ends_its_whole_tree() {
+        let (ping, ended) = rt().block_on(shell_then_ping(true));
+        assert!(ended, "ping {ping} outlived its shell's kill");
+    }
+
+    /// The shell's own job is not kill-on-close: a shell that simply ends (a
+    /// finished command) and drops its job leaves what it started running -
+    /// `Start-Process` apps must survive their `op=run`.
+    #[cfg(windows)]
+    #[test]
+    fn dropping_a_shells_job_leaves_its_programs_running() {
+        let (ping, ended) = rt().block_on(shell_then_ping(false));
+        assert!(!ended, "ping {ping} died with its shell's job handle (kill-on-close?)");
+    }
+
+    /// Start cmd running ping in its own [`Group`], then either give up on it
+    /// (`end_shell`) or just end the shell and drop the group. Returns the
+    /// ping's pid and whether it ended within 3 s; a ping still running is
+    /// then ended (only if it is still the same process).
+    #[cfg(windows)]
+    async fn shell_then_ping(give_up: bool) -> (u32, bool) {
+        let mut cmd = Command::new("cmd");
+        cmd.args(["/S", "/C", "ping -n 30 127.0.0.1 >nul"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true);
+        no_console_window(&mut cmd);
+        let (mut shell, group) = spawn_confined(&mut cmd, Duration::ZERO).expect("spawn cmd");
+        assert!(group.is_some(), "the shell got no job of its own");
+        let shell_pid = shell.id().expect("cmd pid");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let ping = loop {
+            if let Some(&p) = children_named(shell_pid, "PING.EXE").first() {
+                break p;
+            }
+            assert!(Instant::now() < deadline, "cmd never started ping");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        };
+        let born = platform::creation_time(ping);
+        if give_up {
+            end_shell(&mut shell, group);
+        } else {
+            let _ = shell.start_kill();
+            drop(group);
+        }
+        let _ = shell.wait().await;
+        let ended = win_ends(ping);
+        // Ours: started by this test, and still the same process.
+        if !ended && born.is_some() && platform::creation_time(ping) == born {
+            let _ = ghost_core::process::kill(ping);
+        }
+        (ping, ended)
+    }
+
     /// A program a shell starts is in the stop job even when the shell is
     /// adopted late: the shell must not run anything before it is in the job.
     /// The delay widens the spawn-to-adopt window that load opened in a
@@ -2850,7 +2955,7 @@ mod session_tests {
                 .stderr(Stdio::null())
                 .kill_on_drop(true);
             no_console_window(&mut cmd);
-            let mut shell = spawn_confined(&mut cmd, Duration::from_millis(1500)).expect("spawn cmd");
+            let (mut shell, _group) = spawn_confined(&mut cmd, Duration::from_millis(1500)).expect("spawn cmd");
             let shell_pid = shell.id().expect("cmd pid");
             let deadline = Instant::now() + Duration::from_secs(10);
             let ping = loop {
@@ -2905,7 +3010,7 @@ mod session_tests {
                     assert!(e.to_string().contains("injected adopt failure"), "{e}");
                     None
                 }
-                Ok(c) => Some(c),
+                Ok((c, _)) => Some(c),
             };
             #[cfg(windows)]
             let alive = platform::creation_time(pid).is_some();
