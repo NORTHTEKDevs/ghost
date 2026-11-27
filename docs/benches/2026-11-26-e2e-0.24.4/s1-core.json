@@ -1,0 +1,647 @@
+{
+"env": {
+"GHOST_SHELL": "off"
+},
+"steps": [
+{
+"note": "B protocol"
+},
+{
+"rpc": "ping",
+"contains": "\"result\":{}"
+},
+{
+"rpc": "no/such_method",
+"contains": "-32601"
+},
+{
+"tool": "ghost_no_such_tool",
+"expect": "err"
+},
+{
+"note": "C reads on a Ghost-launched testbed (hidden desktop)"
+},
+{
+"tool": "ghost_window",
+"args": {
+"op": "launch",
+"exe": "C:/Users/Krist/projects/active/ghost/target-improve/release/ghost-testbed.exe --title \"E2E Testbed 0243\""
+},
+"expect": "ok",
+"contains": "hidden desktop",
+"capture": {
+"pid": "\"pid\":(\\d+)"
+},
+"max": 900
+},
+{
+"sleep": 800
+},
+{
+"tool": "ghost_see",
+"args": {
+"window": "E2E Testbed 0243"
+},
+"expect": "ok",
+"contains": "Increment",
+"max": 900
+},
+{
+"tool": "ghost_see",
+"args": {
+"window": "E2E Testbed 0243",
+"mode": "text"
+},
+"expect": "ok",
+"contains": "Increment",
+"max": 600
+},
+{
+"tool": "ghost_snapshot",
+"args": {
+"window": "E2E Testbed 0243",
+"actionable_only": true
+},
+"expect": "ok",
+"contains": "Count 0",
+"max": 900
+},
+{
+"tool": "ghost_find",
+"args": {
+"name": "Increment",
+"window": "E2E Testbed 0243",
+"mode": "instant_only"
+},
+"expect": "ok",
+"contains": "Increment"
+},
+{
+"tool": "ghost_see",
+"args": {
+"window": "E2E Testbed 0243",
+"mode": "bogus"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_see",
+"args": {
+"window": "E2E Testbed 0243",
+"bogus_key": 1
+},
+"expect": "ok"
+},
+{
+"note": "D type + click with read-back"
+},
+{
+"tool": "ghost_act",
+"args": {
+"action": "type",
+"name": "Field",
+"text": "e2e-0.24.3 typed",
+"window": "E2E Testbed 0243"
+},
+"expect": "ok",
+"max": 700
+},
+{
+"tool": "ghost_assert",
+"args": {
+"predicate": "value-equals",
+"name": "Field",
+"text": "e2e-0.24.3 typed",
+"window": "E2E Testbed 0243"
+},
+"expect": "ok",
+"contains": "e2e-0.24.3 typed",
+"max": 900
+},
+{
+"tool": "ghost_act",
+"args": {
+"action": "click",
+"name": "Increment",
+"window": "E2E Testbed 0243"
+},
+"expect": "ok",
+"max": 700
+},
+{
+"tool": "ghost_window",
+"args": {
+"op": "list"
+},
+"expect": "ok",
+"contains": "E2E Testbed 0243 [clicks=1]",
+"max": 300
+},
+{
+"tool": "ghost_act",
+"args": {
+"action": "click",
+"name": "Count 0",
+"window": "E2E Testbed 0243"
+},
+"expect": "ok",
+"max": 700
+},
+{
+"tool": "ghost_find",
+"args": {
+"name": "Count 1",
+"window": "E2E Testbed 0243",
+"mode": "instant_only"
+},
+"expect": "ok",
+"contains": "Count 1"
+},
+{
+"tool": "ghost_act",
+"args": {
+"action": "click",
+"name": "Locked",
+"window": "E2E Testbed 0243"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_window",
+"args": {
+"op": "list"
+},
+"expect": "ok",
+"absent": "[clicks=2]",
+"max": 300
+},
+{
+"note": "G GHOST_SHELL=off refusals"
+},
+{
+"tool": "ghost_shell",
+"args": {
+"cmd": "echo hi"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_shell",
+"args": {
+"op": "open"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_window",
+"args": {
+"op": "launch",
+"exe": "cmd.exe"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_window",
+"args": {
+"op": "launch",
+"exe": "C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -c 1"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_window",
+"args": {
+"op": "launch",
+"exe": "C:/WINDOWS/System32/WINDOW~1/v1.0/POWERS~1.EXE"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_window",
+"args": {
+"op": "launch",
+"exe": "wscript.exe"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_desktop_launch",
+"args": {
+"exe": "cmd.exe"
+},
+"expect": "err"
+},
+{
+"note": "H browser on a Ghost-launched headless browser"
+},
+{
+"tool": "ghost_browser_launch",
+"args": {
+"id": "e2e",
+"mode": "headless"
+},
+"expect": "ok",
+"capture": {
+"bpid": "\"pid\":(\\d+)"
+}
+},
+{
+"tool": "ghost_tab_open",
+"args": {
+"browser": "e2e",
+"url": "about:blank"
+},
+"expect": "ok",
+"capture": {
+"tab": "\"tab\":\"([0-9A-F]+)\""
+}
+},
+{
+"tool": "ghost_tab_navigate",
+"args": {
+"browser": "e2e",
+"tab": "{{tab}}",
+"url": "file:///C:/Windows/win.ini"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_tab_navigate",
+"args": {
+"browser": "e2e",
+"tab": "{{tab}}",
+"url": "data:text/html,<p>x</p>"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_tab_navigate",
+"args": {
+"browser": "e2e",
+"tab": "{{tab}}",
+"url": "https://example.com/"
+},
+"expect": "ok"
+},
+{
+"tool": "ghost_tab_eval",
+"args": {
+"browser": "e2e",
+"tab": "{{tab}}",
+"expression": "document.title"
+},
+"expect": "ok",
+"contains": "Example Domain"
+},
+{
+"tool": "ghost_tab_text",
+"args": {
+"browser": "e2e",
+"tab": "{{tab}}",
+"max_chars": 40
+},
+"expect": "ok",
+"contains": "truncated"
+},
+{
+"tool": "ghost_tab_text",
+"args": {
+"browser": "e2e",
+"tab": "{{tab}}"
+},
+"expect": "ok",
+"contains": "This domain is for use"
+},
+{
+"tool": "ghost_tab_open",
+"args": {
+"browser": "e2e",
+"url": "about:blank"
+},
+"expect": "ok",
+"capture": {
+"tab2": "\"tab\":\"([0-9A-F]+)\""
+}
+},
+{
+"tool": "ghost_tab_close",
+"args": {
+"browser": "e2e",
+"tab": "{{tab}}"
+},
+"expect": "ok"
+},
+{
+"tool": "ghost_browser_tabs",
+"args": {
+"id": "e2e"
+},
+"expect": "ok",
+"absent": "{{tab}}"
+},
+{
+"note": "I SSRF refusals"
+},
+{
+"tool": "ghost_http_get",
+"args": {
+"url": "http://127.0.0.1/"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_http_get",
+"args": {
+"url": "http://localhost/"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_http_get",
+"args": {
+"url": "http://127.1/"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_http_get",
+"args": {
+"url": "http://2130706433/"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_http_get",
+"args": {
+"url": "http://0x7f000001/"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_http_get",
+"args": {
+"url": "http://[::1]/"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_http_get",
+"args": {
+"url": "http://[0:0:0:0:0:0:0:1]/"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_http_get",
+"args": {
+"url": "http://[::ffff:127.0.0.1]/"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_http_get",
+"args": {
+"url": "http://[::127.0.0.1]/"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_http_get",
+"args": {
+"url": "http://10.0.0.1/"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_http_get",
+"args": {
+"url": "http://172.16.0.1/"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_http_get",
+"args": {
+"url": "http://192.168.1.1/"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_http_get",
+"args": {
+"url": "http://169.254.169.254/latest/meta-data/"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_http_get",
+"args": {
+"url": "http://100.64.0.1/"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_http_get",
+"args": {
+"url": "http://0.0.0.0/"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_http_get",
+"args": {
+"url": "http://198.18.0.1/"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_http_get",
+"args": {
+"url": "http://224.0.0.1/"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_http_get",
+"args": {
+"url": "http://[fec0::1]/"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_http_get",
+"args": {
+"url": "http://[fd00::1]/"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_http_get",
+"args": {
+"url": "http://[fe80::1]/"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_http_get",
+"args": {
+"url": "http://[64:ff9b::7f00:1]/"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_http_get",
+"args": {
+"url": "http://[64:ff9b::a00:1]/"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_http_get",
+"args": {
+"url": "http://[2002:7f00:1::1]/"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_http_get",
+"args": {
+"url": "http://[2001:0:4136:e378:8000:63bf:80ff:fffe]/"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_http_get",
+"args": {
+"url": "http://localtest.me/"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_http_get",
+"args": {
+"url": "http://127.0.0.1.nip.io/"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_http_get",
+"args": {
+"url": "https://example.com/",
+"headers": {
+"Host": "localhost"
+}
+},
+"expect": "err"
+},
+{
+"tool": "ghost_http_get",
+"args": {
+"url": "file:///C:/Windows/win.ini"
+},
+"expect": "err"
+},
+{
+"tool": "ghost_http_get",
+"args": {
+"url": "https://example.com/"
+},
+"expect": "ok",
+"contains": "Example Domain",
+"max": 300
+},
+{
+"note": "K stop/resume, scope=process only"
+},
+{
+"tool": "ghost_stop",
+"args": {
+"scope": "process"
+},
+"expect": "ok"
+},
+{
+"tool": "ghost_act",
+"args": {
+"action": "click",
+"name": "Increment",
+"window": "E2E Testbed 0243"
+},
+"expect": "err",
+"contains": "-32004"
+},
+{
+"tool": "ghost_window",
+"args": {
+"op": "state",
+"name": "E2E Testbed 0243",
+"state": "close"
+},
+"expect": "err",
+"contains": "-32004"
+},
+{
+"tool": "ghost_tab_close",
+"args": {
+"browser": "e2e",
+"tab": "{{tab2}}"
+},
+"expect": "ok"
+},
+{
+"tool": "ghost_reset",
+"args": {
+"scope": "process"
+},
+"expect": "ok"
+},
+{
+"tool": "ghost_act",
+"args": {
+"action": "click",
+"name": "Increment",
+"window": "E2E Testbed 0243"
+},
+"expect": "ok",
+"max": 300
+},
+{
+"tool": "ghost_window",
+"args": {
+"op": "list"
+},
+"expect": "ok",
+"contains": "E2E Testbed 0243 [clicks=2]",
+"max": 300
+},
+{
+"note": "J close Ghost-owned things"
+},
+{
+"tool": "ghost_browser_close",
+"args": {
+"id": "e2e"
+},
+"expect": "ok"
+},
+{
+"tool": "ghost_desktop_close",
+"args": {
+"id": "auto"
+},
+"expect": "ok",
+"contains": "terminated_pids"
+},
+{
+"sleep": 1500
+},
+{
+"exec": "tasklist /FI \"PID eq {{pid}}\" /NH",
+"contains": "No tasks"
+},
+{
+"exec": "tasklist /FI \"PID eq {{bpid}}\" /NH",
+"contains": "No tasks"
+}
+]
+}

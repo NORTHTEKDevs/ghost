@@ -1,0 +1,9 @@
+$ curl http://127.0.0.1:47393/health
+status=200
+$ curl -H Host: evil.example:47393 http://127.0.0.1:47393/health
+status=403
+$ curl -H Origin: https://evil.example http://127.0.0.1:47393/health
+status=403
+$ curl -X POST -H Content-Type: text/plain --data {"steps":[]} http://127.0.0.1:47393/run
+status=415
+$ ghost-http --addr 0.0.0.0 -> exit=2

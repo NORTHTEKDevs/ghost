@@ -1,0 +1,323 @@
+# server pid 35192, env {"GHOST_SHELL":"off"}
+
+## B protocol
+>>> rpc ping {}  (1ms)
+<<< {"jsonrpc":"2.0","id":2,"result":{}}
+[PASS]
+
+>>> rpc no/such_method {}  (0ms)
+<<< {"jsonrpc":"2.0","id":3,"error":{"code":-32601,"message":"method not found: no/such_method"}}
+[PASS]
+
+>>> ghost_no_such_tool {}  (1ms)
+<<< ERR -32000: unknown method: ghost_no_such_tool | hint: undefined
+[PASS]
+
+
+## C reads on a Ghost-launched testbed (hidden desktop)
+>>> ghost_window {"op":"launch","exe":"C:/Users/Krist/projects/active/ghost/target-improve/release/ghost-testbed.exe --title \"E2E Testbed 0243\""}  (115ms)
+<<< ok {"desktop":"auto","note":"started on a hidden desktop (never on your screen) and anchored: ghost_see / ghost_act / ghost_key now target it by default. Drive it by title like any other window; ghost_desktop_close id=auto ends it.","pid":29332,"surface":"hidden","target":{"desktop":"auto","hwnd":27920944,"pid":29332,"source":"anchor","surface":"hidden","title":"E2E Testbed 0243"},"window":{"hwnd":27920944,"pid":29332,"title":"E2E Testbed 0243"}}
+[PASS]
+
+>>> ghost_see {"window":"E2E Testbed 0243"}  (55ms)
+<<< ok {"elements":[{"bottom":199,"left":218,"name":"Field","right":598,"role":"edit","top":171},{"bottom":255,"left":218,"name":"Increment","right":358,"role":"button","top":221},{"bottom":255,"left":378,"name":"Quit","right":478,"role":"button","top":221},{"bottom":299,"left":218,"name":"Increment","right":358,"role":"button","top":265},{"bottom":299,"left":378,"name":"Locked","right":478,"role":"button","top":265},{"bottom":255,"left":498,"name":"Note","right":608,"role":"button","top":221},{"bottom":299,"left":498,"name":"Popup","right":608,"role":"button","top":265},{"bottom":351,"left":378,"name":"Count 0","right":488,"role":"button","top":321},{"bottom":150,"left":128,"name":"System","right":150,"role":"menuitem","top":128},{"bottom":151,"left":493,"name":"Minimize","right":540,"role":"button","top":121},{"bottom":151,"left":540,"name":"Maximize","right":586,"role":"button","top":121}
+[PASS]
+
+>>> ghost_see {"window":"E2E Testbed 0243","mode":"text"}  (35ms)
+<<< ok {"chars":101,"target":{"desktop":"auto","hwnd":27920944,"pid":29332,"source":"explicit","surface":"hidden","title":"E2E Testbed 0243"},"text":"Field\nIncrement\nQuit\nIncrement\nLocked\nNote\nStatus: idle\nPopup\nCount 0\nSystem\nMinimize\nMaximize\nClose\n","truncated":false}
+[PASS]
+
+>>> ghost_snapshot {"window":"E2E Testbed 0243","actionable_only":true}  (42ms)
+<<< ok {"actionable_count":11,"count":11,"elements":[{"actionable":true,"actions":["type"],"center":{"x":408,"y":185},"enabled":true,"id":0,"name":"Field","rect":{"bottom":199,"left":218,"right":598,"top":171},"role":"edit"},{"actionable":true,"actions":["click"],"center":{"x":288,"y":238},"enabled":true,"id":1,"name":"Increment","rect":{"bottom":255,"left":218,"right":358,"top":221},"role":"button"},{"actionable":true,"actions":["click"],"center":{"x":428,"y":238},"enabled":true,"id":2,"name":"Quit","rect":{"bottom":255,"left":378,"right":478,"top":221},"role":"button"},{"actionable":true,"actions":["click"],"center":{"x":288,"y":282},"enabled":true,"id":3,"name":"Increment","rect":{"bottom":299,"left":218,"right":358,"top":265},"role":"button"},{"actionable":true,"actions":["click"],"center":{"x":553,"y":238},"enabled":true,"id":4,"name":"Note","rect":{"bottom":255,"left":498,"right":608,"
+[PASS]
+
+>>> ghost_find {"name":"Increment","window":"E2E Testbed 0243","mode":"instant_only"}  (6ms)
+<<< ok {"center":{"x":288,"y":238},"confidence":1,"dispatch_mode":"hidden","escalated":false,"has_rect":true,"hwnd":27920944,"index":null,"matches":1,"name":"Increment","ok":true,"rect":{"bottom":255,"left":218,"right":358,"top":221},"source":"uia","target":{"desktop":"auto","hwnd":27920944,"pid":29332,"source":"explicit","surface":"hidden","title":"E2E Testbed 0243"},"window":"E2E Testbed 0243"}
+[PASS]
+
+>>> ghost_see {"window":"E2E Testbed 0243","mode":"bogus"}  (0ms)
+<<< ERR -32602: invalid params: ghost_see mode must be one of fast|full|delta|text|marks|selection (got "bogus") | hint: undefined
+[PASS]
+
+>>> ghost_see {"window":"E2E Testbed 0243","bogus_key":1}  (25ms)
+<<< ok {"elements":[{"bottom":199,"left":218,"name":"Field","right":598,"role":"edit","top":171},{"bottom":255,"left":218,"name":"Increment","right":358,"role":"button","top":221},{"bottom":255,"left":378,"name":"Quit","right":478,"role":"button","top":221},{"bottom":299,"left":218,"name":"Increment","right":358,"role":"button","top":265},{"bottom":299,"left":378,"name":"Locked","right":478,"role":"button","top":265},{"bottom":255,"left":498,"name":"Note","right":608,"role":"button","top":221},{"bot
+[PASS]
+
+
+## D type + click with read-back
+>>> ghost_act {"action":"type","name":"Field","text":"e2e-0.24.3 typed","window":"E2E Testbed 0243"}  (34ms)
+<<< ok {"action":"type","cursor_preserved":true,"focus_preserved":true,"mode":"hidden","name":"Field","ok":true,"rect":{"bottom":199,"left":218,"right":598,"top":171},"target":{"desktop":"auto","hwnd":27920944,"pid":29332,"source":"explicit","surface":"hidden","title":"E2E Testbed 0243"},"timing_ms":{"action":2,"dispatch":1,"find":29},"verified":true,"window":"E2E Testbed 0243"}
+[PASS]
+
+>>> ghost_assert {"predicate":"value-equals","name":"Field","text":"e2e-0.24.3 typed","window":"E2E Testbed 0243"}  (43ms)
+<<< ok {"ok":true,"passed":true,"predicate":"value-equals","target":{"desktop":"auto","hwnd":27920944,"pid":29332,"source":"explicit","surface":"hidden","title":"E2E Testbed 0243"},"value":"e2e-0.24.3 typed"}
+[PASS]
+
+>>> ghost_act {"action":"click","name":"Increment","window":"E2E Testbed 0243"}  (61ms)
+<<< ok {"action":"click","cursor_preserved":true,"focus_preserved":true,"mode":"hidden","name":"Increment","ok":true,"rect":{"bottom":255,"left":218,"right":358,"top":221},"target":{"desktop":"auto","hwnd":27920944,"pid":29332,"source":"explicit","surface":"hidden","title":"E2E Testbed 0243"},"timing_ms":{"action":20,"dispatch":0,"find":38},"verified":true,"verified_by":"title","window":"E2E Testbed 0243"}
+[PASS]
+
+>>> ghost_window {"op":"list"}  (1ms)
+<<< ok {"anchor":{"desktop":"auto","hwnd":27920944,"pid":29332,"source":"anchor","surface":"hidden","title":"E2E Testbed 0243 [clicks=1]"},"windows":[... user-desktop window titles redacted ...]
+[PASS]
+
+>>> ghost_act {"action":"click","name":"Count 0","window":"E2E Testbed 0243"}  (157ms)
+<<< ok {"action":"click","cursor_preserved":true,"focus_preserved":true,"mode":"hidden","name":"Count 0","ok":true,"rect":{"bottom":351,"left":378,"right":488,"top":321},"target":{"desktop":"auto","hwnd":27920944,"pid":29332,"source":"explicit","surface":"hidden","title":"E2E Testbed 0243 [clicks=1]"},"timing_ms":{"action":129,"dispatch":0,"find":25},"verified":true,"verified_by":"uia","window":"E2E Testbed 0243 [clicks=1]"}
+[PASS]
+
+>>> ghost_find {"name":"Count 1","window":"E2E Testbed 0243","mode":"instant_only"}  (31ms)
+<<< ok {"center":{"x":433,"y":336},"confidence":1,"dispatch_mode":"hidden","escalated":false,"has_rect":true,"hwnd":27920944,"index":null,"matches":1,"name":"Count 1","ok":true,"rect":{"bottom":351,"left":378,"right":488,"top":321},"source":"uia","target":{"desktop":"auto","hwnd":27920944,"pid":29332,"source":"explicit","surface":"hidden","title":"E2E Testbed 0243 [clicks=1]"},"window":"E2E Testbed 0243 [clicks=1]"}
+[PASS]
+
+>>> ghost_act {"action":"click","name":"Locked","window":"E2E Testbed 0243"}  (41ms)
+<<< ERR -32002: Element not interactable: Locked - element is disabled | hint: element exists but isn't actionable (disabled or covered) - call ghost_see and check is_enabled/rect, or dismiss the covering element first
+[PASS]
+
+>>> ghost_window {"op":"list"}  (1ms)
+<<< ok {"anchor":{"desktop":"auto","hwnd":27920944,"pid":29332,"source":"anchor","surface":"hidden","title":"E2E Testbed 0243 [clicks=1]"},"windows":[... user-desktop window titles redacted ...]
+[PASS]
+
+
+## G GHOST_SHELL=off refusals
+>>> ghost_shell {"cmd":"echo hi"}  (1ms)
+<<< ERR -32002: Configuration error: ghost_shell is disabled (GHOST_SHELL is off). The operator turns it on by removing that setting - in Claude Desktop it is the "Allow shell commands" checkbox on the extension. | hint: element exists but isn't actionable (disabled or covered) - call ghost_see and check is_enabled/rect, or dismiss the covering element first
+[PASS]
+
+>>> ghost_shell {"op":"open"}  (0ms)
+<<< ERR -32002: Configuration error: ghost_shell is disabled (GHOST_SHELL is off). The operator turns it on by removing that setting - in Claude Desktop it is the "Allow shell commands" checkbox on the extension. | hint: element exists but isn't actionable (disabled or covered) - call ghost_see and check is_enabled/rect, or dismiss the covering element first
+[PASS]
+
+>>> ghost_window {"op":"launch","exe":"cmd.exe"}  (0ms)
+<<< ERR -32000: Configuration error: GHOST_SHELL=off refuses this launch: 'cmd' is a command interpreter or script host. Launching a command interpreter, terminal, script host or a program that starts other programs would run commands the operator turned off. Plain applications still launch (for example 'notepad' or 'notepad C:\x.txt'); the operator can list exactly which programs may launch with GHOST_LAUNCH_ALLOW. | hint: undefined
+[PASS]
+
+>>> ghost_window {"op":"launch","exe":"C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -c 1"}  (1ms)
+<<< ERR -32000: Configuration error: GHOST_SHELL=off refuses this launch: 'powershell' is a command interpreter or script host. Launching a command interpreter, terminal, script host or a program that starts other programs would run commands the operator turned off. Plain applications still launch (for example 'notepad' or 'notepad C:\x.txt'); the operator can list exactly which programs may launch with GHOST_LAUNCH_ALLOW. | hint: undefined
+[PASS]
+
+>>> ghost_window {"op":"launch","exe":"C:/WINDOWS/System32/WINDOW~1/v1.0/POWERS~1.EXE"}  (0ms)
+<<< ERR -32000: Configuration error: GHOST_SHELL=off refuses this launch: 'C:/WINDOWS/System32/WINDOW~1/v1.0/POWERS~1.EXE' is an 8.3 short name that could not be resolved to its real name. Launching a command interpreter, terminal, script host or a program that starts other programs would run commands the operator turned off. Plain applications still launch (for example 'notepad' or 'notepad C:\x.txt'); the operator can list exactly which programs may launch with GHOST_LAUNCH_ALLOW. | hint: undefine
+[PASS]
+
+>>> ghost_window {"op":"launch","exe":"wscript.exe"}  (0ms)
+<<< ERR -32000: Configuration error: GHOST_SHELL=off refuses this launch: 'wscript' is a command interpreter or script host. Launching a command interpreter, terminal, script host or a program that starts other programs would run commands the operator turned off. Plain applications still launch (for example 'notepad' or 'notepad C:\x.txt'); the operator can list exactly which programs may launch with GHOST_LAUNCH_ALLOW. | hint: undefined
+[PASS]
+
+>>> ghost_desktop_launch {"exe":"cmd.exe"}  (1ms)
+<<< ERR -32000: missing param: command | hint: undefined
+[PASS]
+
+
+## H browser on a Ghost-launched headless browser
+>>> ghost_browser_launch {"id":"e2e","mode":"headless"}  (310ms)
+<<< ok {"browser":"default","dies_with_server":true,"id":"e2e","mode":"headless","pid":36664,"port":11112}
+[PASS]
+
+>>> ghost_tab_open {"browser":"e2e","url":"about:blank"}  (26ms)
+<<< ok {"background":true,"tab":"417A013E0B52F4DDF2865BB0E11D2653"}
+[PASS]
+
+>>> ghost_tab_navigate {"browser":"e2e","tab":"417A013E0B52F4DDF2865BB0E11D2653","url":"file:///C:/Windows/win.ini"}  (1ms)
+<<< ERR -32602: invalid params: url scheme not allowed ('file:///C:/Windows/win.ini'); tabs navigate only to http://, https:// or about:blank | hint: undefined
+[PASS]
+
+>>> ghost_tab_navigate {"browser":"e2e","tab":"417A013E0B52F4DDF2865BB0E11D2653","url":"data:text/html,<p>x</p>"}  (1ms)
+<<< ERR -32602: invalid params: url scheme not allowed ('data:text/html,<p>x</p>'); tabs navigate only to http://, https:// or about:blank | hint: undefined
+[PASS]
+
+>>> ghost_tab_navigate {"browser":"e2e","tab":"417A013E0B52F4DDF2865BB0E11D2653","url":"https://example.com/"}  (158ms)
+<<< ok {"background":true,"ok":true,"url":"https://example.com/"}
+[PASS]
+
+>>> ghost_tab_eval {"browser":"e2e","tab":"417A013E0B52F4DDF2865BB0E11D2653","expression":"document.title"}  (1ms)
+<<< ok {"value":"Example Domain"}
+[PASS]
+
+>>> ghost_tab_text {"browser":"e2e","tab":"417A013E0B52F4DDF2865BB0E11D2653","max_chars":40}  (0ms)
+<<< ok {"original_length":917,"text":"This domain is for use in documentation ","truncated":true}
+[PASS]
+
+>>> ghost_tab_text {"browser":"e2e","tab":"417A013E0B52F4DDF2865BB0E11D2653"}  (1ms)
+<<< ok {"text":"This domain is for use in documentation examples without needing permission. This is not a service; avoid relying on it for testing and monitoring purposes.\n\nهذا النطاق مُخصص للاستخدام في أمثلة التوثيق دون الحاجة إلى إذن. هذه ليست خدمة، يُرجى تجنب الاعتماد عليها لأغراض الاختبار والمراقبة.\n\n该域名仅用于文档示例，无需获得许可。这并非一项服务，请勿将其用于测试和监控目的。\n\nL’usage de ce domaine est réservé à des exemples de documentation, sans autorisation préalable. Il ne s’agit pas d’un service ; son utilisation à des
+[PASS]
+
+>>> ghost_tab_open {"browser":"e2e","url":"about:blank"}  (15ms)
+<<< ok {"background":true,"tab":"FDDDBDA308790C28E79D5A96DA8ED319"}
+[PASS]
+
+>>> ghost_tab_close {"browser":"e2e","tab":"417A013E0B52F4DDF2865BB0E11D2653"}  (0ms)
+<<< ok {"ok":true}
+[PASS]
+
+>>> ghost_browser_tabs {"id":"e2e"}  (5ms)
+<<< ok {"tabs":[{"target_id":"FDDDBDA308790C28E79D5A96DA8ED319","title":"about:blank","url":"about:blank"},{"target_id":"0A949F738B5B3368C0712FCDAF4D8865","title":"about:blank","url":"about:blank"}]}
+[PASS]
+
+
+## I SSRF refusals
+>>> ghost_http_get {"url":"http://127.0.0.1/"}  (1ms)
+<<< ERR -32000: URL targets a private/reserved IP (127.0.0.1) - blocked (SSRF prevention). Set GHOST_HTTP_ALLOW_PRIVATE=1 to allow | hint: undefined
+[PASS]
+
+>>> ghost_http_get {"url":"http://localhost/"}  (0ms)
+<<< ERR -32000: URL targets localhost - blocked (SSRF prevention). Set GHOST_HTTP_ALLOW_PRIVATE=1 to allow | hint: undefined
+[PASS]
+
+>>> ghost_http_get {"url":"http://127.1/"}  (0ms)
+<<< ERR -32000: URL targets a private/reserved IP (127.0.0.1) - blocked (SSRF prevention). Set GHOST_HTTP_ALLOW_PRIVATE=1 to allow | hint: undefined
+[PASS]
+
+>>> ghost_http_get {"url":"http://2130706433/"}  (1ms)
+<<< ERR -32000: URL targets a private/reserved IP (127.0.0.1) - blocked (SSRF prevention). Set GHOST_HTTP_ALLOW_PRIVATE=1 to allow | hint: undefined
+[PASS]
+
+>>> ghost_http_get {"url":"http://0x7f000001/"}  (0ms)
+<<< ERR -32000: URL targets a private/reserved IP (127.0.0.1) - blocked (SSRF prevention). Set GHOST_HTTP_ALLOW_PRIVATE=1 to allow | hint: undefined
+[PASS]
+
+>>> ghost_http_get {"url":"http://[::1]/"}  (0ms)
+<<< ERR -32000: URL targets a private/reserved IP (::1) - blocked (SSRF prevention). Set GHOST_HTTP_ALLOW_PRIVATE=1 to allow | hint: undefined
+[PASS]
+
+>>> ghost_http_get {"url":"http://[0:0:0:0:0:0:0:1]/"}  (0ms)
+<<< ERR -32000: URL targets a private/reserved IP (::1) - blocked (SSRF prevention). Set GHOST_HTTP_ALLOW_PRIVATE=1 to allow | hint: undefined
+[PASS]
+
+>>> ghost_http_get {"url":"http://[::ffff:127.0.0.1]/"}  (0ms)
+<<< ERR -32000: URL targets a private/reserved IP (::ffff:127.0.0.1) - blocked (SSRF prevention). Set GHOST_HTTP_ALLOW_PRIVATE=1 to allow | hint: undefined
+[PASS]
+
+>>> ghost_http_get {"url":"http://[::127.0.0.1]/"}  (1ms)
+<<< ERR -32000: URL targets a private/reserved IP (::7f00:1) - blocked (SSRF prevention). Set GHOST_HTTP_ALLOW_PRIVATE=1 to allow | hint: undefined
+[PASS]
+
+>>> ghost_http_get {"url":"http://10.0.0.1/"}  (0ms)
+<<< ERR -32000: URL targets a private/reserved IP (10.0.0.1) - blocked (SSRF prevention). Set GHOST_HTTP_ALLOW_PRIVATE=1 to allow | hint: undefined
+[PASS]
+
+>>> ghost_http_get {"url":"http://172.16.0.1/"}  (0ms)
+<<< ERR -32000: URL targets a private/reserved IP (172.16.0.1) - blocked (SSRF prevention). Set GHOST_HTTP_ALLOW_PRIVATE=1 to allow | hint: undefined
+[PASS]
+
+>>> ghost_http_get {"url":"http://192.168.1.1/"}  (1ms)
+<<< ERR -32000: URL targets a private/reserved IP (192.168.1.1) - blocked (SSRF prevention). Set GHOST_HTTP_ALLOW_PRIVATE=1 to allow | hint: undefined
+[PASS]
+
+>>> ghost_http_get {"url":"http://169.254.169.254/latest/meta-data/"}  (0ms)
+<<< ERR -32000: URL targets a private/reserved IP (169.254.169.254) - blocked (SSRF prevention). Set GHOST_HTTP_ALLOW_PRIVATE=1 to allow | hint: undefined
+[PASS]
+
+>>> ghost_http_get {"url":"http://100.64.0.1/"}  (0ms)
+<<< ERR -32000: URL targets a private/reserved IP (100.64.0.1) - blocked (SSRF prevention). Set GHOST_HTTP_ALLOW_PRIVATE=1 to allow | hint: undefined
+[PASS]
+
+>>> ghost_http_get {"url":"http://0.0.0.0/"}  (0ms)
+<<< ERR -32000: URL targets a private/reserved IP (0.0.0.0) - blocked (SSRF prevention). Set GHOST_HTTP_ALLOW_PRIVATE=1 to allow | hint: undefined
+[PASS]
+
+>>> ghost_http_get {"url":"http://198.18.0.1/"}  (1ms)
+<<< ERR -32000: URL targets a private/reserved IP (198.18.0.1) - blocked (SSRF prevention). Set GHOST_HTTP_ALLOW_PRIVATE=1 to allow | hint: undefined
+[PASS]
+
+>>> ghost_http_get {"url":"http://224.0.0.1/"}  (0ms)
+<<< ERR -32000: URL targets a private/reserved IP (224.0.0.1) - blocked (SSRF prevention). Set GHOST_HTTP_ALLOW_PRIVATE=1 to allow | hint: undefined
+[PASS]
+
+>>> ghost_http_get {"url":"http://[fec0::1]/"}  (0ms)
+<<< ERR -32000: URL targets a private/reserved IP (fec0::1) - blocked (SSRF prevention). Set GHOST_HTTP_ALLOW_PRIVATE=1 to allow | hint: undefined
+[PASS]
+
+>>> ghost_http_get {"url":"http://[fd00::1]/"}  (0ms)
+<<< ERR -32000: URL targets a private/reserved IP (fd00::1) - blocked (SSRF prevention). Set GHOST_HTTP_ALLOW_PRIVATE=1 to allow | hint: undefined
+[PASS]
+
+>>> ghost_http_get {"url":"http://[fe80::1]/"}  (0ms)
+<<< ERR -32000: URL targets a private/reserved IP (fe80::1) - blocked (SSRF prevention). Set GHOST_HTTP_ALLOW_PRIVATE=1 to allow | hint: undefined
+[PASS]
+
+>>> ghost_http_get {"url":"http://[64:ff9b::7f00:1]/"}  (0ms)
+<<< ERR -32000: URL targets a private/reserved IP (64:ff9b::7f00:1) - blocked (SSRF prevention). Set GHOST_HTTP_ALLOW_PRIVATE=1 to allow | hint: undefined
+[PASS]
+
+>>> ghost_http_get {"url":"http://[64:ff9b::a00:1]/"}  (0ms)
+<<< ERR -32000: URL targets a private/reserved IP (64:ff9b::a00:1) - blocked (SSRF prevention). Set GHOST_HTTP_ALLOW_PRIVATE=1 to allow | hint: undefined
+[PASS]
+
+>>> ghost_http_get {"url":"http://[2002:7f00:1::1]/"}  (0ms)
+<<< ERR -32000: URL targets a private/reserved IP (2002:7f00:1::1) - blocked (SSRF prevention). Set GHOST_HTTP_ALLOW_PRIVATE=1 to allow | hint: undefined
+[PASS]
+
+>>> ghost_http_get {"url":"http://[2001:0:4136:e378:8000:63bf:80ff:fffe]/"}  (0ms)
+<<< ERR -32000: URL targets a private/reserved IP (2001:0:4136:e378:8000:63bf:80ff:fffe) - blocked (SSRF prevention). Set GHOST_HTTP_ALLOW_PRIVATE=1 to allow | hint: undefined
+[PASS]
+
+>>> ghost_http_get {"url":"http://localtest.me/"}  (5ms)
+<<< ERR -32000: error sending request for url (http://localtest.me/) | hint: undefined
+[PASS]
+
+>>> ghost_http_get {"url":"http://127.0.0.1.nip.io/"}  (0ms)
+<<< ERR -32000: error sending request for url (http://127.0.0.1.nip.io/) | hint: undefined
+[PASS]
+
+>>> ghost_http_get {"url":"https://example.com/","headers":{"Host":"localhost"}}  (0ms)
+<<< ERR -32000: a caller-supplied Host header is not allowed (SSRF prevention); the URL's host is sent | hint: undefined
+[PASS]
+
+>>> ghost_http_get {"url":"file:///C:/Windows/win.ini"}  (1ms)
+<<< ERR -32000: URL scheme 'file' not allowed; only http/https are permitted | hint: undefined
+[PASS]
+
+>>> ghost_http_get {"url":"https://example.com/"}  (56ms)
+<<< ok {"body":"<!doctype html><html lang=en><head><meta charset=utf-8><link rel=icon href=data:,><meta name=viewport content=\"width=device-width,initial-scale=1\"><title>Example Domain</title><style>html{color-scheme:light dark;background:light-dark(#eee,#222)}body{font:16px/1.6 system-ui,sans-serif;m
+[PASS]
+
+
+## K stop/resume, scope=process only
+>>> ghost_stop {"scope":"process"}  (1ms)
+<<< ok {"ok":true}
+[PASS]
+
+>>> ghost_act {"action":"click","name":"Increment","window":"E2E Testbed 0243"}  (0ms)
+<<< ERR -32004: ghost_act refused: emergency stop active - Ghost is stopped and refuses actions until the stop is lifted | hint: automation is stopped (Ctrl+Alt+G or ghost_stop) - issue no more actions; a stop the human raised is theirs to lift, so wait for them to resume
+[PASS]
+
+>>> ghost_window {"op":"state","name":"E2E Testbed 0243","state":"close"}  (0ms)
+<<< ERR -32004: ghost_window refused: emergency stop active - Ghost is stopped and refuses actions until the stop is lifted | hint: automation is stopped (Ctrl+Alt+G or ghost_stop) - issue no more actions; a stop the human raised is theirs to lift, so wait for them to resume
+[PASS]
+
+>>> ghost_tab_close {"browser":"e2e","tab":"FDDDBDA308790C28E79D5A96DA8ED319"}  (1ms)
+<<< ok {"ok":true}
+[PASS]
+
+>>> ghost_reset {"scope":"process"}  (0ms)
+<<< ok {"ok":true}
+[PASS]
+
+>>> ghost_act {"action":"click","name":"Increment","window":"E2E Testbed 0243"}  (52ms)
+<<< ok {"action":"click","cursor_preserved":true,"focus_preserved":true,"mode":"hidden","name":"Increment","ok":true,"rect":{"bottom":255,"left":218,"right":358,"top":221},"target":{"desktop":"auto","hwnd":27920944,"pid":29332,"source":"explicit","surface":"hidden","title":"E2E Testbed 0243 [clicks=1]"}
+[PASS]
+
+>>> ghost_window {"op":"list"}  (1ms)
+<<< ok {"anchor":{"desktop":"auto","hwnd":27920944,"pid":29332,"source":"anchor","surface":"hidden","title":"E2E Testbed 0243 [clicks=2]"},"windows":[... user-desktop window titles redacted ...]
+[PASS]
+
+
+## J close Ghost-owned things
+>>> ghost_browser_close {"id":"e2e"}  (1ms)
+<<< ok {"ok":true}
+[PASS]
+
+>>> ghost_desktop_close {"id":"auto"}  (1ms)
+<<< ok {"ok":true,"terminated_pids":[29332]}
+[PASS]
+
+$$ tasklist /FI "PID eq 29332" /NH
+INFO: No tasks are running which match the specified criteria.
+[PASS]
+
+$$ tasklist /FI "PID eq 36664" /NH
+INFO: No tasks are running which match the specified criteria.
+[PASS]
+
+
+# summary: 76 pass, 0 fail

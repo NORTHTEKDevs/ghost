@@ -1,0 +1,57 @@
+# server pid 29912, env {"GHOST_SHELL":"off"}
+
+## H3 ghost_tab_open waits for the load (new in 0.24.4)
+>>> ghost_browser_launch {"id":"e2e4","mode":"headless"}  (281ms)
+<<< ok {"browser":"default","dies_with_server":true,"id":"e2e4","mode":"headless","pid":35932,"port":45675}
+[PASS]
+
+>>> ghost_tab_open {"browser":"e2e4","url":"https://example.com/"}  (224ms)
+<<< ok {"background":true,"loaded":true,"tab":"B63D7BBBFD90128E2FEAA88B284AA595","url":"https://example.com/"}
+[PASS]
+
+>>> ghost_tab_eval {"browser":"e2e4","tab":"B63D7BBBFD90128E2FEAA88B284AA595","expression":"location.href + ' ' + document.readyState + ' ' + document.body.innerText.length"}  (1ms)
+<<< ok {"value":"https://example.com/ complete 917"}
+[PASS]
+
+>>> ghost_tab_text {"browser":"e2e4","tab":"B63D7BBBFD90128E2FEAA88B284AA595","max_chars":60}  (2ms)
+<<< ok {"original_length":917,"text":"This domain is for use in documentation examples without nee","truncated":true}
+[PASS]
+
+>>> ghost_tab_open {"browser":"e2e4","url":"https://example.com/","wait":false}  (14ms)
+<<< ok {"background":true,"tab":"58883895447A22D2C455568A7A99E916"}
+[PASS]
+
+>>> ghost_tab_open {"browser":"e2e4","url":"http://127.0.0.1:9/"}  (48ms)
+<<< ERR -32000: Intent error: navigation failed: net::ERR_UNSAFE_PORT; the tab it opened was closed | hint: undefined
+[PASS]
+
+>>> ghost_tab_open {"browser":"e2e4","url":"https://example.com/","timeout_ms":1}  (45ms)
+<<< ERR -32000: Intent error: the page did not load within 1 ms; the tab it opened was closed | hint: undefined
+[PASS]
+
+>>> ghost_tab_open {"browser":"e2e4","url":"https://example.com/","wait":"no"}  (1ms)
+<<< ERR -32602: invalid params: ghost_tab_open wait must be true or false (got "no") | hint: undefined
+[PASS]
+
+>>> ghost_tab_open {"browser":"e2e4","url":"https://example.com/","timeout_ms":0}  (0ms)
+<<< ERR -32602: invalid params: ghost_tab_open timeout_ms must be an integer from 1 to 600000 (got 0) | hint: undefined
+[PASS]
+
+>>> ghost_tab_open {"browser":"e2e4","url":"file:///C:/Windows/win.ini"}  (0ms)
+<<< ERR -32602: invalid params: url scheme not allowed ('file:///C:/Windows/win.ini'); tabs navigate only to http://, https:// or about:blank | hint: undefined
+[PASS]
+
+>>> ghost_browser_tabs {"id":"e2e4"}  (2ms)
+<<< ok {"tabs":[{"target_id":"106277C9C9B9CBD19C67D0698D98D20E","title":"about:blank","url":"about:blank"},{"target_id":"58883895447A22D2C455568A7A99E916","title":"Example Domain","url":"https://example.com/"},{"target_id":"B63D7BBBFD90128E2FEAA88B284AA595","title":"Example Domain","url":"https://example.com/"}]}
+[PASS]
+
+>>> ghost_browser_close {"id":"e2e4"}  (0ms)
+<<< ok {"ok":true}
+[PASS]
+
+$$ tasklist /FI "PID eq 35932" /NH
+INFO: No tasks are running which match the specified criteria.
+[PASS]
+
+
+# summary: 13 pass, 0 fail

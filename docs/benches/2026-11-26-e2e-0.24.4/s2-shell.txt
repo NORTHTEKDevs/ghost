@@ -1,0 +1,145 @@
+# server pid 1516, env {"GHOST_SHELL":"on"}
+
+## E one-shot shell
+>>> ghost_shell {"cmd":"Write-Output 'e2e-one-shot'"}  (659ms)
+<<< ok {"duration_ms":323,"exit_code":0,"ok":true,"output":"e2e-one-shot\r\n","shell":"powershell","timed_out":false,"truncated":false}
+[PASS]
+
+>>> ghost_shell {"cmd":"echo e2e-cmd","shell":"cmd"}  (71ms)
+<<< ok {"duration_ms":71,"exit_code":0,"ok":true,"output":"e2e-cmd\r\n","shell":"cmd","timed_out":false,"truncated":false}
+[PASS]
+
+>>> ghost_shell {"cmd":"Get-Item C:/definitely/not/here"}  (212ms)
+<<< ok {"duration_ms":165,"exit_code":1,"ok":true,"output":"Get-Item : Cannot find path 'C:\\definitely\\not\\here' because it does not exist.\r\nAt line:1 char:1\r\n+ Get-Item C:/definitely/not/here\r\n+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\r\n    + CategoryInfo          : ObjectNotFound: (C:\\definitely\\not\\here:String) [Get-Item], ItemNotFoundException\r\n    + FullyQualifiedErrorId : PathNotFound,Mic
+[PASS]
+
+>>> ghost_shell {"cmd":"Write-Output 1","cwd":"C:/definitely/not/here"}  (1ms)
+<<< ERR -32000: Configuration error: ghost_shell: cwd 'C:/definitely/not/here' is not an existing directory | hint: undefined
+[PASS]
+
+>>> ghost_shell {"cmd":"(Get-Location).Path","cwd":"~"}  (165ms)
+<<< ok {"duration_ms":119,"exit_code":0,"ok":true,"output":"C:\\Users\\Krist\r\n","shell":"powershell","timed_out":false,"truncated":false,"warm":true}
+[PASS]
+
+>>> ghost_shell {"cmd":"Start-Sleep 30","timeout_ms":1500}  (1653ms)
+<<< ok {"duration_ms":1602,"exit_code":null,"ok":false,"output":"","shell":"powershell","timed_out":true,"truncated":false,"warm":true}
+[INFO]
+
+
+## F one-shot that FINISHED: a child it started keeps running (by design, unchanged in 0.24.4); ended here by its PID
+>>> ghost_shell {"cmd":"$psi = New-Object System.Diagnostics.ProcessStartInfo 'ping.exe','-n 120 127.0.0.1'; $psi.UseShellExecute=$false; $psi.CreateNoWindow=$true; $psi.RedirectStandardOutput=$true; $c=[Diagnostics.Process]::Start($psi); 'CHILD=' + $c.Id"}  (173ms)
+<<< ok {"duration_ms":119,"exit_code":0,"ok":true,"output":"CHILD=37764\r\n","shell":"powershell","timed_out":false,"truncated":false,"warm":true}
+[PASS]
+
+$$ tasklist /FI "PID eq 37764" /NH
+PING.EXE                     37764 Console                    1      5,580 K
+[PASS]
+
+$$ taskkill /PID 37764 /F
+SUCCESS: The process with PID 37764 has been terminated.
+[PASS]
+
+
+## F one-shot that TIMED OUT: the shell and its child end (new in 0.24.4)
+>>> ghost_shell {"cmd":"$psi = New-Object System.Diagnostics.ProcessStartInfo 'ping.exe','-n 120 127.0.0.1'; $psi.UseShellExecute=$false; $psi.CreateNoWindow=$true; $psi.RedirectStandardOutput=$true; $c=[Diagnostics.Process]::Start($psi); Set-Content -Path $env:TEMP\\ghost-e2e-0244-child.txt -Value $c.Id; Start-Sleep 30","timeout_ms":2000}  (2121ms)
+<<< ok {"duration_ms":2070,"exit_code":null,"ok":false,"output":"","shell":"powershell","timed_out":true,"truncated":false,"warm":true}
+[PASS]
+
+$$ type %TEMP%\ghost-e2e-0244-child.txt
+22744
+[INFO]
+
+$$ tasklist /FI "PID eq 22744" /NH
+INFO: No tasks are running which match the specified criteria.
+[PASS]
+
+$$ del %TEMP%\ghost-e2e-0244-child.txt
+
+[INFO]
+
+
+## E/F persistent session: start, send, read, list, kill ends its child
+>>> ghost_shell {"op":"open","id":"e2e"}  (148ms)
+<<< ok {"id":"e2e","ok":true,"pid":34604}
+[PASS]
+
+>>> ghost_shell {"op":"send","id":"e2e","cmd":"$x = 41; $x + 1"}  (444ms)
+<<< ok {"busy":false,"exit_code":0,"id":"e2e","ok":true,"output":"42\r\n","timed_out":false,"truncated":false}
+[PASS]
+
+>>> ghost_shell {"op":"send","id":"e2e","cmd":"$psi = New-Object System.Diagnostics.ProcessStartInfo 'ping.exe','-n 120 127.0.0.1'; $psi.UseShellExecute=$false; $psi.CreateNoWindow=$true; $psi.RedirectStandardOutput=$true; $global:c=[Diagnostics.Process]::Start($psi); 'CHILD=' + $c.Id"}  (32ms)
+<<< ok {"busy":false,"exit_code":0,"id":"e2e","ok":true,"output":"CHILD=7856\r\n","timed_out":false,"truncated":false}
+[PASS]
+
+$$ tasklist /FI "PID eq 7856" /NH
+PING.EXE                      7856 Console                    1      5,568 K
+[PASS]
+
+>>> ghost_shell {"op":"list"}  (1ms)
+<<< ok {"ok":true,"sessions":[{"age_ms":664,"busy":false,"commands_run":2,"id":"e2e","pid":34604}]}
+[PASS]
+
+>>> ghost_shell {"op":"read","id":"e2e"}  (0ms)
+<<< ok {"busy":false,"id":"e2e","note":"no command pending","ok":true,"output":""}
+[PASS]
+
+>>> ghost_shell {"op":"kill","id":"e2e"}  (12ms)
+<<< ok {"id":"e2e","killed":true,"ok":true}
+[PASS]
+
+$$ tasklist /FI "PID eq 7856" /NH
+INFO: No tasks are running which match the specified criteria.
+[PASS]
+
+>>> ghost_shell {"op":"list"}  (0ms)
+<<< ok {"ok":true,"sessions":[]}
+[PASS]
+
+
+## K2 a process-scoped stop ends a running persistent command and its child
+>>> ghost_shell {"op":"open","id":"e2s"}  (53ms)
+<<< ok {"id":"e2s","ok":true,"pid":37348}
+[PASS]
+
+>>> ghost_shell {"op":"send","id":"e2s","cmd":"$psi = New-Object System.Diagnostics.ProcessStartInfo 'ping.exe','-n 120 127.0.0.1'; $psi.UseShellExecute=$false; $psi.CreateNoWindow=$true; $psi.RedirectStandardOutput=$true; $global:d=[Diagnostics.Process]::Start($psi); 'CHILD=' + $d.Id"}  (310ms)
+<<< ok {"busy":false,"exit_code":0,"id":"e2s","ok":true,"output":"CHILD=34264\r\n","timed_out":false,"truncated":false}
+[PASS]
+
+>>> ghost_shell {"op":"send","id":"e2s","cmd":"Start-Sleep 60; 'slept'","timeout_ms":1000}  (1031ms)
+<<< ok {"busy":true,"id":"e2s","note":"command #2 still running; call op=read to collect the rest","ok":false,"output":"","timed_out":true,"truncated":false}
+[INFO]
+
+$$ tasklist /FI "PID eq 34264" /NH
+PING.EXE                     34264 Console                    1      5,568 K
+[PASS]
+
+>>> ghost_stop {"scope":"process"}  (1ms)
+<<< ok {"ok":true}
+[PASS]
+
+$$ tasklist /FI "PID eq 34264" /NH
+INFO: No tasks are running which match the specified criteria.
+[PASS]
+
+>>> ghost_shell {"cmd":"Write-Output 'should be refused'"}  (1ms)
+<<< ERR -32004: ghost_shell refused: emergency stop active - Ghost is stopped and refuses actions until the stop is lifted | hint: automation is stopped (Ctrl+Alt+G or ghost_stop) - issue no more actions; a stop the human raised is theirs to lift, so wait for them to resume
+[PASS]
+
+>>> ghost_reset {"scope":"process"}  (0ms)
+<<< ok {"ok":true}
+[PASS]
+
+>>> ghost_shell {"op":"read","id":"e2s"}  (1ms)
+<<< ERR -32000: Configuration error: this shell was ended by an emergency stop (since lifted); start a new one | hint: undefined
+[INFO]
+
+>>> ghost_shell {"op":"list"}  (0ms)
+<<< ok {"ok":true,"sessions":[]}
+[PASS]
+
+>>> ghost_shell {"cmd":"Write-Output 'after reset'"}  (435ms)
+<<< ok {"duration_ms":354,"exit_code":0,"ok":true,"output":"after reset\r\n","shell":"powershell","timed_out":false,"truncated":false}
+[PASS]
+
+
+# summary: 28 pass, 0 fail

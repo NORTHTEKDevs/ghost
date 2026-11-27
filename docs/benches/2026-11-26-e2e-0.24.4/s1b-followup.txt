@@ -1,0 +1,111 @@
+# server pid 13364, env {"GHOST_SHELL":"off"}
+
+## D2 type with value read-back (ValuePattern), negative control, key names
+>>> ghost_window {"op":"launch","exe":"C:/Users/Krist/projects/active/ghost/target-improve/release/ghost-testbed.exe --title \"E2E Testbed 0243b\""}  (112ms)
+<<< ok {"desktop":"auto","note":"started on a hidden desktop (never on your screen) and anchored: ghost_see / ghost_act / ghost_key now target it by default. Drive it by title like any other window; ghost
+[PASS]
+
+>>> ghost_assert {"predicate":"value-equals","name":"Field","text":"","window":"E2E Testbed 0243b"}  (43ms)
+<<< ok {"ok":true,"passed":true,"predicate":"value-equals","target":{"desktop":"auto","hwnd":133630490,"pid":5940,"source":"explicit","surface":"hidden","title":"E2E Testbed 0243b"},"value":""}
+[INFO]
+
+>>> ghost_act {"action":"type","name":"Field","text":"e2e-0.24.3 typed","window":"E2E Testbed 0243b"}  (26ms)
+<<< ok {"action":"type","cursor_preserved":true,"focus_preserved":true,"mode":"hidden","name":"Field","ok":true,"rect":{"bottom":199,"left":218,"right":598,"top":171},"target":{"desktop":"auto","hwnd":133630490,"pid":5940,"source":"explicit","surface":"hidden","title":"E2E Testbed 0243b"},"timing_ms":{"
+[PASS]
+
+>>> ghost_assert {"predicate":"value-equals","name":"Field","text":"e2e-0.24.3 typed","window":"E2E Testbed 0243b"}  (22ms)
+<<< ok {"ok":true,"passed":true,"predicate":"value-equals","target":{"desktop":"auto","hwnd":133630490,"pid":5940,"source":"explicit","surface":"hidden","title":"E2E Testbed 0243b"},"value":"e2e-0.24.3 typed"}
+[PASS]
+
+>>> ghost_wait {"for":"value","name":"Field","text":"e2e-0.24.3 typed","window":"E2E Testbed 0243b","timeout_ms":3000}  (43ms)
+<<< ok {"ok":true,"target":{"desktop":"auto","hwnd":133630490,"pid":5940,"source":"explicit","surface":"hidden","title":"E2E Testbed 0243b"},"value":"e2e-0.24.3 typed"}
+[PASS]
+
+>>> ghost_assert {"predicate":"value-equals","name":"Field","text":"something else","window":"E2E Testbed 0243b"}  (20ms)
+<<< ERR -32000: assert failed: predicate=value-equals, expected="something else", actual="e2e-0.24.3 typed" | hint: undefined
+[PASS]
+
+>>> ghost_act {"action":"type","name":"Field","text":"second","window":"E2E Testbed 0243b"}  (19ms)
+<<< ok {"action":"type","cursor_preserved":true,"focus_preserved":true,"mode":"hidden","name":"Field","ok":true,"rect":{"bottom":199,"left":218,"right":598,"top":171},"target":{"desktop":"auto","hwnd":133630490,"pid":5940,"source":"explicit","surface":"hidden","title":"E2E Testbed 0243b"},"timing_ms":{"
+[PASS]
+
+>>> ghost_assert {"predicate":"value-contains","name":"Field","text":"second","window":"E2E Testbed 0243b"}  (15ms)
+<<< ok {"ok":true,"passed":true,"predicate":"value-contains","target":{"desktop":"auto","hwnd":133630490,"pid":5940,"source":"explicit","surface":"hidden","title":"E2E Testbed 0243b"},"value":"second"}
+[PASS]
+
+>>> ghost_assert {"predicate":"value-contains","name":"Field","text":"secondsecond","window":"E2E Testbed 0243b"}  (16ms)
+<<< ERR -32000: assert failed: predicate=value-contains, expected="secondsecond", actual="second" | hint: undefined
+[PASS]
+
+>>> ghost_act {"action":"type","name":"Increment","text":"x","window":"E2E Testbed 0243b"}  (19ms)
+<<< ERR -32002: Element not interactable: Increment - 'Increment' is not a text field (button); type into an edit control | hint: element exists but isn't actionable (disabled or covered) - call ghost_see and check is_enabled/rect, or dismiss the covering element first
+[PASS]
+
+>>> ghost_find {"name":"Increment","window":"E2E Testbed 0243b","mode":"instant_only"}  (8ms)
+<<< ok {"center":{"x":288,"y":238},"confidence":1,"dispatch_mode":"hidden","escalated":false,"has_rect":true,"hwnd":133630490,"index":null,"matches":1,"name":"Increment","ok":true,"rect":{"bottom":255,"le
+[PASS]
+
+>>> ghost_key {"keys":"NotAKey","window":"E2E Testbed 0243b"}  (0ms)
+<<< ERR -32602: invalid params: ghost_key: unknown key name 'NotAKey' in keys "NotAKey". Use names like Enter, Tab, Escape, Backspace, Delete, Home, End, PageUp, PageDown, arrows (Up/ArrowUp), Space, F1-F12, Ctrl/Shift/Alt/Win, a letter or digit, or any single character | hint: undefined
+[PASS]
+
+>>> ghost_key {"keys":"End","window":"E2E Testbed 0243b"}  (2ms)
+<<< ok {"cursor_preserved":true,"focus_preserved":true,"key":"End","mode":"hidden","note":"WM_KEYDOWN/WM_KEYUP posted to the window's text control; read state (ghost_see mode=text) to confirm the effect","ok":true,"target":{"desktop":"auto","hwnd":133630490,"pid":5940,"source":"explicit","surface":"hidd
+[PASS]
+
+>>> ghost_window {"op":"state","name":"E2E Testbed 0243b","state":"bogus"}  (0ms)
+<<< ERR -32602: invalid params: ghost_window state must be one of maximize|minimize|restore|close (got "bogus") | hint: undefined
+[PASS]
+
+>>> ghost_wait {"for":"ms","ms":10,"timeout_ms":999999999}  (16ms)
+<<< ok {"ok":true}
+[PASS]
+
+
+## H2 example.com body text
+>>> ghost_browser_launch {"id":"e2e2","mode":"headless"}  (396ms)
+<<< ok {"browser":"default","dies_with_server":true,"id":"e2e2","mode":"headless","pid":32860,"port":39005}
+[PASS]
+
+>>> ghost_tab_open {"browser":"e2e2","url":"https://example.com/"}  (149ms)
+<<< ok {"background":true,"loaded":true,"tab":"EBD4FE3A49604D3622F6F582120BD2FF","url":"https://example.com/"}
+[PASS]
+
+>>> ghost_tab_wait_for {"browser":"e2e2","tab":"EBD4FE3A49604D3622F6F582120BD2FF","selector":"body"}  (1ms)
+<<< ok {"background":true,"ok":true}
+[INFO]
+
+>>> ghost_tab_eval {"browser":"e2e2","tab":"EBD4FE3A49604D3622F6F582120BD2FF","expression":"JSON.stringify({h1: document.querySelector('h1') && document.querySelector('h1').innerText, len: document.body.innerText.length, has: document.body.innerText.includes('Example Domain')})"}  (1ms)
+<<< ok {"value":"{\"h1\":null,\"len\":917,\"has\":false}"}
+[PASS]
+
+>>> ghost_tab_text {"browser":"e2e2","tab":"EBD4FE3A49604D3622F6F582120BD2FF","selector":"body"}  (1ms)
+<<< ok {"text":"This domain is for use in documentation examples without needing permission. This is not a service; avoid relying on it for testing and monitoring purposes.\n\nهذا النطاق مُخصص للاستخدام في أمثلة التوثيق دون الحاجة إلى إذن. هذه ليست خدمة، يُرجى تجنب الاعتماد عليها لأغراض الاختبار والمراق
+[PASS]
+
+>>> ghost_tab_navigate {"browser":"e2e2","tab":"EBD4FE3A49604D3622F6F582120BD2FF","url":"https://nonexistent.invalid/"}  (80ms)
+<<< ERR -32000: navigation failed: net::ERR_NAME_NOT_RESOLVED | hint: undefined
+[PASS]
+
+>>> ghost_tab_close {"browser":"e2e2","tab":"EBD4FE3A49604D3622F6F582120BD2FF"}  (5ms)
+<<< ok {"ok":true}
+[PASS]
+
+>>> ghost_browser_close {"id":"e2e2"}  (7ms)
+<<< ok {"ok":true}
+[PASS]
+
+>>> ghost_desktop_close {"id":"auto"}  (1ms)
+<<< ok {"ok":true,"terminated_pids":[5940]}
+[PASS]
+
+$$ tasklist /FI "PID eq 5940" /NH
+INFO: No tasks are running which match the specified criteria.
+[PASS]
+
+$$ tasklist /FI "PID eq 32860" /NH
+INFO: No tasks are running which match the specified criteria.
+[PASS]
+
+
+# summary: 24 pass, 0 fail

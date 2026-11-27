@@ -1,0 +1,18 @@
+{"env": {"GHOST_SHELL": "off"}, "steps": [
+{"note": "H3 ghost_tab_open waits for the load (new in 0.24.4)"},
+{"tool": "ghost_browser_launch", "args": {"id": "e2e4", "mode": "headless"}, "expect": "ok", "capture": {"bpid": "\"pid\":(\\d+)"}},
+{"tool": "ghost_tab_open", "args": {"browser": "e2e4", "url": "https://example.com/"}, "expect": "ok", "contains": "\"loaded\":true", "capture": {"tab": "\"tab\":\"([0-9A-F]+)\""}, "max": 300},
+{"tool": "ghost_tab_eval", "args": {"browser": "e2e4", "tab": "{{tab}}", "expression": "location.href + ' ' + document.readyState + ' ' + document.body.innerText.length"}, "expect": "ok", "contains": "https://example.com/ complete", "max": 200},
+{"tool": "ghost_tab_text", "args": {"browser": "e2e4", "tab": "{{tab}}", "max_chars": 60}, "expect": "ok", "contains": "This domain is for use", "max": 200},
+{"tool": "ghost_tab_open", "args": {"browser": "e2e4", "url": "https://example.com/", "wait": false}, "expect": "ok", "absent": "loaded", "capture": {"tab2": "\"tab\":\"([0-9A-F]+)\""}, "max": 300},
+{"tool": "ghost_tab_open", "args": {"browser": "e2e4", "url": "http://127.0.0.1:9/"}, "expect": "err", "contains": "the tab it opened was closed", "max": 400},
+{"tool": "ghost_tab_open", "args": {"browser": "e2e4", "url": "https://example.com/", "timeout_ms": 1}, "expect": "err", "contains": "the tab it opened was closed", "max": 400},
+{"tool": "ghost_tab_open", "args": {"browser": "e2e4", "url": "https://example.com/", "wait": "no"}, "expect": "err", "contains": "-32602", "max": 300},
+{"tool": "ghost_tab_open", "args": {"browser": "e2e4", "url": "https://example.com/", "timeout_ms": 0}, "expect": "err", "contains": "-32602", "max": 300},
+{"tool": "ghost_tab_open", "args": {"browser": "e2e4", "url": "file:///C:/Windows/win.ini"}, "expect": "err", "max": 300},
+{"sleep": 500},
+{"tool": "ghost_browser_tabs", "args": {"id": "e2e4"}, "expect": "ok", "contains": "{{tab2}}", "max": 600},
+{"tool": "ghost_browser_close", "args": {"id": "e2e4"}, "expect": "ok"},
+{"sleep": 1500},
+{"exec": "tasklist /FI \"PID eq {{bpid}}\" /NH", "contains": "No tasks"}
+]}
