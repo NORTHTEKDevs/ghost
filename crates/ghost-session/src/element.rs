@@ -159,8 +159,22 @@ pub(crate) fn refuse_as_disabled(enabled: Option<bool>) -> bool {
 
 /// The value a read reports for a bare element: see [`pick_value`].
 pub(crate) fn read_value(el: &crate::engine::uia::element::UiaElement) -> String {
-    let role = crate::engine::uia::element::role_id_to_name(el.control_type());
+    let role = effective_role_name(el);
     pick_value(role, el.value_text(), || window_text(el), || el.name())
+}
+
+/// The role Ghost reports for `el`. On Linux the raw AT-SPI role of an
+/// editable text field is "text"/"paragraph"; the normalised role says "edit",
+/// which is what decides whether a value read may fall back to the name.
+pub(crate) fn effective_role_name(el: &crate::engine::uia::element::UiaElement) -> &'static str {
+    #[cfg(target_os = "linux")]
+    {
+        el.role_name()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        crate::engine::uia::element::role_id_to_name(el.control_type())
+    }
 }
 
 #[cfg(windows)]

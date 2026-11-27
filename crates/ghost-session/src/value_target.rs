@@ -89,7 +89,7 @@ pub(crate) fn following_editable(
 }
 
 fn role_of(el: &crate::engine::uia::element::UiaElement) -> &'static str {
-    crate::engine::uia::element::role_id_to_name(el.control_type())
+    crate::element::effective_role_name(el)
 }
 
 /// The element a value read of `by` in window `hwnd` reads; see the module docs.
@@ -109,6 +109,15 @@ pub(crate) fn find_value_element(
         }
         By::Name(n) => n,
     };
+    // A role narrows the walk itself, so a field behind many same-named
+    // links or cells is still reached; the label hop below is for a name
+    // that only a label carries (the field's own name is its contents).
+    if let Some(r) = role_filter {
+        let hits = tree.find_all_in_hwnd(hwnd, Some(n), Some(r), 1).map_err(GhostError::Core)?;
+        if let Some(first) = hits.into_iter().next() {
+            return Ok(Some(first));
+        }
+    }
     let matches = tree.find_all_in_hwnd(hwnd, Some(n), None, 16).map_err(GhostError::Core)?;
     let described: Vec<(String, &str)> = matches.iter().map(|e| (e.name(), role_of(e))).collect();
     let (label, fallback) = match pick_value_match(&described, n, role_filter, &alias) {
@@ -241,5 +250,36 @@ mod tests {
         assert_eq!(following_editable(&["text", "edit"], None, &alias), None);
         assert_eq!(following_editable(&["button"], None, &alias), None);
         assert_eq!(following_editable(&["combobox"], Some("text"), &alias), None);
+    }
+}
+
+/// Wiring pins, read from the source (a behavioural test needs a live tree).
+#[cfg(test)]
+mod wiring_tests {
+    fn body<'a>(src: &'a str, sig: &str) -> &'a str {
+        let start = src.find(sig).unwrap_or_else(|| panic!("{sig} not found"));
+        &src[start..start + src[start..].find("\n}").expect("end of fn")]
+    }
+
+    /// A role given with the name narrows the walk itself: filtering 16 name
+    /// hits afterwards missed a field behind 16 same-named links or cells.
+    #[test]
+    fn a_role_filter_narrows_the_lookup_before_the_label_hop() {
+        let src = include_str!("value_target.rs");
+        let b = body(src, "pub(crate) fn find_value_element(");
+        let filtered = b.find("find_all_in_hwnd(hwnd, Some(n), Some(").expect("no role-filtered lookup");
+        let unfiltered = b.find("find_all_in_hwnd(hwnd, Some(n), None").expect("no name lookup");
+        assert!(filtered < unfiltered, "the role-filtered lookup must come first:\n{b}");
+    }
+
+    /// Editability is judged by the role Ghost reports (Linux normalises
+    /// editable AT-SPI text to "edit"), never by the raw role id.
+    #[test]
+    fn value_reads_judge_roles_by_the_effective_role() {
+        let vt = include_str!("value_target.rs");
+        assert!(body(vt, "fn role_of(").contains("effective_role_name("), "role_of uses the raw role");
+        let el = include_str!("element.rs");
+        let rv = body(el, "pub(crate) fn read_value(");
+        assert!(rv.contains("effective_role_name(") && !rv.contains("role_id_to_name("), "{rv}");
     }
 }
