@@ -71,6 +71,11 @@ pub enum CoreError {
     /// No element matched the locator.
     #[error("element not found: {0}")]
     NotFound(String),
+
+    /// The emergency stop was in force when a state-changing accessibility
+    /// call reached the front of the queue, so it was not performed.
+    #[error("the emergency stop is in force; the action was not performed")]
+    Stopped,
 }
 
 impl CoreError {

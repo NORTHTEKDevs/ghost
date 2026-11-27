@@ -439,7 +439,7 @@ impl BackgroundClicker {
     pub fn button_click(handle: isize) -> Result<()> {
         let addr = handles::resolve(handle).ok_or(CoreError::WindowGone)?;
         let bridge = global_bridge()?;
-        bridge.run_default(move |ctx| Box::pin(async move { ops::do_best_action(ctx, &addr).await }))?;
+        bridge.run_action_default(move |ctx| Box::pin(async move { ops::do_best_action(ctx, &addr).await }))?;
         Ok(())
     }
 
@@ -452,7 +452,7 @@ impl BackgroundClicker {
         let addr = handles::resolve(handle).ok_or(CoreError::WindowGone)?;
         let text = text.to_string();
         let bridge = global_bridge()?;
-        bridge.run_default(move |ctx| {
+        bridge.run_action_default(move |ctx| {
             Box::pin(async move { ops::set_text_value(ctx, &addr, &text).await })
         })?;
         Ok(())
@@ -485,7 +485,7 @@ impl BackgroundClicker {
         let addr = handles::resolve(handle).ok_or(CoreError::WindowGone)?;
         let bridge = global_bridge()?;
         let kind = cmd.kind();
-        bridge.run_default(move |ctx| {
+        bridge.run_action_default(move |ctx| {
             Box::pin(async move { ops::edit_command(ctx, &addr, kind).await })
         })
     }
@@ -494,7 +494,7 @@ impl BackgroundClicker {
         if let Some(addr) = handles::resolve(handle) {
             if let Ok(bridge) = global_bridge() {
                 let _ = bridge
-                    .run_default(move |ctx| Box::pin(async move { ops::grab_focus(ctx, &addr).await }));
+                    .run_action_default(move |ctx| Box::pin(async move { ops::grab_focus(ctx, &addr).await }));
             }
         }
         press_key(VirtualKey(keysym))

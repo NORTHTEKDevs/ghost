@@ -654,7 +654,7 @@ pub fn focus_window(name: &str) -> Result<()> {
     let addr = handles::resolve(win.hwnd).ok_or(CoreError::WindowGone)?;
     let bridge = tree.bridge();
     let focused = bridge
-        .run_default(move |ctx| Box::pin(async move { ops::grab_focus(ctx, &addr).await }))
+        .run_action_default(move |ctx| Box::pin(async move { ops::grab_focus(ctx, &addr).await }))
         .unwrap_or(false);
 
     if raised || focused {
@@ -693,7 +693,7 @@ pub fn set_window_state_hwnd(hwnd: isize, state: WindowState) -> Result<()> {
             let a = addr.clone();
             if tree
                 .bridge()
-                .run_default(move |ctx| Box::pin(async move { ops::do_best_action(ctx, &a).await }))
+                .run_action_default(move |ctx| Box::pin(async move { ops::do_best_action(ctx, &a).await }))
                 .is_ok()
             {
                 return Ok(());
@@ -723,7 +723,7 @@ pub fn set_window_state(name: &str, state: WindowState) -> Result<()> {
             let a = addr.clone();
             if tree
                 .bridge()
-                .run_default(move |ctx| Box::pin(async move { ops::do_best_action(ctx, &a).await }))
+                .run_action_default(move |ctx| Box::pin(async move { ops::do_best_action(ctx, &a).await }))
                 .is_ok()
             {
                 return Ok(());
@@ -750,7 +750,7 @@ pub fn ensure_foreground(hwnd: isize, timeout_ms: u64) -> Result<bool> {
 
     {
         let a = addr.clone();
-        let _ = bridge.run_default(move |ctx| Box::pin(async move { ops::grab_focus(ctx, &a).await }));
+        let _ = bridge.run_action_default(move |ctx| Box::pin(async move { ops::grab_focus(ctx, &a).await }));
     }
 
     let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms);

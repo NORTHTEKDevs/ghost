@@ -136,7 +136,7 @@ impl A11yElement {
         let addr = self.addr.clone();
         let ok = self
             .bridge
-            .run_default(move |ctx| Box::pin(async move { ops::grab_focus(ctx, &addr).await }))?;
+            .run_action_default(move |ctx| Box::pin(async move { ops::grab_focus(ctx, &addr).await }))?;
         if ok {
             Ok(())
         } else {
@@ -147,7 +147,7 @@ impl A11yElement {
     pub fn scroll_into_view(&self) -> Result<()> {
         let addr = self.addr.clone();
         self.bridge
-            .run_default(move |ctx| Box::pin(async move { ops::scroll_into_view(ctx, &addr).await }))?;
+            .run_action_default(move |ctx| Box::pin(async move { ops::scroll_into_view(ctx, &addr).await }))?;
         Ok(())
     }
 
@@ -156,14 +156,14 @@ impl A11yElement {
     pub fn invoke(&self) -> Result<bool> {
         let addr = self.addr.clone();
         self.bridge
-            .run_default(move |ctx| Box::pin(async move { ops::do_best_action(ctx, &addr).await }))
+            .run_action_default(move |ctx| Box::pin(async move { ops::do_best_action(ctx, &addr).await }))
     }
 
     /// Set the element's text or numeric value directly.
     pub fn set_value(&self, text: &str) -> Result<bool> {
         let addr = self.addr.clone();
         let text = text.to_string();
-        self.bridge.run_default(move |ctx| {
+        self.bridge.run_action_default(move |ctx| {
             Box::pin(async move { ops::set_text_value(ctx, &addr, &text).await })
         })
     }
