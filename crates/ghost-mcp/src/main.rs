@@ -1019,6 +1019,10 @@ fn dispatch_tool_inner<'a>(
         // Window anchoring (ghost_session::target): a window-scoped verb with no
         // `window=` acts on the session anchor, never silently on the human's
         // foreground; every such response reports what it targeted.
+        // Out-of-schema values are refused before any window is resolved, so
+        // a typo can never widen to the human's foreground window.
+        let validated = validate_args(name, args)?;
+        let args: &Value = validated.as_ref().unwrap_or(args);
         let prepared = prepare_window_target(session, name, args).await?;
         let args: &Value = prepared.args.as_ref().unwrap_or(args);
         // A Chromium window whose process exposes a DevTools port is driven
@@ -1190,6 +1194,10 @@ async fn dispatch_cdp(
                 }
                 Ok(json!({ "text": text, "chars": text.len(), "truncated": truncated, "coords": "viewport" }))
             }
+            m @ ("marks" | "selection") => Err(format!(
+                "ghost_see mode={m} has no CDP path for this browser window; nothing was read \
+                 from any other window. Use mode=full or mode=text, or ghost_tab_* for the page"
+            )),
             _ => {
                 let els = session.cdp_describe(r, limit_of(p), None, None).await.map_err(err)?;
                 let descriptors: Vec<_> = els.iter().map(|e| e.to_descriptor()).collect();
@@ -1463,6 +1471,10 @@ async fn dispatch_hidden(
                 let (text, truncated) = session.hidden_read_text(t, max_chars).await.map_err(err)?;
                 Ok(json!({ "text": text, "chars": text.len(), "truncated": truncated }))
             }
+            m @ ("marks" | "selection") => Err(format!(
+                "ghost_see mode={m} has no hidden-desktop path; nothing was read from any other \
+                 window. Use mode=full or mode=text"
+            )),
             _ => {
                 let els = session.hidden_describe(t).await.map_err(err)?;
                 Ok(elements_response(&els, p))
@@ -1639,14 +1651,75 @@ struct PreparedTarget {
     target: Option<WindowTarget>,
 }
 
+/// The modes `ghost_see` accepts: its schema enum.
+const SEE_MODES: [&str; 6] = ["fast", "full", "delta", "text", "marks", "selection"];
+
+/// `ghost_see`'s mode: omitted = "fast", otherwise one of [`SEE_MODES`] matched
+/// case-insensitively. Anything else is invalid params. An unknown mode used to
+/// skip window resolution and fall through to the foreground fast path, which
+/// described the human's window (a notification toast) with ok:true.
+fn see_mode(args: &Value) -> std::result::Result<&'static str, String> {
+    let bad = |got: &Value| {
+        format!("{INVALID_PARAMS}ghost_see mode must be one of {} (got {got})", SEE_MODES.join("|"))
+    };
+    match args.get("mode") {
+        None | Some(Value::Null) => Ok("fast"),
+        Some(v @ Value::String(s)) => {
+            let m = s.trim().to_ascii_lowercase();
+            SEE_MODES.iter().copied().find(|k| *k == m).ok_or_else(|| bad(v))
+        }
+        Some(other) => Err(bad(other)),
+    }
+}
+
+/// Refuse argument values the schema does not allow before anything resolves a
+/// window or touches the desktop. Returns rewritten arguments when a value was
+/// normalised (a mode's case), None when the arguments stand as given.
+fn validate_args(name: &str, args: &Value) -> std::result::Result<Option<Value>, String> {
+    let mut out: Option<Value> = None;
+    if name == "ghost_see" {
+        let mode = see_mode(args)?;
+        if args["mode"].is_string() && args["mode"].as_str() != Some(mode) {
+            out.get_or_insert_with(|| args.clone())["mode"] = Value::String(mode.into());
+        }
+        match args.get("limit") {
+            None | Some(Value::Null) => {}
+            Some(v) if v.as_u64().is_some() => {}
+            Some(v) => {
+                return Err(format!(
+                    "{INVALID_PARAMS}{name} limit must be a non-negative integer (got {v})"
+                ))
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// The window a `ghost_see` mode=marks|selection read is confined to: the
+/// handle the resolver chose. A window that was named (or anchored) but has no
+/// usable handle is refused rather than read from the foreground; only a call
+/// that names no window and has no anchor reads the foreground, as documented.
+fn see_scope_hwnd(p: &Value) -> std::result::Result<Option<isize>, String> {
+    if let Some(h) = p["_target_hwnd"].as_i64().filter(|h| *h != 0) {
+        return Ok(Some(h as isize));
+    }
+    match p.get("window").and_then(|v| v.as_str()).map(str::trim) {
+        Some(w) if !w.is_empty() => Err(format!(
+            "ghost_see mode={}: window '{w}' resolved to no window handle this path can read; \
+             nothing was read from the foreground instead",
+            p["mode"].as_str().unwrap_or("?")
+        )),
+        _ => Ok(None),
+    }
+}
+
 /// Which calls are window-scoped, i.e. act inside one window and therefore
 /// need the anchor when the caller names none.
 fn is_window_scoped(name: &str, args: &Value) -> bool {
     match name {
-        "ghost_see" => matches!(
-            args["mode"].as_str().unwrap_or("fast"),
-            "fast" | "full" | "text" | "delta"
-        ),
+        // Every mode: `validate_args` has already refused anything outside the
+        // schema enum, and marks/selection read the resolved window too.
+        "ghost_see" => true,
         "ghost_find" | "ghost_act" | "ghost_key" | "ghost_click_at" | "ghost_snapshot"
         | "ghost_assert" | "ghost_scroll" => true,
         // A full-screen capture is explicitly the whole screen; everything else
@@ -2191,7 +2264,11 @@ async fn handle_tool(
         }
         "ghost_get_selection" => {
             let by = parse_by(p)?;
-            let text = session.get_selected_text(by).await.map_err(|e| e.to_string())?;
+            let text = match see_scope_hwnd(p)? {
+                Some(hwnd) => session.get_selected_text_in(hwnd, by).await,
+                None => session.get_selected_text(by).await,
+            }
+            .map_err(|e| e.to_string())?;
             Ok(json!({ "selection": text, "has_selection": !text.is_empty() }))
         }
         "ghost_get_clipboard" => {
@@ -2568,7 +2645,11 @@ async fn handle_tool(
             }))
         }
         "ghost_render_marks" => {
-            let (jpeg, marks) = session.render_marks().await.map_err(|e| e.to_string())?;
+            let (jpeg, marks) = match see_scope_hwnd(p)? {
+                Some(hwnd) => session.render_marks_in(hwnd).await,
+                None => session.render_marks().await,
+            }
+            .map_err(|e| e.to_string())?;
             Ok(json!({
                 "marked_jpeg_base64": jpeg.map(|j| base64_encode(&j)),
                 "count": marks.len(),
@@ -2974,8 +3055,7 @@ async fn handle_ghost_see(
     session: &GhostSession,
     p: &Value,
 ) -> std::result::Result<Value, String> {
-    let mode = p.get("mode").and_then(|v| v.as_str()).unwrap_or("fast");
-    match mode {
+    match see_mode(p)? {
         "full" => handle_tool(session, "ghost_describe_screen", p).await,
         "delta" => handle_tool(session, "ghost_describe_screen_delta", p).await,
         "text" => handle_tool(session, "ghost_read_text", p).await,
@@ -3754,7 +3834,7 @@ fn lean_tools_schema() -> Value {
     json!([
         // --- Perception ---
         { "name": "ghost_see",
-          "description": "Describe a window's UI as elements {name, role, rect}. Target = window= (title substring; becomes the session anchor) or the current anchor; with neither, the human's foreground window and the response says so (target.source). Never focuses or raises anything. mode=full (default whenever a window is targeted: scoped walk, works on covered windows and hidden-desktop apps), mode=fast (foreground-only quick path, used only when nothing is targeted), mode=text (READ the visible text - the cheapest way to read content), mode=delta (changed elements since since_seq), mode=marks (DEBUG Set-of-Marks image), mode=selection (selected text of a name/role element). Elements capped at 150 (limit); text at 20000 chars.",
+          "description": "Describe a window's UI as elements {name, role, rect}. Target = window= (title substring; becomes the session anchor) or the current anchor; with neither, the human's foreground window and the response says so (target.source). Never focuses or raises anything. mode=full (default whenever a window is targeted: scoped walk, works on covered windows and hidden-desktop apps), mode=fast (foreground-only quick path, used only when nothing is targeted), mode=text (READ the visible text - the cheapest way to read content), mode=delta (changed elements since since_seq), mode=marks (DEBUG Set-of-Marks image of the target window), mode=selection (selected text of a name/role element in the target window). Any other mode is an invalid-params error. Elements capped at 150 (limit); text at 20000 chars.",
           "inputSchema": { "type": "object", "properties": {
               "mode": { "type": "string", "enum": ["fast", "full", "delta", "text", "marks", "selection"], "description": "full=scoped tree (default with a target), fast=foreground quick path, delta=changed only, text=readable text, marks=SoM debug image, selection=selected text of name/role element" },
               "window": { "type": "string", "description": "Title substring of the window to describe. Anchors it for later calls. 'foreground' = the human's current window." },
@@ -6002,3 +6082,6 @@ mod tests {
         assert_eq!(v["error"]["code"].as_i64().unwrap(), -32603);
     }
 }
+
+#[cfg(test)]
+mod arg_validation_tests;

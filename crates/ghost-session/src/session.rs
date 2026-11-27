@@ -875,8 +875,40 @@ impl GhostSession {
             .ok_or_else(|| GhostError::Vision(format!("no window matching '{window}'")))?
             .clone();
         let hwnd = win.hwnd;
+        let Some((jpeg, candidates, labels)) = self.build_marks_in_hwnd(hwnd).await? else {
+            return Ok(None);
+        };
+        match crate::vision::vision_pick_mark(description, &jpeg, &labels).await? {
+            Some(idx) => {
+                let (l, t, r, b) = candidates[idx - 1];
+                Ok(Some(((l + r) / 2, (t + b) / 2, hwnd)))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// [`Self::render_marks`] for window `hwnd`: its own surface and its own
+    /// subtree, never the foreground window's.
+    pub async fn render_marks_in(&self, hwnd: isize) -> Result<(Option<Vec<u8>>, Vec<serde_json::Value>)> {
+        match self.build_marks_in_hwnd(hwnd).await? {
+            Some((jpeg, candidates, labels)) => {
+                let marks: Vec<serde_json::Value> = labels.iter().zip(candidates.iter()).enumerate()
+                    .map(|(i, (name, c))| serde_json::json!({
+                        "number": i + 1, "name": name,
+                        "center": {"x": (c.0 + c.2) / 2, "y": (c.1 + c.3) / 2}
+                    })).collect();
+                Ok((Some(jpeg), marks))
+            }
+            None => Ok((None, Vec::new())),
+        }
+    }
+
+    /// The Set-of-Marks image, candidate rects (screen coordinates) and labels
+    /// for window `hwnd`, rendered from the window's own surface.
+    async fn build_marks_in_hwnd(&self, hwnd: isize)
+        -> Result<Option<(Vec<u8>, Vec<(i32, i32, i32, i32)>, Vec<String>)>> {
         let rect = crate::engine::system::window_rect(hwnd)
-            .ok_or_else(|| GhostError::Vision(format!("window '{window}' has no rect")))?;
+            .ok_or_else(|| GhostError::Vision(format!("window {hwnd:#x} has no rect")))?;
         let els = self.tree.collect_in_hwnd(hwnd, 200).map_err(GhostError::Core)?;
         const MAX_MARKS: usize = 50;
         // Named elements first: the SoM prompt leans on accessible labels for
@@ -927,13 +959,7 @@ impl GhostSession {
         .await
         .map_err(|e| GhostError::Core(crate::engine::error::CoreError::WorkerPanic(e.to_string())))?
         .map_err(GhostError::Core)?;
-        match crate::vision::vision_pick_mark(description, &jpeg, &labels).await? {
-            Some(idx) => {
-                let (l, t, r, b) = candidates[idx - 1];
-                Ok(Some(((l + r) / 2, (t + b) / 2, hwnd)))
-            }
-            None => Ok(None),
-        }
+        Ok(Some((jpeg, candidates, labels)))
     }
 
     #[tracing::instrument(skip(self), fields(desc = %description))]
@@ -1966,6 +1992,18 @@ impl GhostSession {
     pub async fn get_selected_text(&self, by: By) -> Result<String> {
         let el = self.find(by).await?;
         Ok(el.get_selection())
+    }
+
+    /// [`Self::get_selected_text`] confined to window `hwnd`: a same-named
+    /// element in the human's foreground window is never read.
+    pub async fn get_selected_text_in(&self, hwnd: isize, by: By) -> Result<String> {
+        let el = self
+            .find_in_hwnd(hwnd, &by, "selection")?
+            .ok_or_else(|| GhostError::ElementNotFound {
+                query: format!("{by:?} in window {hwnd:#x}"),
+                screenshot: None,
+            })?;
+        Ok(crate::GhostElement::new(el).get_selection())
     }
 
     /// Scroll `direction` in steps of `amount` notches at the foreground window
