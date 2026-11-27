@@ -487,6 +487,12 @@ async fn async_main() {
             }
         };
 
+        // MCP cancellation: abort the named in-flight call. No response.
+        if req.method == "notifications/cancelled" {
+            cancel_request(req.params.as_ref());
+            continue;
+        }
+
         let session = session.clone();
         let out_tx = out_tx.clone();
         // Every request is its own task: a slow wait in one tool cannot delay
@@ -508,6 +514,7 @@ async fn async_main() {
                 async move { handle(&work_session, &method, params.as_ref()).await },
                 deadline,
                 label,
+                req.id.as_ref().map(cancel_key),
             )
             .await;
             // Notifications have no id and get no response.
@@ -576,39 +583,78 @@ fn tool_label(req: &McpRequest) -> String {
     req.method.clone()
 }
 
-/// Run one tool future on its own task and turn the two silent failure modes
-/// into error results: a panic (the task dies, nobody answers) and an overrun
-/// (a blocking call that no client-side timeout can cancel). On overrun the work
-/// is NOT aborted - it may be a blocking COM call that cannot be - so the error
-/// says the work continues and the caller must re-check state before retrying.
+/// In-flight calls by JSON-RPC request id, so `notifications/cancelled` can abort one.
+static IN_FLIGHT: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, tokio::task::AbortHandle>>,
+> = std::sync::LazyLock::new(Default::default);
+
+/// Registry key for a request id (`7` and `"7"` stay distinct).
+fn cancel_key(id: &Value) -> String {
+    id.to_string()
+}
+
+/// Abort the call named by a `notifications/cancelled` `requestId`. True when
+/// one was in flight.
+fn cancel_request(params: Option<&Value>) -> bool {
+    let Some(id) = params.and_then(|p| p.get("requestId")) else { return false };
+    let handle = IN_FLIGHT.lock().unwrap_or_else(|e| e.into_inner()).remove(&cancel_key(id));
+    handle.map(|h| h.abort()).is_some()
+}
+
+/// Removes the registry entry however `guarded` exits.
+struct InFlightEntry(Option<String>);
+impl Drop for InFlightEntry {
+    fn drop(&mut self) {
+        if let Some(k) = self.0.take() {
+            IN_FLIGHT.lock().unwrap_or_else(|e| e.into_inner()).remove(&k);
+        }
+    }
+}
+
+/// Run one tool future on its own task and turn the silent failure modes into
+/// error results: a panic (the task dies, nobody answers), an overrun, and a
+/// client cancellation. On overrun or cancellation the task is ABORTED so it
+/// stops acting; a blocking step already running on another thread (a COM call)
+/// cannot be interrupted and may still finish, so the error says to re-check.
 async fn guarded<F>(
     fut: F,
     deadline: std::time::Duration,
     label: String,
+    cancel: Option<String>,
 ) -> std::result::Result<Value, String>
 where
     F: std::future::Future<Output = std::result::Result<Value, String>> + Send + 'static,
 {
-    let handle = tokio::spawn(fut);
-    match tokio::time::timeout(deadline, handle).await {
+    let mut handle = tokio::spawn(fut);
+    if let Some(k) = &cancel {
+        IN_FLIGHT
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(k.clone(), handle.abort_handle());
+    }
+    let _entry = InFlightEntry(cancel);
+    match tokio::time::timeout(deadline, &mut handle).await {
         Ok(Ok(result)) => result,
+        Ok(Err(join)) if join.is_cancelled() => Err(format!(
+            "{label} cancelled by the client (notifications/cancelled); the call was aborted - \
+             a step already running may still finish, re-check state with ghost_see"
+        )),
         Ok(Err(join)) => {
-            let why = if join.is_panic() {
-                panic_message(join.into_panic())
-            } else {
-                "task cancelled".to_string()
-            };
+            let why = panic_message(join.into_panic());
             Err(format!(
                 "{label} panicked inside the server: {why} (logged to the ghost crash log; \
                  the server is still up - re-check state with ghost_see before retrying)"
             ))
         }
-        Err(_) => Err(format!(
-            "{label} timed out: exceeded the {}s tool deadline (GHOST_TOOL_DEADLINE_MS). The \
-             work was not cancelled and may still complete - re-check state with ghost_see \
-             before retrying",
-            deadline.as_secs()
-        )),
+        Err(_) => {
+            handle.abort();
+            Err(format!(
+                "{label} timed out: exceeded the {}s tool deadline (GHOST_TOOL_DEADLINE_MS). The \
+                 call was aborted, but a blocking step already running may still complete - \
+                 re-check state with ghost_see before retrying",
+                deadline.as_secs()
+            ))
+        }
     }
 }
 
@@ -4329,10 +4375,55 @@ mod tests {
             },
             std::time::Duration::from_secs(5),
             "ghost_x".into(),
+            None,
         ));
         let e = r.expect_err("a panic must become an error, not silence");
         assert!(e.contains("ghost_x panicked"), "{e}");
         assert!(e.contains("boom-7"), "{e}");
+    }
+
+    async fn counting_loop(n: std::sync::Arc<std::sync::atomic::AtomicU32>) -> std::result::Result<Value, String> {
+        loop {
+            n.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        }
+    }
+
+    #[test]
+    fn guarded_aborts_the_task_on_timeout() {
+        use std::sync::atomic::Ordering::SeqCst;
+        let n = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let rt = rt();
+        let e = rt
+            .block_on(guarded(counting_loop(n.clone()), std::time::Duration::from_millis(50), "ghost_wait".into(), None))
+            .expect_err("overrun");
+        assert!(e.contains("timed out"), "{e}");
+        std::thread::sleep((std::time::Duration::from_millis(20)));
+        let after = n.load(SeqCst);
+        std::thread::sleep((std::time::Duration::from_millis(150)));
+        assert_eq!(n.load(SeqCst), after, "the timed-out task kept running");
+    }
+
+    #[test]
+    fn notifications_cancelled_aborts_the_in_flight_request() {
+        use std::sync::atomic::Ordering::SeqCst;
+        let n = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let rt = rt();
+        let key = cancel_key(&json!("req-cancel-1"));
+        let call = rt.spawn(guarded(
+            counting_loop(n.clone()),
+            std::time::Duration::from_secs(30),
+            "ghost_wait".into(),
+            Some(key),
+        ));
+        std::thread::sleep((std::time::Duration::from_millis(30)));
+        assert!(cancel_request(Some(&json!({ "requestId": "req-cancel-1" }))), "registered call found");
+        let e = rt.block_on(call).unwrap().expect_err("cancelled");
+        assert!(e.contains("cancelled"), "{e}");
+        let after = n.load(SeqCst);
+        std::thread::sleep((std::time::Duration::from_millis(100)));
+        assert_eq!(n.load(SeqCst), after, "the cancelled task kept running");
+        assert!(!cancel_request(Some(&json!({ "requestId": "req-cancel-1" }))), "entry removed when done");
     }
 
     #[test]
@@ -4344,6 +4435,7 @@ mod tests {
             },
             std::time::Duration::from_millis(50),
             "ghost_wait".into(),
+            None,
         ));
         let e = r.expect_err("an overrun must become an error");
         assert!(e.contains("ghost_wait timed out"), "{e}");
@@ -4357,6 +4449,7 @@ mod tests {
             async { Ok(json!({ "a": 1 })) },
             std::time::Duration::from_secs(5),
             "ghost_see".into(),
+            None,
         ));
         assert_eq!(r.unwrap(), json!({ "a": 1 }));
     }
