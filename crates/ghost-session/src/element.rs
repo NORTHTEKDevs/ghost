@@ -34,7 +34,7 @@ impl GhostElement {
         refuse_as_disabled(self.inner.is_enabled_checked())
     }
 
-    /// True if the element is a text-editable control (edit/document/combobox) —
+    /// True if the element is a text-editable control (edit/document/combobox) - 
     /// safe to clear (Ctrl+A+Delete) and paste into.
     pub fn is_editable(&self) -> bool {
         crate::engine::uia::patterns::is_editable_role(self.inner.control_type())
@@ -119,7 +119,7 @@ impl GhostElement {
 
     /// Background click: InvokePattern ONLY. Never foregrounds the window, never
     /// moves the real cursor, never falls back to a coordinate click. Errors with
-    /// `NotActionableInBackground` if the element exposes no InvokePattern — the
+    /// `NotActionableInBackground` if the element exposes no InvokePattern - the
     /// caller must NOT silently steal focus in that case.
     pub fn click_background(&self) -> Result<()> {
         if is_stopped() { return Err(GhostError::Stopped); }
@@ -162,16 +162,50 @@ pub(crate) fn refuse_as_disabled(enabled: Option<bool>) -> bool {
 /// [`GhostElement::typed_value`] for a bare UIA element.
 #[cfg(windows)]
 pub(crate) fn typed_value(el: &crate::engine::uia::element::UiaElement) -> String {
-    if let Some(v) = el.value_text().filter(|v| !v.is_empty()) {
+    pick_value(el.value_text(), || {
+        let ctrl = el.native_window_handle();
+        if ctrl == 0 {
+            return None;
+        }
+        crate::engine::input::BackgroundClicker::read_text(ctrl)
+    })
+}
+
+/// An element's value: the ValuePattern value when it has text, else the
+/// control's own window text, else empty. Never the element name: a wait or
+/// read-back that fell back to the name compared against a label ("Field"),
+/// not against what the field contains.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn pick_value(value: Option<String>, window_text: impl FnOnce() -> Option<String>) -> String {
+    if let Some(v) = value.filter(|v| !v.is_empty()) {
         return v;
     }
-    let ctrl = el.native_window_handle();
-    if ctrl != 0 {
-        if let Some(t) = crate::engine::input::BackgroundClicker::read_text(ctrl) {
-            return t;
-        }
+    window_text().unwrap_or_default()
+}
+
+#[cfg(test)]
+mod value_read_tests {
+    //! M7: a value read takes the ValuePattern value, else the control's own
+    //! window text. The element name is not an input at all.
+    use super::pick_value;
+
+    #[test]
+    fn the_value_pattern_wins_when_it_has_text() {
+        assert_eq!(pick_value(Some("hello".into()), || panic!("not needed")), "hello");
     }
-    el.value_text().unwrap_or_default()
+
+    #[test]
+    fn an_empty_value_falls_back_to_the_window_text() {
+        // A classic Win32 EDIT: the proxy's value is empty, WM_GETTEXT has it.
+        assert_eq!(pick_value(Some(String::new()), || Some("hello".into())), "hello");
+        assert_eq!(pick_value(None, || Some("hello".into())), "hello");
+    }
+
+    #[test]
+    fn nothing_readable_is_empty_never_the_name() {
+        assert_eq!(pick_value(None, || None), "");
+        assert_eq!(pick_value(Some(String::new()), || None), "");
+    }
 }
 
 #[cfg(test)]

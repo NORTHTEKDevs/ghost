@@ -2300,7 +2300,8 @@ impl GhostSession {
         }
     }
 
-    /// Wait until an element's VALUE (ValuePattern/get_text) satisfies a predicate.
+    /// Wait until an element's VALUE (ValuePattern, else the control's window
+    /// text; never its name - see `typed_value`) satisfies a predicate.
     /// `pred`: "equals" | "contains" | "changes" (changes = differs from the initial
     /// value observed at call start). Returns the final value on success. Polls with
     /// the same event-bus backoff as wait_for_element. The "wait until this field
@@ -2314,7 +2315,7 @@ impl GhostSession {
         let read = |by: &By| -> Result<String> {
             Ok(self
                 .find_in_hwnd(hwnd, by, "wait_for_value")?
-                .map(|el| crate::GhostElement::new(el).get_text())
+                .map(|el| crate::GhostElement::new(el).typed_value())
                 .unwrap_or_default())
         };
         // Baseline for "changes".

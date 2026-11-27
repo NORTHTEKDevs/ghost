@@ -217,18 +217,10 @@ fn find_in_once(
 /// for a classic EDIT on a non-displayed desktop while the control's text is
 /// readable directly; the text is also what the proxy uses as the NAME after
 /// typing, so name-based lookups of edits are not stable there - use role.
+/// This used `get_text`, whose name fallback is never empty, so the window
+/// text was never read and a wait for an EDIT's value compared its label.
 pub(crate) fn element_value(el: &UiaElement) -> String {
-    let v = el.get_text();
-    if !v.is_empty() {
-        return v;
-    }
-    let ctrl = el.native_window_handle();
-    if ctrl != 0 {
-        if let Some(t) = BackgroundClicker::read_text(ctrl) {
-            return t;
-        }
-    }
-    v
+    crate::element::typed_value(el)
 }
 
 /// [`crate::session`]'s `poll_click_effect` for the hidden desktop's worker
