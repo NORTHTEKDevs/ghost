@@ -323,8 +323,8 @@ async fn main() {
     let tx = spawn_session_thread(cli.timeout_ms);
     let listener = tokio::net::TcpListener::bind(addr).await
         .expect("bind failed");
-    let port = listener.local_addr().expect("local addr").port();
-    let app = build_router(tx, port);
+    let bound = listener.local_addr().expect("local addr");
+    let app = build_router(tx, bound);
     eprintln!("ghost-http listening on http://{}", addr);
     eprintln!("  curl http://{}/tools  for endpoint docs", addr);
     axum::serve(listener, app).await.expect("serve failed");
@@ -351,12 +351,33 @@ fn loopback_addr(raw: &str) -> Result<std::net::SocketAddr, String> {
     Ok(addr)
 }
 
+/// The Host values a local client may send to a server bound at `bound`:
+/// 127.0.0.1, localhost, [::1] and the bound address itself, each with the
+/// bound port, and without a port only when that port is 80 (the default a
+/// client omits).
+fn accepted_hosts(bound: std::net::SocketAddr) -> Vec<String> {
+    let port = bound.port();
+    let ip = match bound.ip() {
+        std::net::IpAddr::V4(v4) => v4.to_string(),
+        std::net::IpAddr::V6(v6) => format!("[{v6}]"),
+    };
+    let mut names = vec!["127.0.0.1".to_string(), "localhost".to_string(), "[::1]".to_string()];
+    if !names.contains(&ip) {
+        names.push(ip);
+    }
+    let mut hosts: Vec<String> = names.iter().map(|n| format!("{n}:{port}")).collect();
+    if port == 80 {
+        hosts.extend(names);
+    }
+    hosts
+}
+
 /// Accept only requests a local script sends: Host is this server's own
 /// loopback name and port (DNS rebinding sends the attacker's name), and no
 /// Origin header (browsers attach one to every cross-origin POST, including
 /// `text/plain` "simple" requests that skip the CORS preflight).
 async fn guard_request(
-    State(port): State<u16>,
+    State(hosts): State<std::sync::Arc<Vec<String>>>,
     req: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
@@ -364,12 +385,9 @@ async fn guard_request(
         .headers()
         .get(axum::http::header::HOST)
         .and_then(|h| h.to_str().ok())
-        .is_some_and(|h| {
-            let h = h.to_ascii_lowercase();
-            [format!("127.0.0.1:{port}"), format!("localhost:{port}"), format!("[::1]:{port}")].contains(&h)
-        });
+        .is_some_and(|h| hosts.contains(&h.to_ascii_lowercase()));
     if !host_ok {
-        return (StatusCode::FORBIDDEN, Json(json!({"error": "forbidden: Host must be 127.0.0.1, localhost or [::1] with this server's port"}))).into_response();
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "forbidden: Host must be 127.0.0.1, localhost, [::1] or the bound address, with this server's port"}))).into_response();
     }
     if req.headers().contains_key(axum::http::header::ORIGIN) {
         return (StatusCode::FORBIDDEN, Json(json!({"error": "forbidden: browser requests (Origin header) are not accepted"}))).into_response();
@@ -377,7 +395,8 @@ async fn guard_request(
     next.run(req).await
 }
 
-fn build_router(tx: mpsc::UnboundedSender<Cmd>, port: u16) -> Router {
+fn build_router(tx: mpsc::UnboundedSender<Cmd>, bound: std::net::SocketAddr) -> Router {
+    let hosts = std::sync::Arc::new(accepted_hosts(bound));
     let state = AppState { tx };
     Router::new()
         .route("/health", get(h_health))
@@ -401,7 +420,7 @@ fn build_router(tx: mpsc::UnboundedSender<Cmd>, port: u16) -> Router {
         // simple content type is sent (and acted on) without a preflight, and
         // DNS rebinding makes the page same-origin. So every route checks Host
         // and Origin, and /run only takes JSON.
-        .layer(axum::middleware::from_fn_with_state(port, guard_request))
+        .layer(axum::middleware::from_fn_with_state(hosts, guard_request))
 }
 
 #[cfg(all(test, windows))]
@@ -436,6 +455,10 @@ mod guard_tests {
     /// A session stand-in: answers ListWindows, refuses everything else, never
     /// touches the desktop.
     fn fake_router(port: u16) -> Router {
+        fake_router_at(&format!("127.0.0.1:{port}"))
+    }
+
+    fn fake_router_at(bound: &str) -> Router {
         let (tx, mut rx) = mpsc::unbounded_channel::<Cmd>();
         tokio::spawn(async move {
             while let Some(cmd) = rx.recv().await {
@@ -446,7 +469,7 @@ mod guard_tests {
                 }
             }
         });
-        build_router(tx, port)
+        build_router(tx, bound.parse().unwrap())
     }
 
     async fn status(app: Router, req: Request<Body>) -> StatusCode {
@@ -471,6 +494,29 @@ mod guard_tests {
     async fn bad_or_missing_host_is_403() {
         for h in [Some("evil.example:7878"), Some("127.0.0.1:9999"), Some("127.0.0.1"), Some("localhost.evil.com:7878"), None] {
             assert_eq!(status(fake_router(7878), get_req(h, None)).await, StatusCode::FORBIDDEN, "{h:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_bound_loopback_address_is_an_accepted_host() {
+        for h in ["127.0.0.2:7878", "127.0.0.1:7878", "localhost:7878"] {
+            assert_eq!(status(fake_router_at("127.0.0.2:7878"), get_req(Some(h), None)).await, StatusCode::OK, "{h}");
+        }
+        assert_eq!(status(fake_router_at("[::1]:7878"), get_req(Some("[::1]:7878"), None)).await, StatusCode::OK);
+        for h in ["127.0.0.3:7878", "127.0.0.2:7879", "127.0.0.2"] {
+            assert_eq!(status(fake_router_at("127.0.0.2:7878"), get_req(Some(h), None)).await, StatusCode::FORBIDDEN, "{h}");
+        }
+        assert_eq!(status(fake_router(7878), get_req(Some("127.0.0.2:7878"), None)).await, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn a_port_less_host_is_accepted_only_on_port_80() {
+        for h in ["127.0.0.1", "localhost", "[::1]", "127.0.0.1:80"] {
+            assert_eq!(status(fake_router(80), get_req(Some(h), None)).await, StatusCode::OK, "{h}");
+        }
+        assert_eq!(status(fake_router_at("127.0.0.2:80"), get_req(Some("127.0.0.2"), None)).await, StatusCode::OK);
+        for h in ["127.0.0.1", "localhost", "[::1]"] {
+            assert_eq!(status(fake_router(7878), get_req(Some(h), None)).await, StatusCode::FORBIDDEN, "{h}");
         }
     }
 
