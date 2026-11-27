@@ -1,5 +1,19 @@
 # Changelog
 
+All notable changes to Ghost. Each heading names the version and, after the
+dash, what that release was about. Versions follow [Semantic
+Versioning](https://semver.org/); Ghost is pre-1.0, so a minor version can
+change behaviour.
+
+## [Unreleased]
+
+### Fixed
+
+- **`ghost_tab_navigate` rejects an invalid `timeout_ms`**, as
+  `ghost_tab_open` does: an integer from 1 to 600000, default 30000. A zero
+  used to time out at once, and a negative number or a string was silently
+  replaced by 30 seconds.
+
 ## [0.24.4] - the rough edges an end-to-end test found
 
 An end-to-end test of the published 0.24.3 zip (driving its `ghost-mcp` over

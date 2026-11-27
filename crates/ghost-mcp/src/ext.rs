@@ -39,21 +39,27 @@ fn parse_port(p: &Value) -> Result<u16, String> {
         .ok_or_else(|| format!("port out of range: {n} (1-65535)"))
 }
 
+/// A page-load bound for `tool`: 30 s when absent, else an integer from 1 to
+/// 600000. Anything else is invalid params, never a silent default.
+fn tab_timeout_ms(p: &Value, tool: &str) -> Result<u64, String> {
+    const MAX_MS: u64 = 600_000;
+    match &p["timeout_ms"] {
+        Value::Null => Ok(30_000),
+        v => v.as_u64().filter(|ms| (1..=MAX_MS).contains(ms)).ok_or_else(|| {
+            format!("invalid params: {tool} timeout_ms must be an integer from 1 to {MAX_MS} (got {v})")
+        }),
+    }
+}
+
 /// How long ghost_tab_open waits for `url` to load: None = answer at once
 /// (`wait:false`, or about:blank, which has nothing to load).
 fn tab_open_wait(p: &Value, url: &str) -> Result<Option<u64>, String> {
-    const MAX_MS: u64 = 600_000;
     let wait = match &p["wait"] {
         Value::Null => true,
         Value::Bool(b) => *b,
         v => return Err(format!("invalid params: ghost_tab_open wait must be true or false (got {v})")),
     };
-    let timeout_ms = match &p["timeout_ms"] {
-        Value::Null => 30_000,
-        v => v.as_u64().filter(|ms| (1..=MAX_MS).contains(ms)).ok_or_else(|| {
-            format!("invalid params: ghost_tab_open timeout_ms must be an integer from 1 to {MAX_MS} (got {v})")
-        })?,
-    };
+    let timeout_ms = tab_timeout_ms(p, "ghost_tab_open")?;
     let blank = url.trim().to_ascii_lowercase().starts_with("about:blank");
     Ok((wait && !blank).then_some(timeout_ms))
 }
@@ -160,7 +166,7 @@ pub async fn dispatch(
             let (browser, tab_id) = browser_tab(p)?;
             let url = req_str(p, "url")?;
             ghost_browser::policy::check_nav_url(&url)?;
-            let timeout_ms = p["timeout_ms"].as_u64().unwrap_or(30_000);
+            let timeout_ms = tab_timeout_ms(p, "ghost_tab_navigate")?;
             let tab = session.tab(&browser, &tab_id).await.map_err(|e| e.to_string())?;
             let note = tab.navigate(&url, timeout_ms).await.map_err(|e| e.to_string())?;
             let mut out = json!({ "ok": true, "background": true, "url": tab.url().await.unwrap_or_default() });
@@ -388,7 +394,8 @@ pub fn schemas() -> Vec<Value> {
           "description": "Navigate a tab and wait for load. Runs in a background tab; the user's view never changes. url must be http://, https:// or about:blank; every other scheme (file:, chrome:, data:, javascript:, ftp: ...) is refused. http(s) to any host including localhost is allowed. Returns an error (naming the net:: errorText) when the page fails to load, e.g. DNS failure or refused connection.",
           "inputSchema": { "type": "object", "required": ["tab", "url"], "properties": {
               "browser": { "type": "string" }, "tab": { "type": "string" },
-              "url": { "type": "string" }, "timeout_ms": { "type": "integer" }
+              "url": { "type": "string" },
+              "timeout_ms": { "type": "integer", "description": "Load timeout, default 30000, max 600000" }
           }}}),
         json!({ "name": "ghost_tab_click",
           "description": "Click an element by CSS selector via a trusted synthetic mouse event inside the tab's renderer. ~1-2ms; no cursor movement; works in a tab that is not in front.",
@@ -664,6 +671,22 @@ mod tests {
             assert!(e.starts_with("invalid params: ghost_tab_open"), "{e}");
         }
         assert_eq!(tab_open_wait(&json!({ "timeout_ms": 600_000 }), url), Ok(Some(600_000)));
+    }
+
+    /// ghost_tab_navigate used `as_u64().unwrap_or(30_000)`: 0 timed out at
+    /// once, and -1 or "5000" silently became 30 s. It now validates exactly
+    /// like ghost_tab_open.
+    #[test]
+    fn tab_navigate_timeout_arguments() {
+        let nav = "ghost_tab_navigate";
+        assert_eq!(tab_timeout_ms(&json!({}), nav), Ok(30_000));
+        assert_eq!(tab_timeout_ms(&json!({ "timeout_ms": 5000 }), nav), Ok(5000));
+        assert_eq!(tab_timeout_ms(&json!({ "timeout_ms": 600_000 }), nav), Ok(600_000));
+        for bad in [json!({ "timeout_ms": 0 }), json!({ "timeout_ms": -1 }),
+                    json!({ "timeout_ms": 600_001 }), json!({ "timeout_ms": "5000" })] {
+            let e = tab_timeout_ms(&bad, nav).expect_err(&bad.to_string());
+            assert!(e.starts_with("invalid params: ghost_tab_navigate timeout_ms"), "{e}");
+        }
     }
 
     /// `port as u16` wrapped 70000 to 4464 and attached to whatever listened there.
