@@ -18,6 +18,8 @@
 
 use std::collections::HashMap;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
@@ -361,6 +363,8 @@ struct ShellSession {
     /// that times out mid-line loses nothing (`read_until` is cancel-safe only
     /// with a buffer that outlives the call).
     partial: Vec<u8>,
+    /// Raised by `op=kill`, so a read waiting on this shell gives it up.
+    killed: Arc<AtomicBool>,
     created: Instant,
     pid: Option<u32>,
     /// The process group this shell leads (Linux), for `end_shell`.
@@ -370,10 +374,21 @@ struct ShellSession {
     born_gen: u64,
 }
 
+/// One named persistent session. It stays in the registry for its whole life,
+/// including while a call runs a command in it (that call holds `shell`), so
+/// `list` can show it busy and `kill` can end it.
+#[derive(Clone)]
+struct SessionSlot {
+    pid: Option<u32>,
+    created: Instant,
+    killed: Arc<AtomicBool>,
+    shell: Arc<tokio::sync::Mutex<ShellSession>>,
+}
+
 /// Registry of persistent sessions, held in a Mutex on GhostSession.
 #[derive(Default)]
 pub struct ShellRegistry {
-    sessions: HashMap<String, ShellSession>,
+    sessions: HashMap<String, SessionSlot>,
     auto_id: u64,
     /// A pre-spawned PowerShell running the persistent driver, waiting for
     /// exactly one `op=run` command. Measured: a fresh `powershell -Command`
@@ -1033,6 +1048,7 @@ fn spawn_driver(cwd: Option<&str>) -> Result<ShellSession> {
         secret: session_secret(),
         pending: None,
         partial: Vec::new(),
+        killed: Arc::new(AtomicBool::new(false)),
         created: Instant::now(),
         pid,
         born_gen,
@@ -1159,11 +1175,11 @@ impl GhostSession {
         }
         match op {
             "run" => self.shell_run(args).await,
-            "open" => self.shell_open(args).await,
-            "send" => self.shell_send(args).await,
-            "read" => self.shell_read(args).await,
-            "list" => Ok(self.shell_list()),
-            "kill" => self.shell_kill(args).await,
+            "open" => shell_open(&self.shells, args).await,
+            "send" => shell_send(&self.shells, args).await,
+            "read" => shell_read(&self.shells, args).await,
+            "list" => Ok(shell_list(&self.shells)),
+            "kill" => shell_kill(&self.shells, args).await,
             other => Err(GhostError::Config(format!(
                 "ghost_shell: unknown op '{other}'; use run|open|send|read|list|kill"
             ))),
@@ -1319,7 +1335,9 @@ impl GhostSession {
                     "timed_out": true, "shell": shell, "warm": true,
                 }))
             }
-            ReadOutcome::Stopped => {
+            // A spare is never in the registry, so nothing kills it; treat a
+            // kill like a stop if it ever happens.
+            ReadOutcome::Stopped | ReadOutcome::Killed => {
                 let _ = sess.child.start_kill();
                 Err(GhostError::Stopped)
             }
@@ -1340,194 +1358,246 @@ impl GhostSession {
             }
         }
     }
+}
 
-    async fn shell_open(&self, args: &Value) -> Result<Value> {
-        let cwd = args.get("cwd").and_then(|v| v.as_str());
-        let id = match args.get("id").and_then(|v| v.as_str()) {
-            Some(s) if !s.trim().is_empty() => s.to_string(),
-            _ => {
-                let mut reg = self.shells.lock().unwrap();
-                reg.auto_id += 1;
-                format!("s{}", reg.auto_id)
-            }
-        };
-        if self.shells.lock().unwrap().sessions.contains_key(&id) {
-            return Err(GhostError::Config(format!(
-                "ghost_shell op=open: session '{id}' already exists"
-            )));
+async fn shell_open(shells: &Mutex<ShellRegistry>, args: &Value) -> Result<Value> {
+    let cwd = args.get("cwd").and_then(|v| v.as_str());
+    let id = match args.get("id").and_then(|v| v.as_str()) {
+        Some(s) if !s.trim().is_empty() => s.to_string(),
+        _ => {
+            let mut reg = shells.lock().unwrap();
+            reg.auto_id += 1;
+            format!("s{}", reg.auto_id)
         }
-
-        let session = spawn_driver(cwd)?;
-        let pid = session.pid;
-        self.shells.lock().unwrap().sessions.insert(id.clone(), session);
-        Ok(json!({ "ok": true, "id": id, "pid": pid }))
+    };
+    if shells.lock().unwrap().sessions.contains_key(&id) {
+        return Err(GhostError::Config(format!(
+            "ghost_shell op=open: session '{id}' already exists"
+        )));
     }
 
-    async fn shell_send(&self, args: &Value) -> Result<Value> {
-        let id = args
-            .get("id")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| GhostError::Config("ghost_shell op=send: missing 'id'".into()))?
-            .to_string();
-        let cmd = args
-            .get("cmd")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| GhostError::Config("ghost_shell op=send: missing 'cmd'".into()))?
-            .to_string();
-        let dur = clamp_timeout(args.get("timeout_ms").and_then(|v| v.as_u64()));
+    let session = spawn_driver(cwd)?;
+    let pid = session.pid;
+    let slot = SessionSlot {
+        pid,
+        created: session.created,
+        killed: session.killed.clone(),
+        shell: Arc::new(tokio::sync::Mutex::new(session)),
+    };
+    shells.lock().unwrap().sessions.insert(id.clone(), slot);
+    Ok(json!({ "ok": true, "id": id, "pid": pid }))
+}
 
-        // Take the session out of the registry so no RefCell borrow is held
-        // across an await point; reinsert (or drop, if killed) when done.
-        let mut sess = self
-            .shells
-            .lock().unwrap()
-            .sessions
-            .remove(&id)
-            .ok_or_else(|| GhostError::Config(format!("ghost_shell: no session '{id}'")))?;
+/// The session `id` and exclusive use of its shell, or why not: no such
+/// session, or another call is using it right now (a command is running).
+fn claim(
+    shells: &Mutex<ShellRegistry>,
+    id: &str,
+) -> Result<(SessionSlot, tokio::sync::OwnedMutexGuard<ShellSession>)> {
+    let slot = shells
+        .lock()
+        .unwrap()
+        .sessions
+        .get(id)
+        .cloned()
+        .ok_or_else(|| GhostError::Config(format!("ghost_shell: no session '{id}'")))?;
+    let guard = slot.shell.clone().try_lock_owned().map_err(|_| {
+        GhostError::Config(format!(
+            "ghost_shell: session '{id}' is busy: another call is running a command in it; wait for that call, or op=kill it"
+        ))
+    })?;
+    Ok((slot, guard))
+}
 
-        if sess.pending.is_some() {
-            let pend = sess.pending;
-            self.shells.lock().unwrap().sessions.insert(id.clone(), sess);
-            return Err(GhostError::Config(format!(
-                "ghost_shell: session '{id}' is busy running command #{}; call op=read to drain it first",
-                pend.unwrap()
-            )));
+/// Forget session `id`, but only if it is still this slot (a kill and a new
+/// open under the same id may have happened meanwhile).
+fn forget(shells: &Mutex<ShellRegistry>, id: &str, slot: &SessionSlot) {
+    let mut reg = shells.lock().unwrap();
+    if reg.sessions.get(id).is_some_and(|s| Arc::ptr_eq(&s.shell, &slot.shell)) {
+        reg.sessions.remove(id);
+    }
+}
+
+async fn shell_send(shells: &Mutex<ShellRegistry>, args: &Value) -> Result<Value> {
+    let id = args
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| GhostError::Config("ghost_shell op=send: missing 'id'".into()))?
+        .to_string();
+    let cmd = args
+        .get("cmd")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| GhostError::Config("ghost_shell op=send: missing 'cmd'".into()))?
+        .to_string();
+    let dur = clamp_timeout(args.get("timeout_ms").and_then(|v| v.as_u64()));
+
+    // The session stays in the registry while its command runs, so list
+    // shows it busy and kill can end it; the guard is this call's exclusive use.
+    let (slot, mut sess) = claim(shells, &id)?;
+
+    if let Some(pend) = sess.pending {
+        return Err(GhostError::Config(format!(
+            "ghost_shell: session '{id}' is busy running command #{pend}; call op=read to drain it first"
+        )));
+    }
+
+    sess.nonce += 1;
+    let nonce = sess.nonce;
+    // The driver echoes this field back verbatim, so folding the secret
+    // into the nonce needs no change on the driver side.
+    let token = sentinel_token(&sess.secret, nonce);
+    let frame = format!("{} {}\n", token, b64_encode(cmd.as_bytes()));
+    if let Err(e) = sess.stdin.write_all(frame.as_bytes()).await {
+        let _ = sess.child.start_kill();
+        forget(shells, &id, &slot);
+        return Err(GhostError::Config(format!("ghost_shell: session '{id}' write failed: {e}")));
+    }
+    let _ = sess.stdin.flush().await;
+    // Pending from the moment it is sent: if this call is dropped mid-read
+    // (the request was cancelled), the session stays in the registry and a
+    // later op=read collects the command instead of the next send mixing in.
+    sess.pending = Some(nonce);
+
+    let outcome = read_until_sentinel(&mut sess, &token, dur).await;
+    finish_send(shells, id, &slot, &mut sess, nonce, outcome).await
+}
+
+async fn shell_read(shells: &Mutex<ShellRegistry>, args: &Value) -> Result<Value> {
+    let id = args
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| GhostError::Config("ghost_shell op=read: missing 'id'".into()))?
+        .to_string();
+    let dur = read_wait(args.get("timeout_ms").and_then(|v| v.as_u64()));
+
+    let (slot, mut sess) = claim(shells, &id)?;
+
+    let nonce = match sess.pending {
+        Some(n) => n,
+        None => {
+            return Ok(json!({ "ok": true, "id": id, "output": "", "busy": false, "note": "no command pending" }));
         }
+    };
+    let token = sentinel_token(&sess.secret, nonce);
+    let outcome = read_until_sentinel(&mut sess, &token, dur).await;
+    finish_send(shells, id, &slot, &mut sess, nonce, outcome).await
+}
 
-        sess.nonce += 1;
-        let nonce = sess.nonce;
-        // The driver echoes this field back verbatim, so folding the secret
-        // into the nonce needs no change on the driver side.
-        let token = sentinel_token(&sess.secret, nonce);
-        let frame = format!("{} {}\n", token, b64_encode(cmd.as_bytes()));
-        if let Err(e) = sess.stdin.write_all(frame.as_bytes()).await {
+/// Common tail for send/read: apply the read outcome to session state, or
+/// forget a session that is gone, and build the response.
+async fn finish_send(
+    shells: &Mutex<ShellRegistry>,
+    id: String,
+    slot: &SessionSlot,
+    sess: &mut ShellSession,
+    nonce: u64,
+    outcome: ReadOutcome,
+) -> Result<Value> {
+    match outcome {
+        ReadOutcome::Done { output, exit_code } => {
+            sess.pending = None;
+            let (output, truncated) = cap_output(output);
+            Ok(json!({
+                "ok": true, "id": id, "output": output,
+                "exit_code": exit_code, "truncated": truncated,
+                "timed_out": false, "busy": false,
+            }))
+        }
+        ReadOutcome::TimedOut { output } => {
+            sess.pending = Some(nonce);
+            let (output, truncated) = cap_output(output);
+            Ok(json!({
+                "ok": false, "id": id, "output": output,
+                "truncated": truncated, "timed_out": true, "busy": true,
+                "note": "command #".to_string() + &nonce.to_string() + " still running; call op=read to collect the rest",
+            }))
+        }
+        ReadOutcome::Stopped => {
             let _ = sess.child.start_kill();
-            return Err(GhostError::Config(format!("ghost_shell: session '{id}' write failed: {e}")));
+            forget(shells, &id, slot);
+            Err(GhostError::Stopped)
         }
-        let _ = sess.stdin.flush().await;
-
-        let outcome = read_until_sentinel(&mut sess, &token, dur).await;
-        self.finish_send(id, sess, nonce, outcome).await
+        ReadOutcome::Killed => {
+            // op=kill already forgot the session and ends the shell once this
+            // call lets go of it.
+            Err(GhostError::Config(format!(
+                "ghost_shell: session '{id}' was killed while command #{nonce} ran"
+            )))
+        }
+        ReadOutcome::Eof { output } => {
+            // Driver process exited unexpectedly. Drop the dead session.
+            let _ = sess.child.start_kill();
+            forget(shells, &id, slot);
+            if ended_by_stop(sess.born_gen) {
+                return Err(ended_by_stop_error());
+            }
+            let (output, _) = cap_output(output);
+            Err(GhostError::Config(format!(
+                "ghost_shell: session '{id}' ended unexpectedly. Partial output: {output}"
+            )))
+        }
     }
+}
 
-    async fn shell_read(&self, args: &Value) -> Result<Value> {
-        let id = args
-            .get("id")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| GhostError::Config("ghost_shell op=read: missing 'id'".into()))?
-            .to_string();
-        let dur = read_wait(args.get("timeout_ms").and_then(|v| v.as_u64()));
-
-        let mut sess = self
-            .shells
-            .lock().unwrap()
-            .sessions
-            .remove(&id)
-            .ok_or_else(|| GhostError::Config(format!("ghost_shell: no session '{id}'")))?;
-
-        let nonce = match sess.pending {
-            Some(n) => n,
-            None => {
-                self.shells.lock().unwrap().sessions.insert(id.clone(), sess);
-                return Ok(json!({ "ok": true, "id": id, "output": "", "busy": false, "note": "no command pending" }));
-            }
-        };
-        let token = sentinel_token(&sess.secret, nonce);
-        let outcome = read_until_sentinel(&mut sess, &token, dur).await;
-        self.finish_send(id, sess, nonce, outcome).await
-    }
-
-    /// Common tail for send/read: apply the read outcome to session state, then
-    /// reinsert the session (or drop it on a stop-kill) and build the response.
-    async fn finish_send(
-        &self,
-        id: String,
-        mut sess: ShellSession,
-        nonce: u64,
-        outcome: ReadOutcome,
-    ) -> Result<Value> {
-        match outcome {
-            ReadOutcome::Done { output, exit_code } => {
-                sess.pending = None;
-                let (output, truncated) = cap_output(output);
-                self.shells.lock().unwrap().sessions.insert(id.clone(), sess);
-                Ok(json!({
-                    "ok": true, "id": id, "output": output,
-                    "exit_code": exit_code, "truncated": truncated,
-                    "timed_out": false, "busy": false,
-                }))
-            }
-            ReadOutcome::TimedOut { output } => {
-                sess.pending = Some(nonce);
-                let (output, truncated) = cap_output(output);
-                self.shells.lock().unwrap().sessions.insert(id.clone(), sess);
-                Ok(json!({
-                    "ok": false, "id": id, "output": output,
-                    "truncated": truncated, "timed_out": true, "busy": true,
-                    "note": "command #".to_string() + &nonce.to_string() + " still running; call op=read to collect the rest",
-                }))
-            }
-            ReadOutcome::Stopped => {
-                let _ = sess.child.start_kill();
-                Err(GhostError::Stopped)
-            }
-            ReadOutcome::Eof { output } => {
-                // Driver process exited unexpectedly. Drop the dead session.
-                let _ = sess.child.start_kill();
-                if ended_by_stop(sess.born_gen) {
-                    return Err(ended_by_stop_error());
+fn shell_list(shells: &Mutex<ShellRegistry>) -> Value {
+    let mut reg = shells.lock().unwrap();
+    let mut sessions = Vec::new();
+    let mut dead = Vec::new();
+    for (id, slot) in &reg.sessions {
+        // A call holding the shell is running a command in it: busy. An idle
+        // shell that has exited (a stop ended it, or it crashed) is dead:
+        // forget it rather than list it as usable.
+        let (busy, commands_run) = match slot.shell.try_lock() {
+            Ok(mut s) => {
+                if !matches!(s.child.try_wait(), Ok(None)) {
+                    dead.push(id.clone());
+                    continue;
                 }
-                let (output, _) = cap_output(output);
-                Err(GhostError::Config(format!(
-                    "ghost_shell: session '{id}' ended unexpectedly. Partial output: {output}"
-                )))
+                (s.pending.is_some(), Value::from(s.nonce))
             }
-        }
+            Err(_) => (true, Value::Null),
+        };
+        sessions.push(json!({
+            "id": id,
+            "pid": slot.pid,
+            "busy": busy,
+            "age_ms": slot.created.elapsed().as_millis() as u64,
+            "commands_run": commands_run,
+        }));
     }
+    for id in dead {
+        reg.sessions.remove(&id);
+    }
+    json!({ "ok": true, "sessions": sessions })
+}
 
-    fn shell_list(&self) -> Value {
-        let mut reg = self.shells.lock().unwrap();
-        // A session whose shell has exited (a stop ended it, or it crashed) is
-        // dead: forget it rather than list it as usable.
-        reg.sessions.retain(|_, s| matches!(s.child.try_wait(), Ok(None)));
-        let sessions: Vec<Value> = reg
-            .sessions
-            .iter()
-            .map(|(id, s)| {
-                json!({
-                    "id": id,
-                    "pid": s.pid,
-                    "busy": s.pending.is_some(),
-                    "age_ms": s.created.elapsed().as_millis() as u64,
-                    "commands_run": s.nonce,
-                })
-            })
-            .collect();
-        json!({ "ok": true, "sessions": sessions })
-    }
-
-    async fn shell_kill(&self, args: &Value) -> Result<Value> {
-        let id = args
-            .get("id")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| GhostError::Config("ghost_shell op=kill: missing 'id'".into()))?
-            .to_string();
-        let mut sess = self
-            .shells
-            .lock().unwrap()
-            .sessions
-            .remove(&id)
-            .ok_or_else(|| GhostError::Config(format!("ghost_shell: no session '{id}'")))?;
-        end_shell(&mut sess.child, sess.group);
-        let _ = sess.child.wait().await;
-        Ok(json!({ "ok": true, "id": id, "killed": true }))
-    }
+async fn shell_kill(shells: &Mutex<ShellRegistry>, args: &Value) -> Result<Value> {
+    let id = args
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| GhostError::Config("ghost_shell op=kill: missing 'id'".into()))?
+        .to_string();
+    let slot = shells
+        .lock()
+        .unwrap()
+        .sessions
+        .remove(&id)
+        .ok_or_else(|| GhostError::Config(format!("ghost_shell: no session '{id}'")))?;
+    // A call running a command in it notices within one read slice and lets go.
+    slot.killed.store(true, Ordering::Release);
+    let mut sess = slot.shell.lock().await;
+    let group = sess.group;
+    end_shell(&mut sess.child, group);
+    let _ = sess.child.wait().await;
+    Ok(json!({ "ok": true, "id": id, "killed": true }))
 }
 
 enum ReadOutcome {
     Done { output: String, exit_code: Option<i64> },
     TimedOut { output: String },
     Stopped,
+    /// `op=kill` ended the session while this read was waiting on it.
+    Killed,
     Eof { output: String },
 }
 
@@ -1566,6 +1636,9 @@ async fn read_until_sentinel(sess: &mut ShellSession, token: &str, dur: Duration
     loop {
         if crate::engine::input::hotkey::is_stopped() {
             return ReadOutcome::Stopped;
+        }
+        if sess.killed.load(Ordering::Acquire) {
+            return ReadOutcome::Killed;
         }
         let now = Instant::now();
         if now >= hard_end {
@@ -2477,6 +2550,61 @@ mod session_tests {
         } else {
             "Start-Sleep -Milliseconds 300; 'q'"
         }
+    }
+
+    fn sleep_one_second() -> &'static str {
+        if cfg!(target_os = "linux") {
+            "sleep 1"
+        } else {
+            "Start-Sleep -Seconds 1"
+        }
+    }
+
+    fn listed(reg: &Mutex<ShellRegistry>, id: &str) -> Option<Value> {
+        let all = shell_list(reg);
+        all["sessions"].as_array().unwrap().iter().find(|s| s["id"] == id).cloned()
+    }
+
+    /// M2: a session stays visible while a command runs in it. list shows it
+    /// busy, a second send or read is refused as busy (not "no session"), and
+    /// kill ends it - the running send then reports the kill.
+    #[test]
+    fn a_session_running_a_command_is_listed_busy_and_can_be_killed() {
+        rt().block_on(async {
+            let reg = std::sync::Arc::new(Mutex::new(ShellRegistry::new()));
+            shell_open(&reg, &json!({"id": "m2"})).await.expect("open");
+            shell_send(&reg, &json!({"id": "m2", "cmd": "echo warm-up", "timeout_ms": 90_000}))
+                .await
+                .expect("warm-up");
+
+            let running = {
+                let reg = reg.clone();
+                tokio::spawn(async move {
+                    shell_send(&reg, &json!({"id": "m2", "cmd": sleep_one_second(), "timeout_ms": 20_000})).await
+                })
+            };
+            tokio::time::sleep(Duration::from_millis(300)).await;
+
+            let row = listed(&reg, "m2");
+            let second = shell_send(&reg, &json!({"id": "m2", "cmd": "echo 2"})).await;
+            let read = shell_read(&reg, &json!({"id": "m2", "timeout_ms": 0})).await;
+            let killed = shell_kill(&reg, &json!({"id": "m2"})).await;
+            let first = running.await.unwrap();
+            let after = listed(&reg, "m2");
+            // Clean up whatever is left if an assertion below fails.
+            let _ = shell_kill(&reg, &json!({"id": "m2"})).await;
+
+            let row = row.expect("a session running a command vanished from op=list");
+            assert_eq!(row["busy"], true, "{row}");
+            let second = format!("{:?}", second.expect_err("a second send must be refused"));
+            assert!(second.contains("busy") && !second.contains("no session"), "{second}");
+            let read = format!("{:?}", read.expect_err("a concurrent read must be refused"));
+            assert!(read.contains("busy") && !read.contains("no session"), "{read}");
+            assert_eq!(killed.expect("kill a busy session")["killed"], true);
+            let first = format!("{:?}", first.expect_err("the killed command must not report success"));
+            assert!(first.contains("killed"), "{first}");
+            assert!(after.is_none(), "a killed session is still listed: {after:?}");
+        });
     }
 
     /// M1: a bare `op=read` waits a little for the pending command instead of
