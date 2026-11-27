@@ -27,6 +27,70 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use crate::error::{GhostError, Result};
 use crate::session::GhostSession;
 
+/// With `GHOST_SHELL=off`, the launch verbs refuse a command line that would
+/// hand the agent a shell anyway. Pure: no process is touched.
+pub fn launch_allowed_with_shell_off(cmdline: &str) -> std::result::Result<(), String> {
+    let refuse = |why: &str| {
+        Err(format!(
+            "GHOST_SHELL=off refuses this launch: {why}. Launching a command interpreter or script host would run commands the operator turned off. Plain applications still launch (for example 'notepad' or 'notepad C:\\x.txt')."
+        ))
+    };
+    let line = cmdline.trim();
+    if line.is_empty() {
+        return refuse("the command line is empty");
+    }
+    let (program, args) = match line.strip_prefix('"') {
+        Some(rest) => match rest.find('"') {
+            Some(i) => (&rest[..i], rest[i + 1..].trim()),
+            None => (rest, ""),
+        },
+        None => match line.find(char::is_whitespace) {
+            Some(i) => (&line[..i], line[i..].trim()),
+            None => (line, ""),
+        },
+    };
+    // Basename on either separator; Windows ignores trailing dots and spaces.
+    let base = program
+        .rsplit(['\\', '/'])
+        .next()
+        .unwrap_or(program)
+        .trim_end_matches(['.', ' '])
+        .to_ascii_lowercase();
+    let (stem, ext) = match base.rsplit_once('.') {
+        Some((s, e)) if matches!(e, "exe" | "com" | "bat" | "cmd" | "ps1" | "vbs" | "vbe" | "js" | "jse" | "wsf" | "wsh" | "hta" | "msc") => (s, e),
+        _ => (base.as_str(), ""),
+    };
+    if matches!(ext, "bat" | "cmd" | "ps1" | "vbs" | "vbe" | "js" | "jse" | "wsf" | "wsh" | "hta") {
+        return refuse(&format!("'{base}' is a script file"));
+    }
+    const HOSTS: &[&str] = &[
+        "cmd", "command", "conhost", "powershell", "powershell_ise", "pwsh", "wscript", "cscript", "mshta",
+        "rundll32", "regsvr32", "wsl", "wslg", "bash", "sh", "zsh", "wt", "windowsterminal",
+        "py", "perl", "ruby", "php", "node", "deno", "bun",
+    ];
+    // python, python3, python3.11, pythonw
+    let python = stem.strip_prefix("python").is_some_and(|r| r.trim_start_matches('w').chars().all(|c| c.is_ascii_digit() || c == '.'));
+    if python || HOSTS.contains(&stem) {
+        return refuse(&format!("'{stem}' is a command interpreter or script host"));
+    }
+    for tok in args.split_whitespace() {
+        let t = tok.trim_matches('"').to_ascii_lowercase();
+        if matches!(t.as_str(), "-c" | "-e" | "-ec" | "-enc" | "-command" | "-encodedcommand" | "/c" | "/k" | "/command") {
+            return refuse(&format!("the argument '{tok}' looks like inline script"));
+        }
+    }
+    Ok(())
+}
+
+/// Gate for every launch verb: when `GHOST_SHELL` is off, refuse command lines
+/// that would start a shell by another route.
+pub(crate) fn ensure_launch_allowed(cmdline: &str) -> Result<()> {
+    if shell_disabled() {
+        launch_allowed_with_shell_off(cmdline).map_err(GhostError::Config)?;
+    }
+    Ok(())
+}
+
 /// Per-response output cap (chars). Protects the agent context window.
 const MAX_OUTPUT_CHARS: usize = 24_000;
 /// Default per-command timeout.
@@ -1311,6 +1375,35 @@ mod tests {
         for on in [None, Some(""), Some("on"), Some("true"), Some("1"), Some("yes"), Some("garbage")] {
             assert!(!shell_off_value(on), "{on:?} should leave the shell on");
         }
+    }
+
+    #[test]
+    fn launch_gate_refuses_interpreters_and_inline_script() {
+        let refused = [
+            "cmd", "cmd.exe", "CMD.EXE /c calc", r"C:\Windows\System32\cmd.exe", r#""C:\Windows\System32\cmd.exe" /k"#,
+            "powershell", "PowerShell.exe -NoProfile", "pwsh -c x", "wscript x.vbs", "cscript", "mshta http://x",
+            "rundll32 a,b", "regsvr32 /s x.dll", "bash", "sh -c id", "wsl", "python -c 1", "python3.11", "Pythonw.exe",
+            "node -e 1", "C:/Windows/System32/cmd.exe", "cmd. /c x", "run.bat", "x.ps1", "wt",
+            "somebinary -EncodedCommand AAAA", "tool /c dir", "tool /K dir", "tool -Command x",
+            r#""C:\Program Files\PowerShell\7\pwsh.exe""#,
+        ];
+        for c in refused {
+            let e = launch_allowed_with_shell_off(c).expect_err(c);
+            assert!(e.contains("GHOST_SHELL=off"), "{c}: {e}");
+        }
+    }
+
+    #[test]
+    fn launch_gate_allows_plain_apps() {
+        for c in ["notepad", "notepad.exe", r"notepad C:\x.txt", r#""C:\Program Files\App\app.exe" --flag"#,
+                  "calc", "mspaint.exe /pt", r#"notepad "C:\a b\cmd.txt""#, "msedge --new-window"] {
+            assert!(launch_allowed_with_shell_off(c).is_ok(), "{c}");
+        }
+    }
+
+    #[test]
+    fn launch_gate_empty_is_refused() {
+        assert!(launch_allowed_with_shell_off("  ").is_err());
     }
 
     #[test]

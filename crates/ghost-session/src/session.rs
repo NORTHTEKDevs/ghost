@@ -1484,6 +1484,7 @@ impl GhostSession {
     /// Launch a process by name or path. Returns PID.
     pub async fn launch(&self, exe: &str) -> Result<u32> {
         crate::error::ensure_not_stopped()?;
+        crate::shell::ensure_launch_allowed(exe)?;
         proc_launch(exe).map_err(GhostError::Core)
     }
 

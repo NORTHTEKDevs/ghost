@@ -57,7 +57,7 @@
     "allow_shell": {
       "type": "boolean",
       "title": "Allow shell commands (on: the agent can run any program you can)",
-      "description": "Ghost's shell is how an agent runs builds, git, scripts and CLIs, and it is why most agents use it. It runs with your account's full rights, so leaving it on means the agent can do anything at this computer that you can. Turn it off to limit Ghost to windows, screen reading and input; every shell call then refuses with an error that says so.",
+      "description": "Ghost's shell is how an agent runs builds, git, scripts and CLIs, and it is why most agents use it. It runs with your account's full rights, so leaving it on means the agent can do anything at this computer that you can. Turn it off to stop ghost_shell and to refuse launching command interpreters (cmd, PowerShell, scripts hosts) through the launch verbs; every such call refuses with an error that says so. It is not a sandbox: keyboard input and clicks can still start programs, so do not rely on it to contain an untrusted agent.",
       "default": true,
       "required": false
     },

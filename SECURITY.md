@@ -24,8 +24,9 @@ So the security boundary is the transport, not the verbs:
   not point it at `0.0.0.0` or expose it to a network. It is a local
   convenience for scripts, not a service.
 - `ghost_shell` runs arbitrary commands. `GHOST_SHELL=off` disables that verb
-  entirely if you are handing a Ghost session to something you do not fully
-  trust.
+  entirely, and the launch verbs then refuse command interpreters and script
+  hosts. It is not a sandbox: keyboard input and clicks can still start
+  programs, so it does not contain an agent you do not trust.
 
 Reports that amount to "an MCP client can make Ghost click things" describe the
 intended behaviour. Reports about **privilege boundaries being crossed** are in

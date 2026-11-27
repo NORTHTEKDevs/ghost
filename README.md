@@ -349,7 +349,9 @@ then drive the new terminal window with `ghost_see` / `ghost_act` / `ghost_key`.
 
 **Security:** shell access is powerful. Set `GHOST_SHELL=off` in the server's env to
 disable the verb entirely - every op then returns a clear refusal, leaving the GUI
-automation verbs fully usable.
+automation verbs fully usable. The launch verbs (`ghost_launch`, `ghost_window op=launch`,
+`ghost_desktop_launch`) then also refuse command interpreters and script hosts (cmd,
+PowerShell, wscript, python, ...). This is not a sandbox: keyboard input can still start programs.
 
 ## Quick Start - CLI
 

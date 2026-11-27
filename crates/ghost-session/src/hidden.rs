@@ -329,6 +329,7 @@ impl GhostSession {
     /// pid is not the launched pid.
     pub async fn launch_hidden(&self, command: &str) -> Result<Value> {
         crate::error::ensure_not_stopped()?;
+        crate::shell::ensure_launch_allowed(command)?;
         let d = self.auto_desktop().await?;
         let before: std::collections::HashSet<isize> =
             core(d.windows())?.into_iter().map(|w| w.hwnd).collect();

@@ -351,6 +351,7 @@ impl GhostSession {
     #[cfg(windows)]
     pub async fn desktop_launch(&self, id: &str, command: &str) -> Result<u32> {
         crate::error::ensure_not_stopped()?;
+        crate::shell::ensure_launch_allowed(command)?;
         self.desktop_handle(id)
             .await?
             .launch(command)
