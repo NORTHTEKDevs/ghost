@@ -671,7 +671,10 @@ rather have Ghost resolve it than read the tree yourself. It works with any
 tool-capable vision model behind an OpenAI-compatible endpoint (OpenAI, Gemini, Groq,
 NVIDIA, or a local vLLM / Ollama / LM Studio server) or Anthropic. Point
 `GHOST_VISION_BASE_URL` and `GHOST_VISION_MODEL` at the endpoint and set
-`GHOST_VISION_API_KEY` (a keyless local server needs only the base URL). Without it,
+`GHOST_VISION_API_KEY` (a keyless local server needs only the base URL; for Anthropic also
+set `GHOST_VISION_PROVIDER=anthropic`). Ambient `OPENAI_API_KEY`, `NVIDIA_API_KEY` and
+`ANTHROPIC_API_KEY` are ignored, so a screenshot is never sent to a cloud provider because
+of an unrelated key. Without it,
 description targets return a clear error naming the alternative; every other tool is
 unaffected.
 

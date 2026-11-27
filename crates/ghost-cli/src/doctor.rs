@@ -174,15 +174,13 @@ pub fn run_checks() -> Vec<Check> {
     });
 
     // --- vision credentials (OPTIONAL) ---
-    let vision = ["GHOST_VISION_API_KEY", "OPENAI_API_KEY", "NVIDIA_API_KEY", "ANTHROPIC_API_KEY"]
-        .iter()
-        .find(|k| std::env::var(k).map(|v| !v.trim().is_empty()).unwrap_or(false));
+    let vision = ghost_session::vision::vision_enabled_by();
     checks.push(match vision {
         Some(k) => Check::new("vision (optional)", Status::Pass, format!("credential found in {k}")),
         None => Check::new(
             "vision (optional)",
             Status::Warn,
-            "no vision key set; describe-by-description falls back to the accessibility tree. Everything else works.",
+            "GHOST_VISION_API_KEY not set (OPENAI/NVIDIA/ANTHROPIC keys are ignored); describe-by-description falls back to the accessibility tree. Everything else works.",
         ),
     });
 

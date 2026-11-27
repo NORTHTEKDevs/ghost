@@ -5,13 +5,15 @@
 //!    (openai-compat), Groq, or a local vLLM / Ollama / LM Studio server - they
 //!    all speak the same `/v1/chat/completions` format. Point
 //!    `GHOST_VISION_BASE_URL` + `GHOST_VISION_MODEL` at your endpoint and set the
-//!    key via `GHOST_VISION_API_KEY` (or `OPENAI_API_KEY` / `NVIDIA_API_KEY`).
+//!    key via `GHOST_VISION_API_KEY`.
 //!    A local keyless server needs only `GHOST_VISION_BASE_URL`.
-//!  - **Anthropic**: claude-haiku-4-5 by default. Set `ANTHROPIC_API_KEY`.
+//!  - **Anthropic**: claude-haiku-4-5 by default. Set `GHOST_VISION_PROVIDER=anthropic`
+//!    and `GHOST_VISION_API_KEY` to your Anthropic key.
 //!
 //! Selection: `GHOST_VISION_PROVIDER=openai|nvidia|gemini|groq|ollama|vllm|anthropic`.
-//! If unset, auto-detects: any OpenAI-compatible key (or a custom base URL) ->
-//! OpenAI-compat path; else `ANTHROPIC_API_KEY` -> Anthropic.
+//! If unset: OpenAI-compat path. Only `GHOST_VISION_API_KEY` (or a keyless
+//! `GHOST_VISION_BASE_URL`) enables the tier; ambient `OPENAI_API_KEY`,
+//! `NVIDIA_API_KEY` and `ANTHROPIC_API_KEY` are ignored.
 //! Default OpenAI-compat endpoint/model is NVIDIA's free Llama-3.2-90B-Vision.
 //!
 //! Strategy: capture a tight ROI screenshot of the foreground window,
@@ -20,7 +22,6 @@
 //! back from the downscaled+cropped image space to absolute screen pixels.
 
 use crate::error::{GhostError, Result};
-use crate::env_key_is_set;
 use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
 
@@ -292,11 +293,7 @@ async fn extract_via_openai_compat(prompt: &str, image_jpeg: &[u8]) -> Result<St
 }
 
 async fn extract_via_anthropic(prompt: &str, image_jpeg: &[u8]) -> Result<String> {
-    let api_key = std::env::var("ANTHROPIC_API_KEY")
-        .map_err(|_| GhostError::Config("ANTHROPIC_API_KEY not set".into()))?;
-    if api_key.trim().is_empty() {
-        return Err(GhostError::Vision("ANTHROPIC_API_KEY is empty/unset — set a valid key before using vision".into()));
-    }
+    let api_key = anthropic_api_key()?;
     let model = std::env::var("GHOST_VISION_MODEL")
         .unwrap_or_else(|_| ANTHROPIC_DEFAULT_MODEL.into());
     let b64 = base64_encode(image_jpeg);
@@ -336,57 +333,78 @@ async fn extract_via_anthropic(prompt: &str, image_jpeg: &[u8]) -> Result<String
         .unwrap_or_default())
 }
 
-fn pick_provider() -> Result<Provider> {
-    if let Ok(p) = std::env::var("GHOST_VISION_PROVIDER") {
-        return match p.to_lowercase().as_str() {
+/// Resolved vision-tier configuration. Escalating to a VLM sends window
+/// screenshots to a (possibly cloud) provider, so it is opt-in: only
+/// `GHOST_VISION_API_KEY` (or `GHOST_VISION_BASE_URL` for a keyless local
+/// server) enables it. Ambient `OPENAI_API_KEY` / `NVIDIA_API_KEY` /
+/// `ANTHROPIC_API_KEY` never do.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct VisionConfig {
+    provider: Provider,
+    /// Trimmed bearer key; empty for a keyless local server.
+    api_key: String,
+    /// The variable that enabled the tier (presence only, never the value).
+    source: &'static str,
+}
+
+/// Pure core of [`vision_config_from_env`]: `get` returns a variable's value.
+/// Blank or whitespace-only values count as unset.
+fn vision_config_with(get: &dyn Fn(&str) -> Option<String>) -> Result<VisionConfig> {
+    let var = |k: &str| get(k).map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+    let provider = match var("GHOST_VISION_PROVIDER") {
+        None => Provider::Nvidia,
+        Some(p) => match p.to_lowercase().as_str() {
             // Any OpenAI-compatible endpoint (NVIDIA, OpenAI, Gemini-openai-compat,
             // Groq, local vLLM / Ollama / LM Studio) uses the same wire format.
             "nvidia" | "openai" | "gemini" | "groq" | "ollama" | "vllm" | "lmstudio" | "openai_compat"
-                => Ok(Provider::Nvidia),
-            "anthropic" | "claude" => Ok(Provider::Anthropic),
-            other => Err(GhostError::Config(format!(
+                => Provider::Nvidia,
+            "anthropic" | "claude" => Provider::Anthropic,
+            other => return Err(GhostError::Config(format!(
                 "GHOST_VISION_PROVIDER={other} not recognized; use openai|nvidia|gemini|groq|ollama|vllm|anthropic"
             ))),
-        };
+        },
+    };
+    if let Some(api_key) = var("GHOST_VISION_API_KEY") {
+        return Ok(VisionConfig { provider, api_key, source: "GHOST_VISION_API_KEY" });
     }
-    // Auto-detect: any OpenAI-compatible key, or a custom base URL (keyless local
-    // server), or Anthropic.
-    if env_key_is_set("GHOST_VISION_API_KEY") || env_key_is_set("OPENAI_API_KEY")
-        || env_key_is_set("NVIDIA_API_KEY") || std::env::var("GHOST_VISION_BASE_URL").is_ok() {
-        return Ok(Provider::Nvidia);
-    }
-    if env_key_is_set("ANTHROPIC_API_KEY") {
-        return Ok(Provider::Anthropic);
+    if provider == Provider::Nvidia && var("GHOST_VISION_BASE_URL").is_some() {
+        return Ok(VisionConfig { provider, api_key: String::new(), source: "GHOST_VISION_BASE_URL" });
     }
     Err(GhostError::Config(
-        "no vision provider configured. Set GHOST_VISION_API_KEY (any OpenAI-compatible endpoint) \
-         + GHOST_VISION_BASE_URL + GHOST_VISION_MODEL, or NVIDIA_API_KEY (free at build.nvidia.com), \
-         or ANTHROPIC_API_KEY".into()
+        "vision tier is off. Set GHOST_VISION_API_KEY (any OpenAI-compatible endpoint, with \
+         GHOST_VISION_BASE_URL and GHOST_VISION_MODEL; GHOST_VISION_PROVIDER=anthropic for \
+         Anthropic), or only GHOST_VISION_BASE_URL for a keyless local server. OPENAI_API_KEY, \
+         NVIDIA_API_KEY and ANTHROPIC_API_KEY are deliberately ignored so a screenshot never \
+         leaves the machine because of an unrelated key.".into()
     ))
 }
 
-/// Resolve the bearer key for the OpenAI-compatible path, provider-agnostic:
-/// GHOST_VISION_API_KEY > OPENAI_API_KEY > NVIDIA_API_KEY. Returns an empty string
-/// (keyless) when a custom GHOST_VISION_BASE_URL is set with no key - local
-/// servers (vLLM/Ollama/LM Studio) typically need none.
+/// The single place the vision tier is configured from the process environment.
+pub(crate) fn vision_config_from_env() -> Result<VisionConfig> {
+    vision_config_with(&|k| std::env::var(k).ok())
+}
+
+/// Which variable enables the vision tier right now, or `None` when it is off.
+pub fn vision_enabled_by() -> Option<&'static str> {
+    vision_config_from_env().ok().map(|c| c.source)
+}
+
+fn pick_provider() -> Result<Provider> {
+    vision_config_from_env().map(|c| c.provider)
+}
+
+/// Bearer key for the OpenAI-compatible path (empty for a keyless local server).
 fn openai_compat_api_key() -> Result<String> {
-    for var in ["GHOST_VISION_API_KEY", "OPENAI_API_KEY", "NVIDIA_API_KEY"] {
-        if let Ok(k) = std::env::var(var) {
-            let k = k.trim();
-            if !k.is_empty() {
-                // Return trimmed - a trailing newline from a .env loader would
-                // corrupt the `Authorization: Bearer <key>` header.
-                return Ok(k.to_string());
-            }
-        }
+    vision_config_from_env().map(|c| c.api_key)
+}
+
+/// Key for the Anthropic path: `GHOST_VISION_API_KEY` only.
+fn anthropic_api_key() -> Result<String> {
+    let c = vision_config_from_env()?;
+    if c.api_key.is_empty() {
+        return Err(GhostError::Config("GHOST_VISION_API_KEY not set".into()));
     }
-    if std::env::var("GHOST_VISION_BASE_URL").is_ok() {
-        return Ok(String::new());
-    }
-    Err(GhostError::Config(
-        "no vision API key set. Use GHOST_VISION_API_KEY (any OpenAI-compatible endpoint), \
-         OPENAI_API_KEY, or NVIDIA_API_KEY; or set GHOST_VISION_BASE_URL for a keyless local server".into()
-    ))
+    Ok(c.api_key)
 }
 
 fn build_prompt(description: &str, final_size: (u32, u32)) -> String {
@@ -644,11 +662,7 @@ async fn locate_via_anthropic(
     image_jpeg: &[u8],
     final_size: (u32, u32),
 ) -> Result<Option<(i32, i32)>> {
-    let api_key = std::env::var("ANTHROPIC_API_KEY")
-        .map_err(|_| GhostError::Config("ANTHROPIC_API_KEY not set".into()))?;
-    if api_key.trim().is_empty() {
-        return Err(GhostError::Vision("ANTHROPIC_API_KEY is empty/unset — set a valid key before using vision".into()));
-    }
+    let api_key = anthropic_api_key()?;
     let model = std::env::var("GHOST_VISION_MODEL")
         .unwrap_or_else(|_| ANTHROPIC_DEFAULT_MODEL.into());
 
@@ -824,18 +838,55 @@ mod tests {
         assert_eq!(r, None);
     }
 
+    fn cfg(vars: &[(&str, &str)]) -> Result<VisionConfig> {
+        let m: std::collections::HashMap<String, String> =
+            vars.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        vision_config_with(&|k| m.get(k).cloned())
+    }
+
     #[test]
-    fn pick_provider_with_explicit_override() {
-        // LOW: use catch_unwind so env vars are always cleaned up even on panic,
-        // guarding against cross-test env-var pollution in a parallel test harness.
-        std::env::set_var("GHOST_VISION_PROVIDER", "anthropic");
-        std::env::set_var("ANTHROPIC_API_KEY", "test");
-        std::env::set_var("NVIDIA_API_KEY", "test");
-        let result = std::panic::catch_unwind(pick_provider);
-        std::env::remove_var("GHOST_VISION_PROVIDER");
-        std::env::remove_var("ANTHROPIC_API_KEY");
-        std::env::remove_var("NVIDIA_API_KEY");
-        assert_eq!(result.unwrap().unwrap(), Provider::Anthropic);
+    fn ambient_provider_keys_alone_never_enable_vision() {
+        for k in ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "NVIDIA_API_KEY"] {
+            assert!(cfg(&[(k, "sk-ambient")]).is_err(), "{k} must not enable the tier");
+        }
+        assert!(cfg(&[
+            ("ANTHROPIC_API_KEY", "a"),
+            ("OPENAI_API_KEY", "b"),
+            ("NVIDIA_API_KEY", "c"),
+            ("GHOST_VISION_PROVIDER", "anthropic"),
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn ghost_vision_api_key_enables_openai_compat() {
+        let c = cfg(&[("GHOST_VISION_API_KEY", "  sk-ghost
+")]).unwrap();
+        assert_eq!(c.provider, Provider::Nvidia);
+        assert_eq!(c.api_key, "sk-ghost");
+    }
+
+    #[test]
+    fn ghost_vision_api_key_with_anthropic_provider_uses_that_key() {
+        let c = cfg(&[
+            ("GHOST_VISION_API_KEY", "k1"),
+            ("GHOST_VISION_PROVIDER", "anthropic"),
+            ("ANTHROPIC_API_KEY", "ambient"),
+        ])
+        .unwrap();
+        assert_eq!((c.provider, c.api_key.as_str()), (Provider::Anthropic, "k1"));
+    }
+
+    #[test]
+    fn base_url_alone_is_a_keyless_local_server() {
+        let c = cfg(&[("GHOST_VISION_BASE_URL", "http://127.0.0.1:11434/v1/chat/completions")]).unwrap();
+        assert_eq!((c.provider, c.api_key.as_str()), (Provider::Nvidia, ""));
+    }
+
+    #[test]
+    fn blank_key_and_unknown_provider_are_rejected() {
+        assert!(cfg(&[("GHOST_VISION_API_KEY", "   ")]).is_err());
+        assert!(cfg(&[("GHOST_VISION_API_KEY", "k"), ("GHOST_VISION_PROVIDER", "bogus")]).is_err());
     }
 
     // --- parse_extract_response (field extraction VLM response parsing) ---
