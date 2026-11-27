@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/NORTHTEKDevs/ghost/security/advisories/new
+    about: Please report vulnerabilities privately, not as a public issue.
+  - name: Documentation
+    url: https://github.com/NORTHTEKDevs/ghost/blob/main/docs/README.md
+    about: Install, configuration, security model and the full tool reference.

@@ -1,0 +1,46 @@
+name: Feature request
+description: Something Ghost should be able to do, or do better
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Start from the job, not the API. "I need to fill a form in app X
+        without it taking my screen" tells us more than "add a parameter to
+        ghost_act". If it is a security concern, do not file it here: see
+        SECURITY.md.
+
+  - type: textarea
+    id: job
+    attributes:
+      label: What are you trying to do?
+      description: The task, the application, and the client or script driving Ghost.
+    validations:
+      required: true
+
+  - type: textarea
+    id: today
+    attributes:
+      label: What happens today?
+      description: The calls you tried and what came back, or why no existing tool fits.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like instead?
+      description: Optional. A sketch of the behaviour or the tool call you would want.
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      multiple: true
+      options:
+        - Windows
+        - Linux - X11
+        - Linux - Wayland
+        - Any
+    validations:
+      required: true

@@ -2,8 +2,10 @@
 
 ## Reporting a vulnerability
 
-Email **info@northtek.io** with "Ghost security" in the subject. Please do not
-open a public issue for a vulnerability.
+Report it privately through
+[GitHub's private vulnerability reporting](https://github.com/NORTHTEKDevs/ghost/security/advisories/new),
+or email **info@northtek.io** with "Ghost security" in the subject. Please do
+not open a public issue for a vulnerability.
 
 Include what you found, how to reproduce it, and what an attacker gets. You will
 get an acknowledgement within 72 hours. There is no bounty program.

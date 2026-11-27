@@ -6,7 +6,10 @@ them is `ghost-core` on Windows and `ghost-linux` on Linux, picked by a one-line
 `cfg` alias in `ghost-session`. The engines mirror each other's module tree and
 function signatures, so a function added to one engine needs a counterpart (or
 an honest `Unsupported` error) in the other, or the other platform stops
-compiling.
+compiling. The crate map is in [docs/usage.md](docs/usage.md#architecture).
+
+Before a large change, open an issue to agree on the approach. Everyone taking
+part follows the [code of conduct](CODE_OF_CONDUCT.md).
 
 ## Build and test
 
@@ -45,7 +48,10 @@ installed and a C compiler for the target for `ring`; `zig cc` works).
 - Nothing that takes the user's foreground under the default `background`
   policy. `ghost_stats.interference_audit` must stay at zero synthetic changes
   through the live suite.
-- A CHANGELOG entry under the unreleased version.
+- A CHANGELOG entry under `[Unreleased]`.
+- If a tool's name, description or parameters changed, a regenerated
+  [docs/tools.md](docs/tools.md): `GHOST_WRITE_TOOL_REFERENCE=1 cargo test -p
+  ghost-mcp tool_reference` on Windows. The test fails until you do.
 
 ## Releases
 
