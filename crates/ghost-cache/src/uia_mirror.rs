@@ -209,7 +209,10 @@ impl UiaCache {
 
     pub fn invalidate(&self) {
         let mut inner = self.inner.lock().unwrap();
-        inner.current = Snapshot::default();
+        // Keep seq monotonic: a client holding an older seq must never get an
+        // empty "no change" delta for a different screen.
+        let next_seq = inner.current.seq + 1;
+        inner.current = Snapshot { seq: next_seq, nodes: vec![] };
         inner.history.clear();
     }
 
@@ -272,6 +275,24 @@ mod tests {
         let d = a.diff(&b);
         assert!(d.added.is_empty() && d.removed.is_empty());
         assert_eq!(d.updated.len(), 1);
+    }
+
+    #[test]
+    fn invalidate_keeps_seq_monotonic_so_stale_clients_get_a_real_delta() {
+        let cache = UiaCache::new();
+        for i in 0..5 {
+            cache.apply_snapshot(Snapshot { seq: 0, nodes: vec![node(&i.to_string(), "A")] });
+        }
+        let seen = cache.seq();
+        assert_eq!(seen, 5);
+        cache.invalidate();
+        assert!(cache.seq() > seen, "invalidate must not reset seq");
+        for i in 10..15 {
+            cache.apply_snapshot(Snapshot { seq: 0, nodes: vec![node(&i.to_string(), "B")] });
+        }
+        let d = cache.snapshot_delta(None, Some(seen)).unwrap();
+        assert!(d.seq > seen);
+        assert!(!d.added.is_empty(), "a different screen must not look like no-change");
     }
 
     #[test]
