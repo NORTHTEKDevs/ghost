@@ -1270,13 +1270,35 @@ pub(crate) fn default_shell() -> &'static str {
 /// Refuse a `cwd` that is not an existing directory, before any shell starts.
 /// Without this the cold path failed to spawn (os error 267) while the warm
 /// path's Set-Location failed quietly and ran the command in the server's cwd.
-fn check_cwd(cwd: Option<&str>) -> Result<()> {
-    match cwd {
-        Some(dir) if !std::path::Path::new(dir).is_dir() => Err(GhostError::Config(format!(
-            "ghost_shell: cwd '{dir}' is not an existing directory"
-        ))),
-        _ => Ok(()),
+/// Returns the directory to use: a leading `~` (`~`, `~/x`, `~\x`) is the
+/// user's home.
+fn check_cwd(cwd: Option<&str>) -> Result<Option<String>> {
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" });
+    resolve_cwd(cwd, home.as_deref().and_then(|h| h.to_str()))
+}
+
+/// [`check_cwd`] with the home directory given.
+fn resolve_cwd(cwd: Option<&str>, home: Option<&str>) -> Result<Option<String>> {
+    let Some(dir) = cwd else { return Ok(None) };
+    let sep = |c: char| c == '/' || (cfg!(windows) && c == '\\');
+    let rest = dir.strip_prefix('~').filter(|r| r.is_empty() || r.starts_with(sep));
+    let path = match (rest, home) {
+        (Some(rest), Some(home)) => format!("{home}{rest}"),
+        (Some(_), None) => {
+            return Err(GhostError::Config(format!(
+                "ghost_shell: cwd '{dir}' starts with ~ but the home directory is unknown; give a full path"
+            )))
+        }
+        (None, _) => dir.to_string(),
+    };
+    if std::path::Path::new(&path).is_dir() {
+        return Ok(Some(path));
     }
+    // PowerShell provider drives (HKLM:\, Env:, Cert:\) are not directories
+    // a shell can start in; say so rather than "does not exist".
+    let provider = dir.split_once(':').is_some_and(|(d, _)| d.len() > 1 && d.chars().all(|c| c.is_ascii_alphanumeric()));
+    let hint = if provider { " (PowerShell provider paths such as HKLM:\\ or Env: are not file-system directories)" } else { "" };
+    Err(GhostError::Config(format!("ghost_shell: cwd '{dir}' is not an existing directory{hint}")))
 }
 
 /// How long `op=read` waits: the caller's `timeout_ms`, else a short default.
@@ -1332,9 +1354,9 @@ impl GhostSession {
             .and_then(|v| v.as_str())
             .ok_or_else(|| GhostError::Config("ghost_shell op=run: missing 'cmd'".into()))?;
         let shell = args.get("shell").and_then(|v| v.as_str()).unwrap_or(default_shell());
-        let cwd = args.get("cwd").and_then(|v| v.as_str());
+        let cwd = check_cwd(args.get("cwd").and_then(|v| v.as_str()))?;
+        let cwd = cwd.as_deref();
         let dur = clamp_timeout(args.get("timeout_ms").and_then(|v| v.as_u64()));
-        check_cwd(cwd)?;
 
         // Warm path: hand the command to the pre-spawned PowerShell. Only the
         // default shell qualifies (cmd starts in ~15 ms anyway; pwsh is rarely
@@ -1506,8 +1528,8 @@ impl GhostSession {
 }
 
 async fn shell_open(shells: &Mutex<ShellRegistry>, args: &Value) -> Result<Value> {
-    let cwd = args.get("cwd").and_then(|v| v.as_str());
-    check_cwd(cwd)?;
+    let cwd = check_cwd(args.get("cwd").and_then(|v| v.as_str()))?;
+    let cwd = cwd.as_deref();
     let id = match args.get("id").and_then(|v| v.as_str()) {
         Some(s) if !s.trim().is_empty() => s.to_string(),
         _ => {
@@ -2935,6 +2957,27 @@ mod session_tests {
         let dir = std::env::temp_dir();
         assert!(check_cwd(None).is_ok());
         assert!(check_cwd(Some(dir.to_str().unwrap())).is_ok());
+        // A leading ~ is the user's home, as a shell user expects.
+        assert!(check_cwd(Some("~")).is_ok(), "{:?}", check_cwd(Some("~")));
+        let home = dir.to_str().unwrap();
+        let sub = dir.join(format!("ghost-cwd-home-{}", std::process::id()));
+        std::fs::create_dir_all(&sub).unwrap();
+        let name = sub.file_name().unwrap().to_str().unwrap();
+        assert_eq!(resolve_cwd(Some("~"), Some(home)).unwrap(), Some(home.to_string()));
+        let seps: &[&str] = if cfg!(windows) { &["/", "\\"] } else { &["/"] };
+        for tilde in seps.iter().map(|s| format!("~{s}{name}")) {
+            let got = resolve_cwd(Some(&tilde), Some(home)).unwrap().expect("a dir");
+            assert!(std::path::Path::new(&got).is_dir() && got.starts_with(home), "{tilde} -> {got}");
+        }
+        let _ = std::fs::remove_dir(&sub);
+        // ~user and an unknown home are not guessed at.
+        assert!(resolve_cwd(Some("~nosuchuser"), Some(home)).is_err());
+        assert!(resolve_cwd(Some("~"), None).unwrap_err().to_string().contains("home directory is unknown"));
+        // Provider paths stay refused, with a message that says why.
+        for p in [r"HKLM:\", "Env:", r"Cert:\CurrentUser"] {
+            let e = resolve_cwd(Some(p), Some(home)).unwrap_err().to_string();
+            assert!(e.contains("provider paths"), "{p}: {e}");
+        }
         for bad in [missing, file] {
             let e = check_cwd(Some(bad)).expect_err(bad).to_string();
             assert!(e.contains("is not an existing directory") && e.contains(bad), "{e}");
