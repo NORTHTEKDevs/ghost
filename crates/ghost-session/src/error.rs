@@ -59,12 +59,12 @@ pub fn is_stopped() -> bool {
 }
 
 /// Why this process cannot read the shared stop event, when it cannot (it
-/// then refuses every action: fail closed). `None` off Windows, where there is
-/// no shared event.
+/// then refuses every action: fail closed). On Linux the shared stop is a
+/// pair of marker files; `None` on macOS, where there is no shared stop.
 pub fn stop_event_error() -> Option<String> {
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     return crate::engine::input::hotkey::stop_event_error();
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "linux")))]
     None
 }
 

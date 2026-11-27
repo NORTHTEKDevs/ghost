@@ -306,45 +306,195 @@ pub mod mouse {
 // ------------------------------------------------------------------ hotkey
 
 pub mod hotkey {
+    //! The emergency stop, shared by every Ghost process of this user.
+    //!
+    //! Windows broadcasts the stop through two named kernel events. Here the
+    //! same two states are marker files in a per-user directory:
+    //! `$XDG_RUNTIME_DIR/ghost/` (`stop`, `human-stop`), or, where
+    //! `XDG_RUNTIME_DIR` is unset (a bare ssh or cron session),
+    //! `/tmp/ghost-stop-<uid>/`. Either directory must be a real directory
+    //! (not a symlink), owned by this user, with no group or other access;
+    //! Ghost creates it that way. One that fails those checks, or cannot be
+    //! read, cannot be trusted to show a stop another process raised, so every
+    //! process counts as stopped (fail closed, as on Windows) and
+    //! `stop_event_error` says why. Processes of one user that see different
+    //! `XDG_RUNTIME_DIR` values do not share a stop.
+    //!
+    //! `STOP_FLAG` stays process-local: `ghost_stop scope=process` sets it
+    //! alone.
+
+    use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, Ordering};
 
     use crate::error::Result;
 
-    /// Emergency-stop flag, mirroring the Windows engine's `STOP_FLAG`.
+    /// Emergency-stop flag, mirroring the Windows engine's `STOP_FLAG`:
+    /// this process only.
     pub static STOP_FLAG: AtomicBool = AtomicBool::new(false);
 
-    /// Set with the stop when the human raised it (Ctrl+Alt+G). While it is
-    /// set, an agent's reset (`reset_stop`) cannot lift the stop.
-    static HUMAN_STOP: AtomicBool = AtomicBool::new(false);
+    /// Raised by any stop; an agent's reset removes it.
+    const STOP: &str = "stop";
+    /// Raised with `STOP` when the human stopped Ghost (Ctrl+Alt+G); only the
+    /// human's resume removes it.
+    const HUMAN: &str = "human-stop";
 
+    /// This process's effective uid, from `/proc/self/status`.
+    fn euid() -> Option<u32> {
+        let status = std::fs::read_to_string("/proc/self/status").ok()?;
+        status.lines().find(|l| l.starts_with("Uid:"))?.split_whitespace().nth(2)?.parse().ok()
+    }
+
+    /// The marker directory this process uses.
+    ///
+    /// This crate's own tests never use the real one: `GHOST_TEST_STOP_DIR`
+    /// when set (a per-test directory), else a per-process one under the temp
+    /// dir. The variable is read only under `cfg(test)`: a shipped binary that
+    /// honoured it would let any agent with a shell start a Ghost that ignores
+    /// the human's stop.
+    fn marker_dir() -> std::result::Result<PathBuf, String> {
+        if cfg!(test) {
+            return Ok(std::env::var_os("GHOST_TEST_STOP_DIR").map(PathBuf::from).unwrap_or_else(|| {
+                std::env::temp_dir().join(format!("ghost-stop-test-{}", std::process::id()))
+            }));
+        }
+        match std::env::var_os("XDG_RUNTIME_DIR").filter(|d| !d.is_empty()) {
+            Some(d) => Ok(PathBuf::from(d).join("ghost")),
+            None => {
+                let uid = euid().ok_or("cannot read this process's uid from /proc/self/status")?;
+                Ok(PathBuf::from(format!("/tmp/ghost-stop-{uid}")))
+            }
+        }
+    }
+
+    /// Check that `dir` is safe to trust: a directory (not a symlink), owned
+    /// by this user, with no group/other access. `Ok(false)` when it does not
+    /// exist yet (then no stop was ever raised through it).
+    fn check_dir(dir: &Path) -> std::result::Result<bool, String> {
+        use std::os::unix::fs::MetadataExt;
+        let meta = match std::fs::symlink_metadata(dir) {
+            Ok(m) => m,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(e) => return Err(format!("cannot read the stop marker dir {}: {e}", dir.display())),
+        };
+        let uid = euid().ok_or("cannot read this process's uid from /proc/self/status")?;
+        if !meta.file_type().is_dir() {
+            Err(format!("the stop marker dir {} is not a directory", dir.display()))
+        } else if meta.uid() != uid {
+            Err(format!("the stop marker dir {} is owned by uid {}, not {uid}", dir.display(), meta.uid()))
+        } else if meta.mode() & 0o077 != 0 {
+            Err(format!("the stop marker dir {} is open to other users (mode {:o})", dir.display(), meta.mode() & 0o777))
+        } else {
+            Ok(true)
+        }
+    }
+
+    /// Whether `name` is raised. A directory that cannot be trusted counts as
+    /// raised (fail closed).
+    fn raised(name: &str) -> bool {
+        let Ok(dir) = marker_dir() else { return true };
+        match check_dir(&dir) {
+            Ok(false) => false,
+            Ok(true) => match std::fs::symlink_metadata(dir.join(name)) {
+                Ok(_) => true,
+                Err(e) => e.kind() != std::io::ErrorKind::NotFound,
+            },
+            Err(_) => true,
+        }
+    }
+
+    /// Raise or lower `name`, creating the directory (0700) when needed.
+    fn set(name: &str, up: bool) -> std::result::Result<(), String> {
+        use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+        let dir = marker_dir()?;
+        if !check_dir(&dir)? {
+            if !up {
+                return Ok(());
+            }
+            match std::fs::DirBuilder::new().mode(0o700).create(&dir) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(e) => return Err(format!("cannot create the stop marker dir {}: {e}", dir.display())),
+            }
+            // Re-check: another process (or user) may have won the race.
+            check_dir(&dir)?;
+        }
+        let path = dir.join(name);
+        let r = if up {
+            std::fs::OpenOptions::new().write(true).create(true).truncate(false).mode(0o600).open(&path).map(drop)
+        } else {
+            std::fs::remove_file(&path)
+        };
+        match r {
+            Err(e) if !(e.kind() == std::io::ErrorKind::NotFound && !up) => {
+                Err(format!("cannot {} the stop marker {}: {e}", if up { "raise" } else { "lower" }, path.display()))
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// Whether the emergency stop is active - raised here, or by any other
+    /// Ghost process of this user through the shared markers.
     pub fn is_stopped() -> bool {
-        STOP_FLAG.load(Ordering::SeqCst) || HUMAN_STOP.load(Ordering::SeqCst)
+        STOP_FLAG.load(Ordering::SeqCst) || raised(STOP) || raised(HUMAN)
     }
 
+    /// Whether the stop in force is the shared one, not only this process's
+    /// `scope: "process"` flag.
+    pub fn shared_stop_raised() -> bool {
+        raised(STOP) || raised(HUMAN)
+    }
+
+    /// Whether the human raised the stop (in any Ghost process). An
+    /// untrustworthy marker dir counts as raised: a human stop cannot be ruled
+    /// out, so an agent reset is refused.
     pub fn human_stop_active() -> bool {
-        HUMAN_STOP.load(Ordering::SeqCst)
+        raised(HUMAN)
     }
 
-    /// An agent's stop (`ghost_stop`).
+    /// Why this process cannot trust the shared stop markers, when it cannot.
+    /// While this is `Some`, every action is refused and no reset helps.
+    pub fn stop_event_error() -> Option<String> {
+        marker_dir().and_then(|d| check_dir(&d)).err()
+    }
+
+    /// An agent's stop (`ghost_stop`): raised for every Ghost process. If the
+    /// marker cannot be written, this process stops anyway.
     pub fn trigger_stop() {
-        STOP_FLAG.store(true, Ordering::SeqCst);
+        if let Err(e) = set(STOP, true) {
+            tracing::warn!("emergency stop: {e}; stopping this process only");
+            STOP_FLAG.store(true, Ordering::SeqCst);
+        }
     }
 
     /// The human's stop (Ctrl+Alt+G): only `reset_human_stop` lifts it.
     pub fn trigger_human_stop() {
-        HUMAN_STOP.store(true, Ordering::SeqCst);
-        STOP_FLAG.store(true, Ordering::SeqCst);
+        let human = set(HUMAN, true);
+        let stop = set(STOP, true);
+        if let Err(e) = human.and(stop) {
+            tracing::warn!("emergency stop: {e}; stopping this process only");
+            STOP_FLAG.store(true, Ordering::SeqCst);
+        }
     }
 
-    /// An agent's reset (`ghost_reset`): never lifts the human's stop.
+    /// An agent's reset (`ghost_reset`): lowers this process's flag and the
+    /// shared stop, never the human's marker - a stop the human raised stays
+    /// in force everywhere.
     pub fn reset_stop() {
         STOP_FLAG.store(false, Ordering::SeqCst);
+        if let Err(e) = set(STOP, false) {
+            tracing::warn!("emergency stop reset: {e}");
+        }
     }
 
-    /// The human's resume (Ctrl+Alt+Shift+G, or `ghost reset`).
+    /// The human's resume (Ctrl+Alt+Shift+G, or `ghost reset`): lifts any
+    /// stop, theirs included, in every Ghost process.
     pub fn reset_human_stop() {
-        HUMAN_STOP.store(false, Ordering::SeqCst);
         STOP_FLAG.store(false, Ordering::SeqCst);
+        for name in [HUMAN, STOP] {
+            if let Err(e) = set(name, false) {
+                tracing::warn!("emergency stop resume: {e}");
+            }
+        }
     }
 
     /// Register the global Ctrl+Alt+G emergency stop.
@@ -369,7 +519,7 @@ pub mod hotkey {
     /// `ghost_key` deliberately exposes `down:ctrl` / `up:ctrl` so a caller can
     /// hold a modifier across calls. If `ghost_stop` fires between the two, the
     /// modifier stays physically latched in the user's session until they tap
-    /// the real key — and on Linux `ghost_stop` is the *only* out-of-band
+    /// the real key - and on Linux `ghost_stop` is the *only* out-of-band
     /// control, since there is no global emergency hotkey. So the stop path has
     /// to actively clear them, exactly as the Windows engine does.
     ///
@@ -510,7 +660,7 @@ impl BackgroundClicker {
     /// Background click at a screen point.
     ///
     /// On Windows this posts `WM_LBUTTONDOWN/UP` to the target window: the
-    /// message never touches the OS cursor. Linux has no equivalent — a
+    /// message never touches the OS cursor. Linux has no equivalent - a
     /// coordinate click here would be a *real* synthetic pointer warp, which
     /// moves the user's cursor and can steal focus under click-to-focus window
     /// managers.
@@ -600,5 +750,99 @@ mod tests {
         assert!(hotkey::is_stopped() && hotkey::human_stop_active());
         hotkey::reset_human_stop();
         assert!(!hotkey::is_stopped());
+    }
+
+    /// A per-test marker directory (0700, ours), never the real shared one.
+    fn temp_marker_dir(tag: &str) -> std::path::PathBuf {
+        use std::os::unix::fs::DirBuilderExt;
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!("ghost-stop-test-{}-{tag}-{nanos}", std::process::id()));
+        std::fs::DirBuilder::new().mode(0o700).create(&dir).expect("temp marker dir");
+        dir
+    }
+
+    /// Run `child_stop_probe` in a fresh process against `dir`: what a second
+    /// Ghost process (`ghost reset`, a new `ghost-mcp`) would see.
+    fn probe(dir: &std::path::Path, step: &str) -> bool {
+        std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["input::tests::child_stop_probe", "--exact", "--test-threads=1", "--quiet"])
+            .env("GHOST_TEST_STOP_DIR", dir)
+            .env("GHOST_TEST_STOP_PROBE", step)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+
+    /// The child half of the cross-process tests; a no-op in a normal run.
+    #[test]
+    fn child_stop_probe() {
+        let Ok(step) = std::env::var("GHOST_TEST_STOP_PROBE") else { return };
+        assert!(std::env::var_os("GHOST_TEST_STOP_DIR").is_some(), "never probe the real markers");
+        match step.as_str() {
+            "trigger" => hotkey::trigger_stop(),
+            "trigger-human" => hotkey::trigger_human_stop(),
+            "agent-reset" => hotkey::reset_stop(),
+            "human-reset" => hotkey::reset_human_stop(),
+            "expect-stopped" => assert!(hotkey::is_stopped()),
+            "expect-human" => assert!(hotkey::is_stopped() && hotkey::human_stop_active()),
+            "expect-running" => assert!(!hotkey::is_stopped() && !hotkey::human_stop_active()),
+            other => panic!("unknown probe step {other}"),
+        }
+    }
+
+    /// A stop raised in one process is in force in every other, an agent's
+    /// reset never lifts the human's, and the human's resume lifts both.
+    #[test]
+    fn a_stop_reaches_every_process_and_only_the_human_lifts_theirs() {
+        let dir = temp_marker_dir("reach");
+        assert!(probe(&dir, "expect-running"), "a fresh dir is not stopped");
+        assert!(probe(&dir, "trigger"));
+        assert!(dir.join("stop").exists(), "the stop left no shared marker");
+        assert!(probe(&dir, "expect-stopped"), "another process did not see the stop");
+        assert!(probe(&dir, "agent-reset"));
+        assert!(probe(&dir, "expect-running"), "a reset elsewhere did not lift it");
+
+        assert!(probe(&dir, "trigger-human"));
+        assert!(probe(&dir, "agent-reset"));
+        assert!(dir.join("human-stop").exists(), "an agent reset removed the human's marker");
+        assert!(probe(&dir, "expect-human"), "an agent reset lifted the human's stop");
+        assert!(probe(&dir, "human-reset"));
+        assert!(probe(&dir, "expect-running"), "the human's resume did not lift it");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A marker directory others could write to (or that is not ours) cannot
+    /// be trusted to show a stop: every process counts as stopped.
+    #[test]
+    fn an_insecure_marker_dir_fails_closed() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_marker_dir("open");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+        assert!(probe(&dir, "expect-human"), "a world-writable marker dir was trusted");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // Owned by someone else (only checkable as root, which may chown).
+        let root = std::fs::read_to_string("/proc/self/status")
+            .map(|s| s.lines().any(|l| l.starts_with("Uid:") && l.split_whitespace().nth(2) == Some("0")))
+            .unwrap_or(false);
+        if root {
+            let dir = temp_marker_dir("owner");
+            std::os::unix::fs::chown(&dir, Some(4_321), None).unwrap();
+            assert!(probe(&dir, "expect-human"), "a marker dir owned by another user was trusted");
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        // A symlink in place of the directory is refused too.
+        let real = temp_marker_dir("target");
+        let link = real.with_extension("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert!(probe(&link, "expect-human"), "a symlinked marker dir was trusted");
+        let _ = std::fs::remove_file(&link);
+        let _ = std::fs::remove_dir_all(&real);
     }
 }

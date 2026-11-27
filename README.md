@@ -689,6 +689,11 @@ can still inspect what happened while everything is stopped.
 - **Session-wide since 0.19.** The stop is a named kernel event
   (`Local\ghost-emergency-stop-event`), so one press halts every Ghost process in
   your logon session, not just the one that happened to register the hotkey.
+  On Linux the same two states are marker files (`stop`, `human-stop`) in
+  `$XDG_RUNTIME_DIR/ghost/`, or `/tmp/ghost-stop-<uid>/` where
+  `XDG_RUNTIME_DIR` is unset; the directory must be yours and closed to other
+  users (mode 0700), or every Ghost process counts as stopped. Ghost processes
+  of one user that see different `XDG_RUNTIME_DIR` values do not share a stop.
 - **Only you can lift your stop (0.24.2).** A stop raised with Ctrl+Alt+G is
   marked as yours. An agent's `ghost_reset` cannot lift it; the agent is told
   only that you stopped Ghost and to wait for you. You resume with either:
