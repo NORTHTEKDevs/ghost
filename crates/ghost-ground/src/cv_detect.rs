@@ -1,4 +1,4 @@
-//! CPU classical-CV element detector — a GPU-free, dependency-free fallback that
+//! CPU classical-CV element detector - a GPU-free, dependency-free fallback that
 //! proposes interactable-region bounding boxes for windows with no useful
 //! accessibility tree (canvas apps, custom-drawn UIs, remote-desktop surfaces).
 //!
@@ -8,7 +8,7 @@
 //! optional ONNX OmniParser tier ([`crate::yolo::YoloDetector`]) provides them when
 //! a GPU model is available. This module is the always-available middle ground: it
 //! finds element-like boxes from pixels alone using edge density + connected
-//! components — no model download, no GPU, no external crates. It is less precise
+//! components - no model download, no GPU, no external crates. It is less precise
 //! than OmniParser but turns "no candidates at all" into "usable candidates" for
 //! the canvas case.
 //!
@@ -225,7 +225,7 @@ mod tests {
     /// Build a solid-color RGBA image, returning a mutable buffer for drawing.
     fn canvas(w: usize, h: usize, bg: (u8, u8, u8)) -> Vec<u8> {
         let mut v = vec![0u8; w * h * 4];
-        for px in v.chunks_exact_mut(4) {
+        for px in v.as_chunks_mut::<4>().0 {
             px[0] = bg.0;
             px[1] = bg.1;
             px[2] = bg.2;

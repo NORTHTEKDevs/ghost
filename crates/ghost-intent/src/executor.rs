@@ -49,6 +49,9 @@ pub struct IntentResult {
     pub duration_ms: u64,
 }
 
+// async_trait marks the boxed future #[must_use]; clippy 1.99 reports that as
+// a double must_use inside the macro expansion.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait OpsDispatcher {
     async fn dispatch(&self, op: &Op, state: &mut IntentState) -> Result<(), IntentError>;
