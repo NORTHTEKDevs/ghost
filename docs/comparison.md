@@ -10,7 +10,7 @@ screen.** For web scraping or cross-OS VM agents, other tools are the right call
 | Capability | **Ghost** | Playwright-MCP | Anthropic Computer Use | cua-driver (Hermes) | pywinauto / WinAppDriver |
 | --- | --- | --- | --- | --- | --- |
 | Native Windows apps (Win32/WPF/UWP) | ✅ deep (UI Automation) | ❌ browser only | ⚠️ via screenshots | ✅ | ✅ |
-| Web / browser | ⚠️ drives it like a user (no DOM) | ✅ deep (CDP/DOM) | ⚠️ screenshots | ⚠️ | ❌ |
+| Web / browser | ✅ CDP: DOM names, selectors, JS eval | ✅ deep (CDP/DOM) | ⚠️ screenshots | ⚠️ | ❌ |
 | **Background (no focus/cursor steal)** | ✅ posts window messages | ❌ | ❌ (drives the VM screen) | ✅ | ❌ |
 | **Per-action verification** | ✅ `verified`/`focus_confirmed` | partial (waits) | ❌ (model must re-look) | ❌ | ❌ |
 | Works on apps with **no API** | ✅ | ❌ | ✅ (visual) | ✅ | ✅ |
@@ -28,8 +28,9 @@ screen.** For web scraping or cross-OS VM agents, other tools are the right call
   integration. Especially when it should run *in the background* while a person
   keeps using the machine, and when you need to *know* each action worked.
 - **Playwright / Playwright-MCP** — the target is a website and you want DOM-level
-  control, network interception, and headless browsers. Ghost drives a browser
-  only as a user would (no DOM); Playwright is the better web tool.
+  control, network interception, and headless browsers. Ghost drives your own
+  browser over CDP (DOM names, selectors, JS eval); Playwright is still the
+  better tool for network interception and headless test suites.
 - **Anthropic Computer Use** — you want a Claude-native agent reasoning over
   screenshots inside a sandboxed VM, across OSes. Strong general vision reasoning;
   it operates the VM's foreground screen (not background) and re-looks to confirm.

@@ -15,9 +15,9 @@ the same on both platforms; only the engine underneath changes.
 Fedora 41.**
 
 CI stands up a real desktop (Xvfb + D-Bus + `at-spi-bus-launcher`) and runs
-**17 live tests against a real GTK application**, on both distros:
+**19 live tests against a real GTK application**, on both distros:
 
-- `crates/ghost-linux/tests/live_atspi.rs` (10) — the engine. Both halves of the
+- `crates/ghost-linux/tests/live_atspi.rs` (12, some X11-only) — the engine. Both halves of the
   wedge: text written through `EditableText` and read back from the application,
   and `Action.DoAction` dismissing a dialog with an *observable* effect rather
   than merely returning `Ok`. Plus window enumeration with real PIDs, role and

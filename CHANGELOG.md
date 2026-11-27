@@ -52,9 +52,9 @@ could still land, or a stop could go unseen, after the stop was raised:
   every Ghost process, and a shell ended that way reports `Stopped` instead of
   `ok: true` with exit code 57005. The job does not end its programs when the
   server exits, so an editor or terminal a command opened survives a restart;
-  start apps that must outlive a stop with `ghost_window op=launch`. The
-  other side of that: after a server restarts, a stop no longer reaches the
-  programs its predecessor's shells started. Windows only; on Linux a stop
+  start apps that must outlive a stop with `ghost_window op=launch`. After
+  a server restarts, a stop reaches its predecessor's shells only through the
+  24-hour snapshot described above. Windows only; on Linux a stop
   still ends the shell but not its children.
 - **`ghost verify` no longer raises and lifts the machine-wide stop.** Its
   stop check used the real emergency stop, which halted every other Ghost

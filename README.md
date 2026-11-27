@@ -796,7 +796,7 @@ is the typed value really present?), never by trusting a tool call's return.
 
 Latest run (see [`bench/results/latest.md`](bench/results/latest.md)):
 
-> **14/14 tasks passed (100%)**, median ~2.7 s per task (full wall-clock incl.
+> **14/14 tasks passed (100%)**, median ~2.9 s per task (full wall-clock incl.
 > app launch) - perception, click/keyboard action+verify, waits, window
 > management (list/minimize/restore), text extraction, disambiguation, flow
 > chaining, clipboard round-trip, structured errors, element screenshots, and
@@ -823,7 +823,7 @@ error rate, whether each action's real effect happened (the display is
 re-observed, never trusted from the return), and latency percentiles.
 
 > Latest (160 acts): **PASS** - verify-null 0.0, focus-loss 0.0, effect-mismatch
-> 0 (100% correct), p50 85ms / p95 117ms. See
+> 0 (100% correct), p50 149ms / p95 155ms. See
 > [`bench/results/soak.md`](bench/results/soak.md).
 
 ```bash

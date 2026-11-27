@@ -107,7 +107,7 @@ repo still needs the binary from the Releases page.
 }
 ```
 
-Works with any MCP client. See the README for the full tool list.
+Works with any MCP client. The server's `tools/list` response is the full tool list.
 
 ## Keeping the installed binary current (auto-update)
 

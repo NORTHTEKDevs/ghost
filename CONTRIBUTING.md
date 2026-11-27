@@ -52,8 +52,8 @@ installed and a C compiler for the target for `ring`; `zig cc` works).
 Releases are cut by pushing a `v*` tag. The `Release` workflow builds Windows
 and Linux binaries, smoke-tests the Linux MCP server against its own protocol,
 and publishes one GitHub release with both archives and their SHA-256 files.
-Keep `crates/ghost-mcp/Cargo.toml`, `server.json` and the CHANGELOG heading on
-the same version.
+Keep `[workspace.package]` in `Cargo.toml`, `server.json`, `plugin.json`,
+`lhm.plugin.json` and the CHANGELOG heading on the same version.
 
 ## Security
 
