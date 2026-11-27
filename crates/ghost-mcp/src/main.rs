@@ -759,6 +759,12 @@ fn tool_class(name: &str, args: &Value) -> Option<ToolClass> {
         // Releasing a held key is part of stopping safely: a stop releases only
         // the modifiers, so a key held with ghost_key_down would stay down.
         "ghost_stop" | "ghost_reset" | "ghost_key_up" => Control,
+        // Closing what Ghost itself created only reduces what it can do. The
+        // session layer checks ownership: while stopped it closes a browser
+        // Ghost launched (and its tabs) and Ghost's hidden desktops, and
+        // refuses a browser Ghost only attached to. The human's own windows
+        // (ghost_window op=state close) stay Act.
+        "ghost_tab_close" | "ghost_browser_close" | "ghost_desktop_close" => Control,
         "ghost_see" | "ghost_find" | "ghost_snapshot" | "ghost_screenshot" | "ghost_screenshot_region"
         | "ghost_query" | "ghost_assert" | "ghost_stats" | "ghost_cache_stats" | "ghost_cache_invalidate"
         | "ghost_event_seq" | "ghost_list_windows" | "ghost_get_clipboard" | "ghost_get_selection"
@@ -795,9 +801,9 @@ fn tool_class(name: &str, args: &Value) -> Option<ToolClass> {
         | "ghost_navigate_and_wait" | "ghost_click_and_wait_for_text" | "ghost_fill_form"
         | "ghost_execute_intent" | "ghost_click_background" | "ghost_click_by_description"
         | "ghost_type_by_description" | "ghost_click_text_local" | "ghost_browser_launch"
-        | "ghost_browser_attach" | "ghost_browser_close" | "ghost_tab_open" | "ghost_tab_close"
+        | "ghost_browser_attach" | "ghost_tab_open"
         | "ghost_tab_navigate" | "ghost_tab_click" | "ghost_tab_type" | "ghost_tab_press" | "ghost_tab_eval"
-        | "ghost_tab_scroll" | "ghost_tab_select_option" | "ghost_desktop_create" | "ghost_desktop_close"
+        | "ghost_tab_scroll" | "ghost_tab_select_option" | "ghost_desktop_create"
         | "ghost_desktop_launch" | "ghost_desktop_click" | "ghost_desktop_scroll" | "ghost_desktop_type"
         | "ghost_desktop_press" | "ghost_desktop_shortcut" => Act,
         _ => return None,
@@ -821,9 +827,11 @@ fn stop_gate(name: &str, args: &Value, stopped: bool) -> std::result::Result<(),
 /// stop active": nothing was stopped, the process fails closed, and the fix is
 /// on the machine, not a reset.
 fn with_stop_reason(name: &str, refusal: String) -> String {
-    match ghost_session::error::stop_event_error() {
-        Some(why) => format!("{name} refused: Ghost is stopped (fail closed) - {why}"),
-        None => refusal,
+    use ghost_session::error::{human_stop_active, stop_event_error, stop_refusal};
+    if stop_event_error().is_some() || human_stop_active() {
+        format!("{name} refused: {}", stop_refusal())
+    } else {
+        refusal
     }
 }
 
@@ -1871,9 +1879,11 @@ async fn handle_tool(
         }
         "ghost_reset" => {
             match StopScope::of(p) {
-                StopScope::Everywhere => session.reset(),
+                // Refused when the human raised the stop: the error names
+                // their ways out (Ctrl+Alt+Shift+G, `ghost reset`).
+                StopScope::Everywhere => session.reset().map_err(|e| e.to_string())?,
                 // Only this server's flag: a stop raised elsewhere (the shared
-                // event) stays in force.
+                // event, a human stop) stays in force.
                 StopScope::Process => {
                     crate::engine::input::hotkey::STOP_FLAG.store(false, std::sync::atomic::Ordering::Release)
                 }
@@ -3642,7 +3652,7 @@ fn lean_tools_schema() -> Value {
           "description": "Grounding + cache telemetry for debugging flow speed/reliability: which tier is winning (cache/UIA/OCR/VLM), VLM escalation rate, cache hit/miss counts, UIA-mirror stats. Call when a flow is slow or a find is unreliable.",
           "inputSchema": { "type": "object", "properties": {} }},
         { "name": "ghost_reset",
-          "description": "Resume automation after a stop you raised yourself with ghost_stop. Clears the stop for every Ghost process. Do not call it to undo a stop the human raised with Ctrl+Alt+G: that stop is theirs to lift.",
+          "description": "Lift a stop raised with ghost_stop, for every Ghost process. A stop the human raised with Ctrl+Alt+G is refused: only the human can lift it, so wait for them.",
           "inputSchema": { "type": "object", "properties": {
             "scope": { "type": "string", "enum": ["everywhere", "process"], "description": "everywhere (default): clears the stop for every Ghost process. process: only this server's own flag; a stop raised elsewhere stays." } } }},
         { "name": "ghost_stop",
@@ -3729,7 +3739,7 @@ fn legacy_tools_schema_full() -> Value {
           "inputSchema": { "type": "object", "properties": {
             "scope": { "type": "string", "enum": ["everywhere", "process"], "description": "everywhere (default): every Ghost process in this logon session. process: only this server (used by ghost verify)." } } }},
         { "name": "ghost_reset",
-          "description": "Resume automation after a stop you raised yourself with ghost_stop. Clears the stop for every Ghost process. Do not call it to undo a stop the human raised with Ctrl+Alt+G: that stop is theirs to lift.",
+          "description": "Lift a stop raised with ghost_stop, for every Ghost process. A stop the human raised with Ctrl+Alt+G is refused: only the human can lift it, so wait for them.",
           "inputSchema": { "type": "object", "properties": {
             "scope": { "type": "string", "enum": ["everywhere", "process"], "description": "everywhere (default): clears the stop for every Ghost process. process: only this server's own flag; a stop raised elsewhere stays." } } }},
         { "name": "ghost_press",
@@ -4118,7 +4128,7 @@ mod stop_gate_tests {
                 assert!(stop_gate(&n, &json!({}), false).is_ok(), "{n} must run when not stopped");
             }
         }
-        assert!(acts >= 50, "only {acts} state-changing tools found");
+        assert!(acts >= 45, "only {acts} state-changing tools found");
     }
 
     #[test]
@@ -4166,6 +4176,18 @@ mod stop_gate_tests {
     fn an_unknown_tool_is_refused_while_stopped() {
         assert_eq!(tool_class("ghost_brand_new_tool", &json!({})), None);
         assert!(stop_gate("ghost_brand_new_tool", &json!({}), true).is_err());
+    }
+
+    /// Closing what Ghost created passes the gate while stopped (the session
+    /// layer then checks ownership); closing the human's windows does not.
+    #[test]
+    fn owned_closes_pass_the_gate_and_window_close_does_not() {
+        for n in ["ghost_tab_close", "ghost_browser_close", "ghost_desktop_close"] {
+            assert_eq!(tool_class(n, &json!({})), Some(ToolClass::Control), "{n}");
+            assert!(stop_gate(n, &json!({}), true).is_ok(), "{n}");
+        }
+        let close = json!({"op": "state", "name": "Notepad", "state": "close"});
+        assert!(stop_gate("ghost_window", &close, true).is_err(), "closing a user window passed the gate");
     }
 
     /// Releasing a held key is part of stopping safely (a stop releases only
@@ -4489,6 +4511,27 @@ mod tests {
 
     /// When the shared stop event cannot be read, the hint must say so -
     /// "wait for the human" would never resolve it.
+    /// A refusal during a human stop says the human resumes and the agent
+    /// waits - and never HOW the human resumes: an agent with a shell of its
+    /// own would use it (audit H1).
+    #[test]
+    fn a_human_stop_refusal_says_wait_without_naming_the_way_out() {
+        let msg = ghost_session::GhostError::HumanStopped.to_string();
+        assert!(msg.contains("only the human can resume") && msg.contains("wait"), "{msg}");
+        for leak in ["Ctrl+Alt+Shift", "ghost reset", "reset"] {
+            assert!(!msg.contains(leak), "the refusal names a way out ({leak}): {msg}");
+        }
+        for schema in [tools_schema(), legacy_tools_schema_full()] {
+            for t in schema.as_array().unwrap() {
+                let d = t["description"].as_str().unwrap_or("");
+                assert!(!d.contains("Ctrl+Alt+Shift") && !d.contains("ghost reset"), "{}: {d}", t["name"]);
+            }
+        }
+        let (code, hint) = classify_error(&format!("ghost_reset failed: {msg}"));
+        assert_eq!(code, -32004);
+        assert!(hint.unwrap().contains("wait for them"));
+    }
+
     #[test]
     fn the_fail_closed_refusal_has_its_own_hint() {
         let (code, hint) = classify_error("ghost_act refused: Ghost is stopped (fail closed) - cannot open the shared emergency-stop event");

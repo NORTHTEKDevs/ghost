@@ -496,7 +496,10 @@ pub fn run(strict_cursor: bool) -> i32 {
         a.claim(
             "emergency stop blocks; reset resumes",
             false,
-            "not checked: an emergency stop is in force on this machine, and verify will not lift it".into(),
+            match ghost_session::error::stop_event_error() {
+                Some(why) => format!("not checked: Ghost cannot read the shared stop event - {why}"),
+                None => "not checked: an emergency stop is in force on this machine, and verify will not lift it".into(),
+            },
         );
     } else {
         let _ = s.call("ghost_stop", json!({"scope": "process"}), &mut pending);

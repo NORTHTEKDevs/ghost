@@ -34,18 +34,54 @@ pub static STOP_FLAG: AtomicBool = AtomicBool::new(false);
 /// waiting process wakes, not just one.
 const STOP_EVENT_NAME: &str = r"Local\ghost-emergency-stop-event";
 
-/// The event this process uses: the shared one, except in this crate's own
-/// unit tests, which use a per-process name. `trigger_stop` there used to
-/// raise the shared event, so every `cargo test` briefly stopped every Ghost
-/// process on the machine, other sessions' servers included.
-#[cfg(not(test))]
-fn stop_event_name() -> String {
-    STOP_EVENT_NAME.to_string()
+/// Raised together with the stop event when the HUMAN stops Ghost (Ctrl+Alt+G).
+/// While it is up, an agent's `ghost_reset` cannot lift the stop: only the
+/// human can (Ctrl+Alt+Shift+G, or `ghost reset` in a terminal).
+const HUMAN_EVENT_NAME: &str = r"Local\ghost-emergency-stop-human";
+
+/// The name this process uses for one of the shared events: the real one,
+/// except
+/// - in this crate's own unit tests, which use a per-process name
+///   (`trigger_stop` there used to raise the shared event, so every
+///   `cargo test` briefly stopped every Ghost process on the machine), and
+/// - in a private build with the `isolated-stop-events` feature, which takes a
+///   namespace from `GHOST_ISOLATED_STOP_NS` so a live test can raise a stop
+///   without stopping the human's running Ghosts. Release builds never enable
+///   the feature: a released binary that honoured the variable would let any
+///   agent with a shell start a Ghost that ignores the human's stop.
+fn event_name(base: &str) -> String {
+    if cfg!(test) {
+        return format!("{base}-test-{}", std::process::id());
+    }
+    match isolated_ns() {
+        Some(ns) => format!("{base}-isolated-{ns}"),
+        None => base.to_string(),
+    }
 }
 
-#[cfg(test)]
+// The private feature must never reach a release build (`--all-features`
+// would otherwise switch it on): private test builds are debug builds.
+#[cfg(all(feature = "isolated-stop-events", not(debug_assertions)))]
+compile_error!("`isolated-stop-events` is for private debug test builds only; never build it in release");
+
+#[cfg(feature = "isolated-stop-events")]
+fn isolated_ns() -> Option<String> {
+    std::env::var("GHOST_ISOLATED_STOP_NS")
+        .ok()
+        .filter(|ns| !ns.is_empty() && ns.len() <= 32 && ns.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
+}
+
+#[cfg(not(feature = "isolated-stop-events"))]
+fn isolated_ns() -> Option<String> {
+    None
+}
+
 fn stop_event_name() -> String {
-    format!("{STOP_EVENT_NAME}-test-{}", std::process::id())
+    event_name(STOP_EVENT_NAME)
+}
+
+fn human_event_name() -> String {
+    event_name(HUMAN_EVENT_NAME)
 }
 
 static REGISTERED: AtomicBool = AtomicBool::new(false);
@@ -58,7 +94,23 @@ static REGISTERED: AtomicBool = AtomicBool::new(false);
 /// force (every CLI command, `ghost-http`, a fresh `ghost-mcp`) acted for up
 /// to a second before it knew (docs/plans/2026-11-26-emergency-stop-audit.md).
 pub fn is_stopped() -> bool {
-    STOP_FLAG.load(Ordering::Acquire) || stop_event_raised()
+    // The human event too: an agent reset lowers only the stop event, so a
+    // human stop must hold on its own even if that reset races the hotkey.
+    STOP_FLAG.load(Ordering::Acquire) || raised(&STOP_EVENT, stop_event_name) || raised(&HUMAN_EVENT, human_event_name)
+}
+
+/// Whether the stop in force is the shared one (raised by `ghost_stop`, the
+/// hotkey, or any other Ghost process) rather than only this process's
+/// `scope: "process"` flag. An unreadable event counts as raised.
+pub fn shared_stop_raised() -> bool {
+    raised(&STOP_EVENT, stop_event_name) || raised(&HUMAN_EVENT, human_event_name)
+}
+
+/// Whether the human raised the stop (Ctrl+Alt+G, in any Ghost process). An
+/// event that cannot be read counts as raised: a human stop cannot be ruled
+/// out, so an agent reset is refused (fail closed).
+pub fn human_stop_active() -> bool {
+    raised(&HUMAN_EVENT, human_event_name)
 }
 
 /// The shared event is signalled - or cannot be read at all. A process that
@@ -66,41 +118,64 @@ pub fn is_stopped() -> bool {
 /// (the Ctrl+Alt+G owner, a `ghost_stop` elsewhere), so it fails closed: it
 /// counts as stopped, and `stop_event_error` says why. A zero-timeout wait
 /// only reads the state.
-fn stop_event_raised() -> bool {
-    match open_stop_event() {
-        Some(ev) => unsafe { WaitForSingleObject(ev.0, 0) == WAIT_OBJECT_0 },
-        None => true,
+fn raised(cell: &'static SharedEvent, name: fn() -> String) -> bool {
+    match open_event(cell, name).as_ref() {
+        Ok(ev) => unsafe { WaitForSingleObject(ev.0, 0) == WAIT_OBJECT_0 },
+        Err(_) => true,
     }
 }
 
-/// Why this process cannot read the shared stop event, when it cannot. While
-/// this is `Some`, every action is refused (fail closed) and `reset_stop`
-/// cannot help: the fix is to end the Ghost process that created the event
-/// with a DACL this user is not in, then restart this one.
+/// Why this process cannot read the shared stop events, when it cannot. While
+/// this is `Some`, every action is refused (fail closed) and a reset cannot
+/// help: the fix is to end the Ghost process that created the event with a
+/// DACL this user is not in, then restart this one.
 pub fn stop_event_error() -> Option<String> {
-    open_stop_event_result().as_ref().err().cloned()
+    open_event(&STOP_EVENT, stop_event_name)
+        .as_ref()
+        .err()
+        .or_else(|| open_event(&HUMAN_EVENT, human_event_name).as_ref().err())
+        .cloned()
 }
 
-/// Trip the stop locally and broadcast it to every other ghost process.
+fn set(cell: &'static SharedEvent, name: fn() -> String, up: bool) {
+    if let Ok(ev) = open_event(cell, name) {
+        unsafe {
+            let _ = if up { SetEvent(ev.0) } else { ResetEvent(ev.0) };
+        }
+    }
+}
+
+/// An agent's stop (`ghost_stop`): trip it locally and broadcast it to every
+/// other ghost process. Any reset lifts it.
 pub fn trigger_stop() {
     STOP_FLAG.store(true, Ordering::Release);
-    if let Some(ev) = open_stop_event() {
-        unsafe {
-            let _ = SetEvent(ev.0);
-        }
-    }
+    set(&STOP_EVENT, stop_event_name, true);
 }
 
-/// Clear the stop so automation can resume. Also lowers the shared event -
-/// otherwise every new ghost process would arrive pre-stopped, and the watchers
-/// would re-trip immediately.
+/// The human's stop (Ctrl+Alt+G): the same broadcast, marked as the human's,
+/// so only the human can lift it (`reset_human_stop`).
+pub fn trigger_human_stop() {
+    STOP_FLAG.store(true, Ordering::Release);
+    set(&HUMAN_EVENT, human_event_name, true);
+    set(&STOP_EVENT, stop_event_name, true);
+}
+
+/// An agent's reset (`ghost_reset`): lowers this process's flag and the stop
+/// event, never the human's mark - so a stop the human raised stays in force
+/// (`is_stopped` reads the human event). Callers check `human_stop_active`
+/// first to tell the agent why. Lowering the event matters: otherwise every new
+/// ghost process would arrive pre-stopped, and the watchers would re-trip.
 pub fn reset_stop() {
     STOP_FLAG.store(false, Ordering::Release);
-    if let Some(ev) = open_stop_event() {
-        unsafe {
-            let _ = ResetEvent(ev.0);
-        }
-    }
+    set(&STOP_EVENT, stop_event_name, false);
+}
+
+/// The human's resume (Ctrl+Alt+Shift+G, or `ghost reset` in a terminal):
+/// lifts any stop, theirs included.
+pub fn reset_human_stop() {
+    STOP_FLAG.store(false, Ordering::Release);
+    set(&HUMAN_EVENT, human_event_name, false);
+    set(&STOP_EVENT, stop_event_name, false);
 }
 
 /// Owned event handle. `CreateEventW` opens the existing event when one exists, so
@@ -123,15 +198,17 @@ unsafe impl Sync for EventHandle {}
 /// destroyed when its last handle closes, so an open-set-close sequence would raise
 /// the event and then immediately destroy it, and no other process would ever see
 /// the signal.
-static STOP_EVENT: std::sync::OnceLock<std::result::Result<EventHandle, String>> = std::sync::OnceLock::new();
+type SharedEvent = std::sync::OnceLock<std::result::Result<EventHandle, String>>;
+static STOP_EVENT: SharedEvent = std::sync::OnceLock::new();
+static HUMAN_EVENT: SharedEvent = std::sync::OnceLock::new();
 
 fn open_stop_event() -> Option<&'static EventHandle> {
-    open_stop_event_result().as_ref().ok()
+    open_event(&STOP_EVENT, stop_event_name).as_ref().ok()
 }
 
-fn open_stop_event_result() -> &'static std::result::Result<EventHandle, String> {
-    STOP_EVENT.get_or_init(|| {
-        let name = stop_event_name();
+fn open_event(cell: &'static SharedEvent, name: fn() -> String) -> &'static std::result::Result<EventHandle, String> {
+    cell.get_or_init(|| {
+        let name = name();
         // An explicit DACL that grants this user: with the default one, an
         // elevated Ghost that creates the event first grants only
         // Administrators and SYSTEM, and every non-elevated Ghost after it
@@ -268,30 +345,99 @@ pub fn register_emergency_stop() -> Result<(), CoreError> {
     std::thread::Builder::new()
         .name("ghost-stop-hotkey".into())
         .spawn(|| unsafe {
-            loop {
-                if RegisterHotKey(None, 1, MOD_CONTROL | MOD_ALT, b'G' as u32).is_ok() {
-                    break;
+            // Ctrl+Alt+G (the human's stop) is a RegisterHotKey hotkey: only
+            // one process can own it, and another Ghost process may and will
+            // broadcast for us; a thread timer retries every 3 s so ownership
+            // migrates here if that process exits. Anything may RAISE a stop.
+            //
+            // Ctrl+Alt+Shift+G (the human's resume) is read by a low-level
+            // keyboard hook instead, which sees whether a key was injected
+            // (SendInput, SendKeys, keybd_event) and ignores it: RegisterHotKey
+            // fires for injected keys too, so any program could have resumed.
+            let mut owned = false;
+            let register = |owned: &mut bool| {
+                if !*owned {
+                    *owned = RegisterHotKey(None, 1, MOD_CONTROL | MOD_ALT, b'G' as u32).is_ok();
                 }
-                // Another ghost process owns it and will broadcast for us. Keep
-                // retrying so ownership migrates here if that process exits.
-                std::thread::sleep(Duration::from_secs(3));
+            };
+            register(&mut owned);
+            let module = windows::Win32::System::LibraryLoader::GetModuleHandleW(None).unwrap_or_default();
+            if SetWindowsHookExW(WH_KEYBOARD_LL, Some(resume_hook), module, 0).is_err() {
+                tracing::warn!(
+                    "the resume key is unavailable here (keyboard hook refused)"
+                );
             }
+            let _ = SetTimer(None, 0, 3_000, None);
             let mut msg = MSG::default();
             loop {
                 let ret = GetMessageW(&mut msg, None, 0, 0);
                 if ret.0 == 0 || ret.0 == -1 {
                     break;
                 }
-                if msg.message == WM_HOTKEY && msg.wParam.0 == 1 {
-                    tracing::warn!("emergency stop triggered (Ctrl+Alt+G)");
-                    trigger_stop();
-                    release_all_modifiers();
+                match (msg.message, msg.wParam.0) {
+                    (WM_TIMER, _) if !owned => register(&mut owned),
+                    (WM_HOTKEY, 1) => {
+                        tracing::warn!("emergency stop raised by the human (Ctrl+Alt+G)");
+                        trigger_human_stop();
+                        release_all_modifiers();
+                    }
+                    _ => {}
                 }
             }
         })
         .map_err(|e| CoreError::ComInit(format!("spawn hotkey thread: {e}")))?;
 
     Ok(())
+}
+
+/// Physical (not injected) state of the resume chord's modifiers, kept by the
+/// keyboard hook from real key events only.
+static PHYS_CTRL: AtomicBool = AtomicBool::new(false);
+static PHYS_ALT: AtomicBool = AtomicBool::new(false);
+static PHYS_SHIFT: AtomicBool = AtomicBool::new(false);
+
+/// The resume chord: G pressed, not injected, while Ctrl, Alt and Shift are
+/// physically down (each tracked from non-injected events).
+fn is_human_resume(vk: u32, injected: bool, ctrl: bool, alt: bool, shift: bool) -> bool {
+    vk == u32::from(b'G') && !injected && ctrl && alt && shift
+}
+
+/// Low-level keyboard hook (installed on the hotkey thread, whose message
+/// loop services it): tracks the physical modifiers and lifts the human's stop
+/// on a real Ctrl+Alt+Shift+G. Never swallows a key.
+unsafe extern "system" fn resume_hook(code: i32, wparam: windows::Win32::Foundation::WPARAM, lparam: windows::Win32::Foundation::LPARAM) -> windows::Win32::Foundation::LRESULT {
+    if code == HC_ACTION as i32 {
+        let k = &*(lparam.0 as *const KBDLLHOOKSTRUCT);
+        let injected = k.flags.0 & LLKHF_INJECTED.0 != 0;
+        let msg = wparam.0 as u32;
+        let down = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
+        let up = msg == WM_KEYUP || msg == WM_SYSKEYUP;
+        if !injected && (down || up) {
+            let flag = match VIRTUAL_KEY(k.vkCode as u16) {
+                VK_CONTROL | VK_LCONTROL | VK_RCONTROL => Some(&PHYS_CTRL),
+                VK_MENU | VK_LMENU | VK_RMENU => Some(&PHYS_ALT),
+                VK_SHIFT | VK_LSHIFT | VK_RSHIFT => Some(&PHYS_SHIFT),
+                _ => None,
+            };
+            if let Some(f) = flag {
+                f.store(down, Ordering::Relaxed);
+            }
+        }
+        if down
+            && is_human_resume(
+                k.vkCode,
+                injected,
+                PHYS_CTRL.load(Ordering::Relaxed),
+                PHYS_ALT.load(Ordering::Relaxed),
+                PHYS_SHIFT.load(Ordering::Relaxed),
+            )
+            && human_stop_active()
+        {
+            tracing::warn!("emergency stop lifted by the human (Ctrl+Alt+Shift+G)");
+            reset_human_stop();
+        }
+    }
+    CallNextHookEx(None, code, wparam, lparam)
 }
 
 /// Send key-up events for all modifier keys so no key stays stuck.
@@ -388,6 +534,70 @@ mod tests {
         assert!(open_stop_event().is_some(), "{:?}", stop_event_error());
         assert!(stop_event_error().is_none());
         assert!(!is_stopped());
+    }
+
+    /// H1: a stop the human raised (Ctrl+Alt+G) survives an agent's reset and
+    /// is lifted only by the human's resume; an agent's own stop is not marked
+    /// as the human's and any reset lifts it.
+    #[test]
+    fn only_the_human_lifts_a_human_stop() {
+        if std::env::var_os(CHILD_ENV).is_none() {
+            return run_in_child("input::hotkey::tests::only_the_human_lifts_a_human_stop");
+        }
+        reset_human_stop();
+        assert!(!is_stopped() && !human_stop_active());
+
+        // The agent's stop: any reset lifts it.
+        trigger_stop();
+        assert!(is_stopped() && !human_stop_active(), "an agent stop is not the human's");
+        reset_stop();
+        assert!(!is_stopped());
+
+        // The human's stop: the agent reset lowers its own flag and the stop
+        // event, and the stop still holds through the human event.
+        trigger_human_stop();
+        assert!(is_stopped() && human_stop_active());
+        reset_stop();
+        assert!(human_stop_active(), "an agent reset lowered the human's mark");
+        assert!(is_stopped(), "an agent reset lifted a human stop");
+
+        // The human's resume lifts it.
+        reset_human_stop();
+        assert!(!is_stopped() && !human_stop_active());
+    }
+
+    /// The resume chord counts only real key presses: an injected G (or a
+    /// chord whose modifiers were injected, so never marked down) does not.
+    #[test]
+    fn only_a_physical_ctrl_alt_shift_g_resumes() {
+        let g = u32::from(b'G');
+        assert!(is_human_resume(g, false, true, true, true));
+        assert!(!is_human_resume(g, true, true, true, true), "an injected G resumed");
+        assert!(!is_human_resume(g, false, true, true, false), "Ctrl+Alt+G (the stop key) resumed");
+        assert!(!is_human_resume(g, false, false, true, true));
+        assert!(!is_human_resume(u32::from(b'H'), false, true, true, true));
+    }
+
+    /// A release build never takes the event names from the environment: a
+    /// binary that did would let any agent start a Ghost that ignores the
+    /// human's stop. (Run in a child with the variable set.)
+    #[test]
+    fn a_default_build_ignores_the_isolated_namespace() {
+        if std::env::var_os(CHILD_ENV).is_none() {
+            let out = std::process::Command::new(std::env::current_exe().expect("test binary"))
+                .args(["input::hotkey::tests::a_default_build_ignores_the_isolated_namespace", "--exact", "--test-threads=1"])
+                .env(CHILD_ENV, "1")
+                .env("GHOST_ISOLATED_STOP_NS", "should-be-ignored")
+                .output()
+                .expect("child");
+            assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stdout));
+            return;
+        }
+        if cfg!(feature = "isolated-stop-events") {
+            assert_eq!(isolated_ns().as_deref(), Some("should-be-ignored"));
+        } else {
+            assert_eq!(isolated_ns(), None, "a default build read GHOST_ISOLATED_STOP_NS");
+        }
     }
 
     fn round_trip() {

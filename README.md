@@ -679,10 +679,29 @@ can still inspect what happened while everything is stopped.
 - **Session-wide since 0.19.** The stop is a named kernel event
   (`Local\ghost-emergency-stop-event`), so one press halts every Ghost process in
   your logon session, not just the one that happened to register the hotkey.
-  `ghost_reset` resumes service, again for all of them.
+- **Only you can lift your stop (0.24.2).** A stop raised with Ctrl+Alt+G is
+  marked as yours. An agent's `ghost_reset` cannot lift it; the agent is told
+  only that you stopped Ghost and to wait for you. You resume with either:
+  - **Ctrl+Alt+Shift+G**, pressed on the keyboard (a key a program injects is
+    ignored), or
+  - **`ghost reset`** in a terminal you type into: it shows a short word and you
+    type it back (a pipe or a script is refused).
+
+  A stop an agent raised itself with `ghost_stop` is lifted by its `ghost_reset`
+  as before. The limit: a program running as your user can still change the
+  named stop event directly; this protects you from an agent acting through
+  Ghost, not from arbitrary code you let it run.
+- While stopped, Ghost may still close what it created itself: tabs and
+  browsers it launched, and its own hidden desktops. It never closes your
+  windows, or tabs in a browser it only attached to.
 - Programs started by `ghost_shell` end with the stop, including whatever a
-  command launched, not just the shell itself (Windows). Start an app that
-  should outlive a stop with `ghost_window op=launch`.
+  command launched, not just the shell itself. Your Ctrl+Alt+G stop also reaches
+  programs started by a Ghost server that has since restarted, for up to 24
+  hours and within the same boot (and only while they are still in a job); an
+  agent's `ghost_stop` does not. Start an app that should outlive a stop with
+  `ghost_window op=launch`. On Linux the stop ends each shell's process group,
+  and the resume key works only where XInput2 can tell a real key from an
+  injected one.
 - A Ghost process that cannot read the shared stop event fails closed: it
   refuses every action and its error says why, rather than missing a stop
   raised elsewhere.

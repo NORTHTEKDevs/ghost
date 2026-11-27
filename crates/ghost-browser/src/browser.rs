@@ -106,8 +106,13 @@ impl Browser {
         self.tab(&target_id).await
     }
 
+    /// Close a tab. While the emergency stop is active, only in a browser
+    /// Ghost launched: a tab of a browser Ghost only attached to is the
+    /// human's, and stays.
     pub async fn close_tab(&self, target_id: &str) -> Result<()> {
-        crate::error::ensure_not_stopped()?;
+        if !self.is_owned() {
+            crate::error::ensure_not_stopped()?;
+        }
         self.cdp
             .call("Target.closeTarget", json!({ "targetId": target_id }), None)
             .await?;

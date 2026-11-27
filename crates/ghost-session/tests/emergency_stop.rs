@@ -43,7 +43,9 @@ async fn session_actions_refuse_while_stopped_and_run_after_reset() {
     refused("desktop_launch", s.desktop_launch("stoptest", "x.exe").await);
     refused("desktop_click", s.desktop_click("stoptest", 0, 1, 1, "left").await);
     refused("desktop_type", s.desktop_type("stoptest", 0, "a").await);
-    refused("desktop_close", s.desktop_close("stoptest").await);
+    // Closing Ghost's own hidden desktop is allowed while stopped (it only
+    // ends what Ghost started); here none is registered, so the lookup fails.
+    not_refused("desktop_close (Ghost's own desktop)", s.desktop_close("stoptest").await);
     refused("browser_launch", s.browser_launch_with("stoptest", "headless", None).await);
     refused("tab_open", s.tab_open("stoptest", "about:blank").await);
     refused("set_focus_policy foreground", s.set_focus_policy("foreground"));

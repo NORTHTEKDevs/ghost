@@ -57,6 +57,9 @@ struct ShellSession {
     pending: Option<u64>,
     created: Instant,
     pid: Option<u32>,
+    /// The stop generation when this shell started: if a stop ended shells
+    /// since, this one was among them (see `ended_by_stop`).
+    born_gen: u64,
 }
 
 /// Registry of persistent sessions, held in a Mutex on GhostSession.
@@ -136,37 +139,127 @@ fn no_console_window(command: &mut Command) {
     }
 }
 
-/// Everything a shell starts lives in one job per Ghost process, and the
-/// emergency stop ends that whole job - not just the shell process: a
-/// command's own children (a script driving the desktop, a build) used to keep
-/// running after the stop killed the shell above them. Covers one-shot
-/// commands, persistent sessions (including a command left running by
-/// `op=send`) and the warm spare, whichever Ghost process raised the stop.
+/// Everything a shell starts ends with the emergency stop - not just the
+/// shell process: a command's own children (a script driving the desktop, a
+/// build) used to keep running after the stop killed the shell above them.
+/// Covers one-shot commands, persistent sessions (including a command left
+/// running by `op=send`) and the warm spare, whichever Ghost process raised the
+/// stop.
 ///
-/// Not kill-on-close: a program a command opened (an editor, a terminal) is
-/// the human's from then on and must survive this server exiting or
-/// restarting. Only the stop ends it; apps meant to outlive a stop are
-/// started with `ghost_window op=launch`, which is not in this job.
-#[cfg(windows)]
-mod stop_job {
-    use ghost_browser::launch::job::Job;
-    use std::sync::OnceLock;
+/// Windows: each Ghost process puts its shells in one named job and lists the
+/// name in a per-user directory. A shared stop (`ghost_stop`, Ctrl+Alt+G, any
+/// other Ghost) ends every listed job that still has processes - including the
+/// jobs of a server that has since exited or restarted, whose programs would
+/// otherwise outlive every later stop. A `scope: "process"` stop ends only this
+/// server's job. The job is not kill-on-close: a program a command opened (an
+/// editor, a terminal) is the human's from then on and must survive this
+/// server exiting; only a stop ends it. Apps meant to outlive a stop are
+/// started with `ghost_window op=launch`, which is not in any shell job.
+///
+/// Linux: each shell starts in its own process group, and the stop kills each
+/// group this process started.
+mod stop_kill {
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::Duration;
 
-    static JOB: OnceLock<Option<Job>> = OnceLock::new();
+    /// Bumped each time a stop ends shells. A shell that dies while this
+    /// differs from its birth value was ended by a stop; one that exits on its
+    /// own (even with exit code 57005) was not.
+    static STOP_GEN: AtomicU64 = AtomicU64::new(0);
+
+    pub(crate) fn generation() -> u64 {
+        STOP_GEN.load(Ordering::Acquire)
+    }
+
+    /// When the watcher ends shells: the stop rose, or a human stop rose on
+    /// top of an agent's stop that was already up (it reaches further).
+    pub(crate) fn stop_edge(now: bool, was: bool, human: bool, was_human: bool) -> bool {
+        (now && !was) || (human && !was_human)
+    }
+
+    /// Start the watcher once: on each rise of the stop, end shells.
+    pub(super) fn ensure_watcher() {
+        static STARTED: std::sync::Once = std::sync::Once::new();
+        STARTED.call_once(|| {
+            let _ = std::thread::Builder::new().name("ghost-shell-stop".into()).spawn(|| {
+                let (mut was, mut was_human) = (false, false);
+                let mut tick = 0u32;
+                loop {
+                    let now = crate::error::is_stopped();
+                    // A human stop raised on top of an agent's stop is a new
+                    // edge too: it reaches further (dead servers' programs).
+                    let human = now && crate::error::human_stop_active();
+                    if stop_edge(now, was, human, was_human) {
+                        STOP_GEN.fetch_add(1, Ordering::AcqRel);
+                        super::platform::end_on_stop();
+                    }
+                    was = now;
+                    was_human = human;
+                    tick = tick.wrapping_add(1);
+                    #[cfg(windows)]
+                    if tick.is_multiple_of(20) {
+                        super::platform::snapshot();
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            });
+        });
+    }
+}
+
+#[cfg(windows)]
+mod platform {
+    use ghost_browser::launch::job::Job;
+    use std::path::{Path, PathBuf};
+    use std::sync::OnceLock;
+
+    /// This process's job, and its name (`ghost-shell-job-<pid>-<ms>`).
+    static JOB: OnceLock<Option<(Job, String)>> = OnceLock::new();
+
+    const PREFIX: &str = "ghost-shell-job-";
+
+    /// Where shell jobs are listed: one file per Ghost process, named after
+    /// its job and holding a snapshot of the job's members (`pid creation-time`
+    /// per line). A named job leaves the namespace when its creator's last
+    /// handle closes - processes in it hold references, not handles - so once
+    /// that server has exited its job can no longer be opened by name: the
+    /// snapshot is how a later stop still finds what it started.
+    pub(super) fn jobs_dir() -> PathBuf {
+        #[cfg(test)]
+        if let Some(d) = std::env::var_os("GHOST_TEST_SHELL_JOBS_DIR") {
+            return PathBuf::from(d);
+        }
+        std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir)
+            .join("Ghost")
+            .join("shell-jobs")
+    }
 
     fn job() -> Option<&'static Job> {
-        JOB.get_or_init(|| match Job::new_terminable() {
-            Ok(j) => {
-                watch_for_stop();
-                Some(j)
-            }
-            Err(e) => {
-                tracing::warn!("shell job unavailable ({e}); a stop ends shells but not their children");
-                None
+        JOB.get_or_init(|| {
+            let ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0);
+            let name = format!("{PREFIX}{}-{ms}", std::process::id());
+            match Job::new_terminable_named(&name) {
+                Ok(j) => {
+                    let dir = jobs_dir();
+                    if let Err(e) = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(dir.join(&name), b"")) {
+                        tracing::warn!("could not list the shell job ({e}); a stop after a restart will not reach it");
+                    }
+                    super::stop_kill::ensure_watcher();
+                    Some((j, name))
+                }
+                Err(e) => {
+                    tracing::warn!("shell job unavailable ({e}); a stop ends shells but not their children");
+                    None
+                }
             }
         })
         .as_ref()
+        .map(|(j, _)| j)
     }
 
     /// Put a just-started shell in the job; its children join it as they start.
@@ -178,40 +271,292 @@ mod stop_job {
         }
     }
 
-    /// On each rise of the stop (local, the hotkey, or another process through
-    /// the shared event), end everything in the job.
-    fn watch_for_stop() {
-        let _ = std::thread::Builder::new().name("ghost-shell-stop".into()).spawn(|| {
-            let mut was = false;
-            loop {
-                let now = crate::error::is_stopped();
-                if now && !was {
-                    if let Some(job) = JOB.get().and_then(|j| j.as_ref()) {
-                        let _ = job.terminate(crate::engine::process::manager::KILLED_EXIT_CODE);
+    /// Creation time of a process (FILETIME ticks), to tell it from a later
+    /// process that reused its id.
+    pub(super) fn creation_time(pid: u32) -> Option<u64> {
+        use windows::Win32::Foundation::{CloseHandle, FILETIME};
+        use windows::Win32::System::Threading::{GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+        unsafe {
+            let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+            let (mut c, mut e, mut k, mut u) = (FILETIME::default(), FILETIME::default(), FILETIME::default(), FILETIME::default());
+            let ok = GetProcessTimes(h, &mut c, &mut e, &mut k, &mut u).is_ok();
+            let _ = CloseHandle(h);
+            ok.then_some(((c.dwHighDateTime as u64) << 32) | c.dwLowDateTime as u64)
+        }
+    }
+
+    /// Write this job's members to its file, when they changed since the
+    /// last write. Called by the stop watcher about once a second.
+    pub(super) fn snapshot() {
+        static LAST: std::sync::Mutex<Vec<u32>> = std::sync::Mutex::new(Vec::new());
+        let Some((job, name)) = JOB.get().and_then(|j| j.as_ref()) else { return };
+        let mut ids = job.process_ids();
+        ids.sort_unstable();
+        let mut last = LAST.lock().unwrap();
+        if *last == ids {
+            return;
+        }
+        let mut text = snapshot_header(now_ms(), boot_ms());
+        text.extend(ids.iter().filter_map(|&pid| creation_time(pid).map(|t| format!("{pid} {t}\n"))));
+        if std::fs::write(jobs_dir().join(name), text).is_ok() {
+            *last = ids;
+        }
+    }
+
+    /// A snapshot is trusted for 24 hours and within one boot. Past that, a
+    /// program a shell once started has long been the human's (and the file
+    /// is stale either way), so a stop leaves it alone and the file is dropped.
+    const SNAPSHOT_TTL_MS: u64 = 24 * 60 * 60 * 1000;
+
+    pub(super) fn now_ms() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0)
+    }
+
+    /// When this machine booted (wall clock ms), from the uptime.
+    pub(super) fn boot_ms() -> u64 {
+        now_ms().saturating_sub(unsafe { windows::Win32::System::SystemInformation::GetTickCount64() })
+    }
+
+    pub(super) fn snapshot_header(written_ms: u64, boot_ms: u64) -> String {
+        format!("ghost-shell-snapshot v1 written={written_ms} boot={boot_ms}\n")
+    }
+
+    /// Whether a snapshot written at `written_ms` in the boot that started at
+    /// `boot_ms` may still be acted on now. Boot times are compared with a
+    /// minute's slack (they are derived from the clock and the uptime).
+    pub(super) fn snapshot_fresh(written_ms: u64, file_boot_ms: u64, now: u64, boot_now: u64) -> bool {
+        now.saturating_sub(written_ms) <= SNAPSHOT_TTL_MS && file_boot_ms.abs_diff(boot_now) <= 60_000
+    }
+
+    /// Whether a process is in any job object. A program a Ghost shell
+    /// started is (in that shell's job); an app the human opened from the
+    /// desktop is normally not - so a forged or stale line naming one of
+    /// those is not acted on.
+    fn in_a_job(pid: u32) -> bool {
+        use windows::Win32::Foundation::{CloseHandle, BOOL};
+        use windows::Win32::System::JobObjects::IsProcessInJob;
+        use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+        unsafe {
+            let Ok(h) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else { return false };
+            let mut inside = BOOL(0);
+            let ok = IsProcessInJob(h, None, &mut inside).is_ok();
+            let _ = CloseHandle(h);
+            ok && inside.as_bool()
+        }
+    }
+
+    /// End the processes a dead server's snapshot lists, each only if the
+    /// snapshot is fresh (under 24 h, this boot) and the process is still the
+    /// same one (same id AND creation time) and still inside a job. True if
+    /// any listed process was ended; false drops the file.
+    fn end_snapshot(file: &Path, code: u32) -> bool {
+        use windows::Win32::Foundation::CloseHandle;
+        use windows::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+        let Ok(text) = std::fs::read_to_string(file) else { return false };
+        let mut lines = text.lines();
+        let header = lines.next().unwrap_or("");
+        let field = |k: &str| {
+            header
+                .split_whitespace()
+                .find_map(|f| f.strip_prefix(k))
+                .and_then(|v| v.parse::<u64>().ok())
+        };
+        let (Some(written), Some(boot)) = (field("written="), field("boot=")) else { return false };
+        if !header.starts_with("ghost-shell-snapshot v1 ") || !snapshot_fresh(written, boot, now_ms(), boot_ms()) {
+            return false;
+        }
+        let mut any = false;
+        for line in lines {
+            let mut it = line.split_whitespace();
+            let (Some(Ok(pid)), Some(Ok(born))) = (it.next().map(str::parse::<u32>), it.next().map(str::parse::<u64>)) else {
+                continue;
+            };
+            if creation_time(pid) != Some(born) {
+                continue; // exited, or the id now belongs to someone else
+            }
+            if !in_a_job(pid) {
+                continue;
+            }
+            any = true;
+            unsafe {
+                if let Ok(h) = OpenProcess(PROCESS_TERMINATE, false, pid) {
+                    let _ = TerminateProcess(h, code);
+                    let _ = CloseHandle(h);
+                }
+            }
+        }
+        any
+    }
+
+    pub(super) fn end_on_stop() {
+        let code = crate::engine::process::manager::KILLED_EXIT_CODE;
+        // Programs a now-dead server's shells started (from its snapshot) only
+        // for the HUMAN's stop: an agent's ghost_stop must not end, say, an
+        // editor another session opened this morning.
+        if crate::engine::input::hotkey::human_stop_active() {
+            end_all_listed(&jobs_dir(), code);
+        } else if crate::engine::input::hotkey::shared_stop_raised() {
+            end_live_listed(&jobs_dir(), code);
+        }
+        // This server's own job, in every case (a `scope: "process"` stop
+        // reaches only this one).
+        if let Some((job, _)) = JOB.get().and_then(|j| j.as_ref()) {
+            let _ = job.terminate(code);
+        }
+    }
+
+    /// End the listed jobs of servers that are still running (by name).
+    pub(super) fn end_live_listed(dir: &Path, code: u32) {
+        let own = JOB.get().and_then(|j| j.as_ref()).map(|(_, n)| n.as_str());
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with(PREFIX) && Some(name.as_str()) != own {
+                if let Ok(job) = Job::open_named(&name) {
+                    let _ = job.terminate(code);
+                }
+            }
+        }
+    }
+
+    /// End every listed job: a live server's by name, a dead server's from its
+    /// snapshot. A dead server's file is dropped once nothing it lists runs.
+    pub(super) fn end_all_listed(dir: &Path, code: u32) {
+        let own = JOB.get().and_then(|j| j.as_ref()).map(|(_, n)| n.as_str());
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let well_formed = name
+                .strip_prefix(PREFIX)
+                .is_some_and(|rest| !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit() || c == '-'));
+            if !well_formed {
+                continue;
+            }
+            if Some(name.as_str()) == own {
+                continue; // ended directly by end_on_stop
+            }
+            match Job::open_named(&name) {
+                // Its server is alive: end the whole job.
+                Ok(job) => {
+                    let _ = job.terminate(code);
+                }
+                // Its server is gone: end what its snapshot lists, and forget
+                // it once nothing listed is left.
+                Err(_) => {
+                    if !end_snapshot(&entry.path(), code) {
+                        let _ = std::fs::remove_file(entry.path());
                     }
                 }
-                was = now;
-                std::thread::sleep(Duration::from_millis(50));
             }
-        });
+        }
     }
 }
 
-#[cfg(windows)]
-use stop_job::confine;
-#[cfg(not(windows))]
-fn confine(_pid: Option<u32>) {}
+#[cfg(unix)]
+mod platform {
+    use std::sync::Mutex;
 
-/// The shell ended because the emergency stop ended its job, not because the
-/// command finished: report the stop, never a normal exit. (The job kill can
-/// land before the read loop's own stop poll, closing the pipes as if the
-/// command had simply ended - `ok: true`, exit code 57005.)
-fn killed_by_stop(status: Option<std::process::ExitStatus>) -> bool {
-    #[cfg(windows)]
-    let killed = status.and_then(|s| s.code()) == Some(crate::engine::process::manager::KILLED_EXIT_CODE as i32);
-    #[cfg(not(windows))]
-    let killed = { let _ = status; false };
-    killed || crate::error::is_stopped()
+    /// Process groups of the shells this process started (a shell is its
+    /// group's leader, so the group id is its pid), with the leader's start
+    /// time.
+    static GROUPS: Mutex<Vec<(u32, u64)>> = Mutex::new(Vec::new());
+
+    /// A process's start time (clock ticks since boot, /proc/<pid>/stat field
+    /// 22), to tell a group's leader from a later process that reused its id.
+    pub(super) fn start_time(pid: u32) -> Option<u64> {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        // Fields after the command name, which is in parentheses and may hold spaces.
+        let rest = stat.rsplit_once(')')?.1;
+        rest.split_whitespace().nth(19)?.parse().ok()
+    }
+
+    pub(super) fn confine(pid: Option<u32>) {
+        if let Some(pid) = pid {
+            if let Some(t) = start_time(pid) {
+                GROUPS.lock().unwrap().push((pid, t));
+            }
+            super::stop_kill::ensure_watcher();
+        }
+    }
+
+    /// Whether a group id may still be signalled: its leader is still the
+    /// process Ghost started, or the leader has exited (a group id cannot be
+    /// handed to a new process while the old group has members). A process
+    /// with that id but a different start time means the id was reused.
+    pub(super) fn group_still_ours(pgid: u32, leader_start: u64) -> bool {
+        match start_time(pgid) {
+            Some(t) => t == leader_start,
+            // The leader exited: signal only while the group still has a
+            // member that started after the leader (what the shell's command
+            // started). An empty group is left alone - its id may already be
+            // someone else's. One case cannot be told apart here: the id was
+            // reused by a new group leader that then exited too while its own
+            // group lives on, all between two stops (rare; documented).
+            None => group_members_since(pgid, leader_start),
+        }
+    }
+
+    /// Whether some process in group `pgid` started at or after `since`.
+    fn group_members_since(pgid: u32, since: u64) -> bool {
+        let Ok(dir) = std::fs::read_dir("/proc") else { return false };
+        dir.flatten().any(|e| {
+            let name = e.file_name();
+            let Some(pid) = name.to_str().and_then(|n| n.parse::<u32>().ok()) else { return false };
+            let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else { return false };
+            let Some(rest) = stat.rsplit_once(')').map(|r| r.1) else { return false };
+            let f: Vec<&str> = rest.split_whitespace().collect();
+            f.get(2).and_then(|g| g.parse::<u32>().ok()) == Some(pgid)
+                && f.get(19).and_then(|t| t.parse::<u64>().ok()).is_some_and(|t| t >= since)
+        })
+    }
+
+    /// Kill every group this process started that is still ours, then forget
+    /// them all.
+    pub(super) fn end_on_stop() {
+        let groups: Vec<(u32, u64)> = std::mem::take(&mut *GROUPS.lock().unwrap());
+        for (pgid, leader_start) in groups {
+            if !group_still_ours(pgid, leader_start) {
+                continue;
+            }
+            let _ = std::process::Command::new("kill")
+                .args(["-KILL", "--", &format!("-{pgid}")])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+        }
+    }
+}
+
+use platform::confine;
+
+/// Start a shell in its own process group (Linux), so the stop can end the
+/// group: the shell and everything its command started.
+fn in_own_group(command: &mut Command) {
+    #[cfg(unix)]
+    command.process_group(0);
+    #[cfg(not(unix))]
+    let _ = command;
+}
+
+/// Whether a shell that ended did so because the stop ended it: a stop has
+/// ended shells since this one started (`born_gen`). Not the exit code alone -
+/// a command may `exit 57005` itself.
+fn ended_by_stop(born_gen: u64) -> bool {
+    stop_kill::generation() != born_gen
+}
+
+/// The error for a shell the stop ended: the stop itself while it is still in
+/// force; once lifted, say what happened rather than claim a stop that is no
+/// longer active.
+fn ended_by_stop_error() -> GhostError {
+    if crate::error::is_stopped() {
+        GhostError::Stopped
+    } else {
+        GhostError::Config("this shell was ended by an emergency stop (since lifted); start a new one".into())
+    }
 }
 
 /// Start one persistent driver process (PowerShell here, bash on Linux).
@@ -239,7 +584,9 @@ fn spawn_driver(cwd: Option<&str>) -> Result<ShellSession> {
         .stderr(Stdio::null())
         .kill_on_drop(true);
     no_console_window(&mut command);
+    in_own_group(&mut command);
 
+    let born_gen = stop_kill::generation();
     let mut child = command
         .spawn()
         .map_err(|e| GhostError::Config(format!("failed to start persistent shell: {e}")))?;
@@ -256,6 +603,7 @@ fn spawn_driver(cwd: Option<&str>) -> Result<ShellSession> {
         pending: None,
         created: Instant::now(),
         pid,
+        born_gen,
     })
 }
 
@@ -418,7 +766,9 @@ impl GhostSession {
             .stderr(Stdio::piped())
             .kill_on_drop(true);
 
+        in_own_group(&mut command);
         let started = Instant::now();
+        let born_gen = stop_kill::generation();
         let mut child = command
             .spawn()
             .map_err(|e| GhostError::Config(format!("failed to spawn {shell}: {e}")))?;
@@ -445,8 +795,11 @@ impl GhostSession {
         }
         let status = child.wait().await.ok();
 
-        if stopped || killed_by_stop(status) {
+        if stopped {
             return Err(GhostError::Stopped);
+        }
+        if ended_by_stop(born_gen) {
+            return Err(ended_by_stop_error());
         }
 
         let mut merged = String::from_utf8_lossy(&obuf).into_owned();
@@ -533,8 +886,8 @@ impl GhostSession {
                 // The command ended the shell itself (`exit N`): the process exit
                 // status is the command's exit code, exactly as in the one-shot path.
                 let status = sess.child.wait().await.ok();
-                if killed_by_stop(status) {
-                    return Err(GhostError::Stopped);
+                if ended_by_stop(sess.born_gen) {
+                    return Err(ended_by_stop_error());
                 }
                 let (output, truncated) = cap_output(output);
                 Ok(json!({
@@ -680,8 +1033,8 @@ impl GhostSession {
             ReadOutcome::Eof { output } => {
                 // Driver process exited unexpectedly. Drop the dead session.
                 let _ = sess.child.start_kill();
-                if killed_by_stop(sess.child.try_wait().ok().flatten()) {
-                    return Err(GhostError::Stopped);
+                if ended_by_stop(sess.born_gen) {
+                    return Err(ended_by_stop_error());
                 }
                 let (output, _) = cap_output(output);
                 Err(GhostError::Config(format!(
@@ -692,7 +1045,10 @@ impl GhostSession {
     }
 
     fn shell_list(&self) -> Value {
-        let reg = self.shells.lock().unwrap();
+        let mut reg = self.shells.lock().unwrap();
+        // A session whose shell has exited (a stop ended it, or it crashed) is
+        // dead: forget it rather than list it as usable.
+        reg.sessions.retain(|_, s| matches!(s.child.try_wait(), Ok(None)));
         let sessions: Vec<Value> = reg
             .sessions
             .iter()
@@ -1037,5 +1393,198 @@ mod warm_tests {
                 "a warm command should not cost a process start: {elapsed:?}"
             );
         });
+    }
+}
+
+#[cfg(test)]
+mod stop_reach_tests {
+    use super::*;
+
+    /// A shell ended without a stop - even one that exits with the stop's own
+    /// exit code - is not reported as ended by a stop.
+    /// The watcher acts when the stop rises, and again when the human raises
+    /// a stop on top of an agent's (dead servers' programs are only reached
+    /// by the human's stop) - not on every tick while stopped.
+    #[test]
+    fn the_watcher_acts_on_a_stop_and_on_a_human_stop_on_top() {
+        use stop_kill::stop_edge;
+        assert!(stop_edge(true, false, false, false), "an agent stop rose");
+        assert!(stop_edge(true, true, true, false), "the human stopped on top of it");
+        assert!(!stop_edge(true, true, true, true), "still stopped: no new edge");
+        assert!(!stop_edge(true, true, false, false));
+        assert!(!stop_edge(false, true, false, true), "lifted");
+    }
+
+    #[test]
+    fn only_a_stop_generation_change_counts_as_ended_by_stop() {
+        let born = stop_kill::generation();
+        assert!(!ended_by_stop(born), "no stop since birth");
+        assert!(ended_by_stop(born.wrapping_sub(1)), "a stop happened since birth");
+    }
+
+    /// Set in the child copy of this test binary that plays the old server.
+    #[cfg(windows)]
+    const OLD_SERVER_ENV: &str = "GHOST_TEST_OLD_SHELL_SERVER";
+
+    /// (a) A stop after a server restart still reaches what the old server's
+    /// shells started. The child plays the old server: it puts a `ping` in its
+    /// named shell job, lists it, and exits. This process plays the new server
+    /// and ends the listed jobs, as a shared stop does.
+    #[cfg(windows)]
+    #[test]
+    fn a_stop_after_a_restart_reaches_the_old_servers_shell_children() {
+        use std::io::BufRead;
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        if std::env::var_os(OLD_SERVER_ENV).is_some() {
+            let ping = std::process::Command::new("ping")
+                .args(["-n", "30", "127.0.0.1"])
+                .stdout(std::process::Stdio::null())
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn()
+                .expect("spawn ping");
+            platform::confine(Some(ping.id()));
+            platform::snapshot(); // the watcher does this within a second
+            println!("PING {}", ping.id());
+            use std::io::Write;
+            let _ = std::io::stdout().flush();
+            std::process::exit(0); // the old server is gone; ping is not
+        }
+        let dir = std::env::temp_dir().join(format!("ghost-test-shell-jobs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["shell::stop_reach_tests::a_stop_after_a_restart_reaches_the_old_servers_shell_children", "--exact", "--nocapture", "--test-threads=1"])
+            .env(OLD_SERVER_ENV, "1")
+            .env("GHOST_TEST_SHELL_JOBS_DIR", &dir)
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("old server");
+        let ping: u32 = std::io::BufReader::new(child.stdout.take().unwrap())
+            .lines()
+            .map_while(std::result::Result::ok)
+            .find_map(|l| l.split("PING ").nth(1).and_then(|p| p.trim().parse().ok()))
+            .expect("the old server reported its ping");
+        let _ = child.wait();
+        let alive = |pid: u32| {
+            std::process::Command::new("tasklist")
+                .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+                .output()
+                .map(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()))
+                .unwrap_or(false)
+        };
+        assert!(alive(ping), "ping should outlive the old server (the job is not kill-on-close)");
+
+        platform::end_all_listed(&dir, 7);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while alive(ping) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        let survived = alive(ping);
+        if survived {
+            let _ = crate::engine::process::kill(ping);
+        }
+        let listed_after = std::fs::read_dir(&dir).map(|d| d.count()).unwrap_or(0);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(!survived, "the stop did not reach the old server's shell child (ping {ping})");
+        assert_eq!(listed_after, 1, "listed until a later stop finds nothing of it running");
+    }
+
+    /// A snapshot is acted on only within 24 hours and the same boot.
+    #[cfg(windows)]
+    #[test]
+    fn snapshots_expire_after_a_day_and_at_reboot() {
+        let (now, boot) = (100 * 86_400_000u64, 99 * 86_400_000u64);
+        assert!(platform::snapshot_fresh(now - 1_000, boot, now, boot));
+        assert!(platform::snapshot_fresh(now - 86_400_000, boot, now, boot + 30_000), "boot slack");
+        assert!(!platform::snapshot_fresh(now - 86_400_001, boot, now, boot), "older than a day");
+        assert!(!platform::snapshot_fresh(now - 1_000, boot - 3_600_000, now, boot), "another boot");
+    }
+
+    /// An expired snapshot that still lists a live process in a job: a stop
+    /// leaves the process alone and drops the file.
+    #[cfg(windows)]
+    #[test]
+    fn an_expired_snapshot_kills_nothing_and_is_dropped() {
+        use std::os::windows::process::CommandExt;
+        let mut ping = std::process::Command::new("ping")
+            .args(["-n", "30", "127.0.0.1"])
+            .stdout(std::process::Stdio::null())
+            .creation_flags(0x0800_0000)
+            .spawn()
+            .expect("ping");
+        let job = ghost_browser::launch::job::Job::new_terminable().expect("job");
+        job.adopt(ping.id()).expect("adopt");
+        let dir = std::env::temp_dir().join(format!("ghost-test-expired-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let born = platform::creation_time(ping.id()).expect("creation time");
+        let old = platform::now_ms() - 2 * 86_400_000;
+        let text = platform::snapshot_header(old, platform::boot_ms()) + &format!("{} {born}\n", ping.id());
+        std::fs::write(dir.join("ghost-shell-job-1-1"), text).unwrap();
+        platform::end_all_listed(&dir, 7);
+        std::thread::sleep(Duration::from_millis(300));
+        let survived = ping.try_wait().unwrap().is_none();
+        let left = std::fs::read_dir(&dir).map(|d| d.count()).unwrap_or(0);
+        let _ = ping.kill();
+        let _ = ping.wait();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(survived, "an expired snapshot ended a process");
+        assert_eq!(left, 0, "the expired snapshot was not dropped");
+    }
+
+    /// (b) Linux: the stop kills the shell's whole process group, so what a
+    /// command started (here `sleep`, started by bash) ends with it.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_stop_kills_the_shells_process_group_on_linux() {
+        use std::os::unix::process::CommandExt;
+        let mut bash = std::process::Command::new("bash")
+            .args(["-c", "sleep 37 & wait"])
+            .process_group(0)
+            .spawn()
+            .expect("bash");
+        let pgid = bash.id();
+        platform::confine(Some(pgid));
+        std::thread::sleep(Duration::from_millis(300));
+        // The sleep in that group.
+        let in_group = |pid: &str| {
+            std::fs::read_to_string(format!("/proc/{pid}/stat"))
+                .ok()
+                .map(|st| {
+                    let rest = st.rsplit(')').next().unwrap_or("").to_string();
+                    let f: Vec<&str> = rest.split_whitespace().collect();
+                    (f.first().copied() != Some("Z")) && f.get(2).copied() == Some(pgid.to_string().as_str())
+                })
+                .unwrap_or(false)
+        };
+        let members = || -> Vec<String> {
+            std::fs::read_dir("/proc")
+                .map(|d| {
+                    d.flatten()
+                        .map(|e| e.file_name().to_string_lossy().into_owned())
+                        .filter(|n| n.chars().all(|c| c.is_ascii_digit()) && in_group(n))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        assert!(members().len() >= 2, "bash and its sleep should be in the group: {:?}", members());
+        platform::end_on_stop();
+        let _ = bash.wait();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while !members().is_empty() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(members().is_empty(), "the stop left the group alive: {:?}", members());
+    }
+
+    /// Linux: a group whose leader id now belongs to a different process (the
+    /// id was reused) is never signalled.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_reused_group_id_is_not_signalled() {
+        let me = std::process::id();
+        let mine = platform::start_time(me).expect("own start time");
+        assert!(platform::group_still_ours(me, mine), "the same process");
+        assert!(!platform::group_still_ours(me, mine + 1), "a different process under the same id");
+        assert!(!platform::group_still_ours(u32::MAX - 7, 1), "no leader and no member: not ours");
     }
 }

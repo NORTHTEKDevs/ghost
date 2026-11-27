@@ -92,4 +92,54 @@ async fn a_stop_ends_the_programs_a_shell_command_started() {
 
     assert!(matches!(r, Err(GhostError::Stopped)), "the command was not stopped: {r:?}");
     assert!(!survived, "ping (pid {ping}), started by the stopped shell command, kept running");
+
+    // ---- A persistent session: a command left running by op=send ends with
+    // the stop, the session says so accurately, and the dead session is not
+    // listed as usable.
+    let opened = s.shell(&json!({"op": "open", "id": "stoptest"})).await.expect("open");
+    assert_eq!(opened["id"], "stoptest", "{opened}");
+    let sent = s
+        .shell(&json!({"op": "send", "id": "stoptest", "cmd": "ping -n 37 127.0.0.1 | Out-Null", "timeout_ms": 300}))
+        .await
+        .expect("send");
+    assert_eq!(sent["busy"], true, "the command should still be running: {sent}");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let ping = loop {
+        if let Some(pid) = our_grandchild_ping() {
+            break pid;
+        }
+        assert!(Instant::now() < deadline, "the session never started ping");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    STOP_FLAG.store(true, Ordering::Release);
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while alive(ping) && Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let survived = alive(ping);
+    STOP_FLAG.store(false, Ordering::Release);
+    if survived {
+        let _ = ghost_core::process::kill(ping);
+    }
+    assert!(!survived, "ping (pid {ping}) from a persistent session kept running after the stop");
+    // Read after the stop was lifted: say what happened, not "stop active".
+    let read_after = s.shell(&json!({"op": "read", "id": "stoptest", "timeout_ms": 2000})).await;
+    let text = format!("{read_after:?}");
+    assert!(
+        read_after.is_err() && text.contains("ended by an emergency stop (since lifted)"),
+        "reading the session the stop ended, after reset: {text}"
+    );
+    let listed = s.shell(&json!({"op": "list"})).await.expect("list");
+    assert!(
+        !listed["sessions"].as_array().unwrap().iter().any(|x| x["id"] == "stoptest"),
+        "a session the stop ended is still listed: {listed}"
+    );
+
+    // ---- A command that exits with the stop's own exit code, with no stop,
+    // is a normal exit, not a stop.
+    let r = s
+        .shell(&json!({"op": "run", "shell": "cmd", "cmd": "exit 57005", "timeout_ms": 10000}))
+        .await
+        .expect("exit 57005 is a normal exit");
+    assert_eq!(r["exit_code"], 57005, "{r}");
 }

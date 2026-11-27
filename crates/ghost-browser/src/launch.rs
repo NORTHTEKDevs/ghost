@@ -278,6 +278,29 @@ pub mod job {
             }
         }
 
+        /// A named terminable job (`Local\<name>`), so a later Ghost process
+        /// can open it by name and end it: a job lives as long as any process
+        /// is in it, even after the process that created it has exited.
+        pub fn new_terminable_named(name: &str) -> Result<Self, String> {
+            unsafe {
+                CreateJobObjectW(None, &windows::core::HSTRING::from(format!("Local\\{name}")))
+                    .map(Job)
+                    .map_err(|e| e.to_string())
+            }
+        }
+
+        /// Open a named job to end it. Fails once every process in it has
+        /// exited (the job, and its name, are gone).
+        pub fn open_named(name: &str) -> Result<Self, String> {
+            use windows::Win32::System::JobObjects::OpenJobObjectW;
+            const JOB_OBJECT_TERMINATE: u32 = 0x0008;
+            unsafe {
+                OpenJobObjectW(JOB_OBJECT_TERMINATE, false, &windows::core::HSTRING::from(format!("Local\\{name}")))
+                    .map(Job)
+                    .map_err(|e| e.to_string())
+            }
+        }
+
         /// Put the process (and everything it starts from now on) in this job.
         pub fn adopt(&self, pid: u32) -> Result<(), String> {
             unsafe {
@@ -295,6 +318,33 @@ pub mod job {
             unsafe {
                 windows::Win32::System::JobObjects::TerminateJobObject(self.0, exit_code)
                     .map_err(|e| e.to_string())
+            }
+        }
+
+        /// The ids of the processes in the job now (up to 1024).
+        pub fn process_ids(&self) -> Vec<u32> {
+            use windows::Win32::System::JobObjects::{
+                JobObjectBasicProcessIdList, QueryInformationJobObject, JOBOBJECT_BASIC_PROCESS_ID_LIST,
+            };
+            const CAP: usize = 1024;
+            // The struct holds one id inline; room for CAP after the header.
+            let words = std::mem::size_of::<JOBOBJECT_BASIC_PROCESS_ID_LIST>().div_ceil(8) + CAP;
+            let mut buf = vec![0u64; words];
+            unsafe {
+                let list = buf.as_mut_ptr() as *mut JOBOBJECT_BASIC_PROCESS_ID_LIST;
+                let ok = QueryInformationJobObject(
+                    self.0,
+                    JobObjectBasicProcessIdList,
+                    list as *mut core::ffi::c_void,
+                    (buf.len() * 8) as u32,
+                    None,
+                );
+                if ok.is_err() {
+                    return Vec::new();
+                }
+                let n = ((*list).NumberOfProcessIdsInList as usize).min(CAP);
+                let ids = std::ptr::addr_of!((*list).ProcessIdList) as *const usize;
+                (0..n).map(|i| *ids.add(i) as u32).collect()
             }
         }
     }

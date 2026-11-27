@@ -434,6 +434,7 @@ impl GhostSession {
         // The browser crate cannot read the stop itself; give it the check so
         // its page-changing calls refuse while stopped.
         ghost_browser::set_stop_check(is_stopped);
+        ghost_browser::set_stop_text(crate::error::stop_refusal);
         let tree = UiaTree::new().map_err(GhostError::Core)?;
 
         // Report the optional built-in vision tier (presence only, never values).
@@ -1492,9 +1493,27 @@ impl GhostSession {
         crate::engine::input::hotkey::release_all_modifiers();
     }
 
-    /// Reset the stop flag (allows automation to resume after a stop).
-    pub fn reset(&self) {
+    /// An agent's reset (`ghost_reset`): lifts a stop raised with `ghost_stop`.
+    /// A stop the human raised (Ctrl+Alt+G) is refused with
+    /// `GhostError::HumanStopped`, which names the human's ways out; even if
+    /// the human presses while this runs, `reset_stop` never lowers their mark.
+    /// When the shared stop event cannot be read, nothing can be lifted (the
+    /// process fails closed): say so rather than answer ok.
+    pub fn reset(&self) -> Result<()> {
+        if crate::error::stop_event_error().is_some() {
+            return Err(GhostError::Stopped);
+        }
+        if crate::error::human_stop_active() {
+            return Err(GhostError::HumanStopped);
+        }
         reset_stop();
+        Ok(())
+    }
+
+    /// The human's resume (`ghost reset` in a terminal; Ctrl+Alt+Shift+G does
+    /// the same from the hotkey thread): lifts any stop, theirs included.
+    pub fn reset_human(&self) {
+        crate::engine::input::hotkey::reset_human_stop();
     }
 
     /// Press and release a named key: Enter, Tab, Escape, F5, ArrowUp, Ctrl, etc.

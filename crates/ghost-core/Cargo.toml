@@ -19,6 +19,14 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 blake3 = { workspace = true }
 
+[features]
+# PRIVATE TEST BUILDS ONLY - never enabled by a release. Takes the names of the
+# shared emergency-stop events from GHOST_ISOLATED_STOP_NS, so a live test can
+# raise a stop without stopping the human's running Ghosts. In a released
+# binary it would let any agent with a shell start a Ghost that ignores the
+# human's stop.
+isolated-stop-events = []
+
 [dev-dependencies]
 criterion = { workspace = true }
 

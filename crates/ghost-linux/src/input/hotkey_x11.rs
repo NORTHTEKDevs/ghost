@@ -39,8 +39,53 @@ pub fn is_registered() -> bool {
 }
 
 use x11rb::connection::Connection;
+use x11rb::protocol::xinput::{self, ConnectionExt as _};
 use x11rb::protocol::xproto::{ConnectionExt, GrabMode, ModMask};
 use x11rb::protocol::Event;
+
+/// Decides whether a Ctrl+Alt+Shift+G the grab delivered was typed by a person.
+/// Core X events cannot tell a real key from one injected through XTEST
+/// (`xdotool key ctrl+alt+shift+g`), so the chord is paired, by server
+/// timestamp, with the XInput2 raw event of the same key press, which names
+/// its source device: a press from the XTEST device - or one no raw event
+/// vouches for - does not resume.
+/// Whether the grabbed chord is the resume (Shift held) or the stop. The Shift
+/// bit on the core event is not enough - an XTEST-held Shift sets it too, which
+/// would turn the human's second Ctrl+Alt+G into a resume - so Shift must also
+/// be physically down, as tracked from non-XTEST raw key events.
+fn is_resume_chord(shift_bit: bool, shift_physically_down: bool) -> bool {
+    shift_bit && shift_physically_down
+}
+
+#[derive(Default)]
+struct ResumeGate {
+    /// The core resume press waiting for its raw event (server time).
+    pending: Option<u32>,
+    /// The last raw press of the G key: (server time, from XTEST).
+    last_raw: Option<(u32, bool)>,
+}
+
+impl ResumeGate {
+    /// A core Ctrl+Alt+Shift+G press. `Some(true)` = resume now.
+    fn on_press(&mut self, time: u32) -> Option<bool> {
+        match self.last_raw {
+            Some((t, xtest)) if t == time => Some(!xtest),
+            _ => {
+                self.pending = Some(time);
+                None
+            }
+        }
+    }
+
+    /// A raw press of the G key. `Some(true)` = the pending press may resume.
+    fn on_raw(&mut self, time: u32, from_xtest: bool) -> Option<bool> {
+        self.last_raw = Some((time, from_xtest));
+        (self.pending == Some(time)).then(|| {
+            self.pending = None;
+            !from_xtest
+        })
+    }
+}
 
 use crate::error::{CoreError, Result};
 use crate::session::{session_kind, SessionKind};
@@ -101,6 +146,49 @@ pub fn register() -> Result<()> {
     // Lock or Num Lock happens to be on.
     let mut grabbed = false;
     let mut missing: Vec<&str> = Vec::new();
+    // Ctrl+Alt+Shift+G is the human's resume - only with XInput2, which can
+    // tell a real key from an injected one (see ResumeGate). Without it the
+    // chord is not grabbed at all: an injectable resume key would let any
+    // program lift the human's stop.
+    let xtest_devices: Option<Vec<u16>> = conn
+        .xinput_xi_query_version(2, 0)
+        .ok()
+        .and_then(|c| c.reply().ok())
+        .filter(|v| v.major_version >= 2)
+        .and_then(|_| conn.xinput_xi_query_device(xinput::Device::ALL).ok())
+        .and_then(|c| c.reply().ok())
+        .map(|r| {
+            r.infos
+                .iter()
+                .filter(|d| String::from_utf8_lossy(&d.name).contains("XTEST"))
+                .map(|d| d.deviceid)
+                .collect()
+        });
+    // Shift's keycodes, to track whether it is physically held.
+    let shift_keys: Vec<u8> = [0xffe1u32, 0xffe2].iter().filter_map(|&ks| keycode_for(&conn, ks)).collect();
+    let mut resume_grabbed = xtest_devices.is_some()
+        && conn
+            .xinput_xi_select_events(
+                root,
+                &[xinput::EventMask {
+                    deviceid: xinput::Device::ALL.into(),
+                    mask: vec![xinput::XIEventMask::RAW_KEY_PRESS | xinput::XIEventMask::RAW_KEY_RELEASE],
+                }],
+            )
+            .map(|c| c.check().is_ok())
+            .unwrap_or(false);
+    if resume_grabbed {
+        for (extra, _) in lock_variants {
+            resume_grabbed &= conn
+                .grab_key(true, root, base | ModMask::SHIFT | extra, keycode, GrabMode::ASYNC, GrabMode::ASYNC)
+                .map(|c| c.check().is_ok())
+                .unwrap_or(false);
+        }
+    }
+    if !resume_grabbed {
+        tracing::warn!("the resume key is unavailable here (needs XInput2 and a free Ctrl+Alt+Shift+G)");
+    }
+    let xtest_devices = xtest_devices.unwrap_or_default();
     for (extra, label) in lock_variants {
         let ok = conn
             .grab_key(true, root, base | extra, keycode, GrabMode::ASYNC, GrabMode::ASYNC)
@@ -133,9 +221,41 @@ pub fn register() -> Result<()> {
         .name("ghost-hotkey".into())
         .spawn(move || {
             // Any KeyPress delivered here is our grab: nothing else is grabbed.
+            let mut gate = ResumeGate::default();
+            let resume = |ok: Option<bool>| {
+                if ok == Some(true) && super::hotkey::human_stop_active() {
+                    super::hotkey::reset_human_stop();
+                } else if ok == Some(false) {
+                    tracing::warn!("ignored an injected resume key");
+                }
+            };
+            let mut shift_down = false;
             while let Ok(event) = conn.wait_for_event() {
-                if let Event::KeyPress(_) = event {
-                    super::hotkey::STOP_FLAG.store(true, Ordering::SeqCst);
+                match event {
+                    Event::KeyPress(press) => {
+                        let shift_bit = u16::from(press.state) & u16::from(ModMask::SHIFT) != 0;
+                        if is_resume_chord(shift_bit, shift_down) {
+                            resume(gate.on_press(press.time));
+                        } else {
+                            super::hotkey::trigger_human_stop();
+                        }
+                    }
+                    Event::XinputRawKeyPress(raw) => {
+                        let real = !xtest_devices.contains(&raw.sourceid);
+                        if real && shift_keys.iter().any(|&k| u32::from(k) == raw.detail) {
+                            shift_down = true;
+                        }
+                        if raw.detail == u32::from(keycode) {
+                            resume(gate.on_raw(raw.time, !real));
+                        }
+                    }
+                    Event::XinputRawKeyRelease(raw)
+                        if !xtest_devices.contains(&raw.sourceid)
+                            && shift_keys.iter().any(|&k| u32::from(k) == raw.detail) =>
+                    {
+                        shift_down = false;
+                    }
+                    _ => {}
                 }
             }
             // The connection dropped. Clear the flag so a later call re-arms
@@ -173,6 +293,32 @@ fn keycode_for(conn: &impl Connection, keysym: u32) -> Option<u8> {
 
 #[cfg(test)]
 mod tests {
+    /// An injected (XTEST) Shift does not turn the human's Ctrl+Alt+G into a
+    /// resume: Shift must be physically down as well.
+    #[test]
+    fn a_resume_needs_a_physically_held_shift() {
+        assert!(super::is_resume_chord(true, true));
+        assert!(!super::is_resume_chord(true, false), "an XTEST-held Shift made it a resume");
+        assert!(!super::is_resume_chord(false, true));
+    }
+
+    /// The resume chord resumes only when its raw event shows a real device,
+    /// whichever of the two events arrives first; an XTEST press never does.
+    #[test]
+    fn only_a_real_key_press_resumes() {
+        let mut g = super::ResumeGate::default();
+        assert_eq!(g.on_press(100), None, "waits for the raw event");
+        assert_eq!(g.on_raw(100, false), Some(true), "real keyboard");
+
+        let mut g = super::ResumeGate::default();
+        assert_eq!(g.on_raw(200, true), None);
+        assert_eq!(g.on_press(200), Some(false), "XTEST (xdotool) is refused");
+
+        let mut g = super::ResumeGate::default();
+        assert_eq!(g.on_raw(300, false), None);
+        assert_eq!(g.on_press(301), None, "a raw event of another press does not vouch");
+    }
+
     #[test]
     fn g_keysym_is_ascii_lowercase_g() {
         assert_eq!(super::KEYSYM_G, 'g' as u32);

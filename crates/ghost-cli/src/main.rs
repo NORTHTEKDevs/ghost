@@ -201,6 +201,14 @@ enum Command {
         #[arg(long)]
         strict_cursor: bool,
     },
+
+    /// Lift the emergency stop for every Ghost process - including a stop the
+    /// human raised with Ctrl+Alt+G, which an agent's ghost_reset cannot lift.
+    /// This is the human's way to resume from a terminal (Ctrl+Alt+Shift+G,
+    /// pressed on the keyboard, is the other). Run it yourself in an
+    /// interactive terminal: it shows a short word and you type it back; a
+    /// pipe or a script is refused.
+    Reset,
 }
 
 #[tokio::main]
@@ -226,6 +234,11 @@ async fn main() -> ExitCode {
 
     if let Command::Verify { strict_cursor } = &cli.command {
         return ExitCode::from(verify::run(*strict_cursor) as u8);
+    }
+
+    // No session: lifting the stop must work even when nothing else can start.
+    if let Command::Reset = &cli.command {
+        return human_reset();
     }
 
     match run(cli).await {
@@ -264,9 +277,71 @@ fn cli_acts(cmd: &Command) -> bool {
         | Command::Query { .. }
         | Command::Snapshot { .. }
         | Command::Serve
+        | Command::Reset
         | Command::Doctor
         | Command::Verify { .. } => false,
     }
+}
+
+/// `ghost reset`: the human's resume. Says what it lifted, and fails when the
+/// stop could not be lifted (a process that cannot read the shared stop event
+/// stays stopped whatever happens here).
+fn human_reset() -> ExitCode {
+    use ghost_session::error::{human_stop_active, is_stopped, stop_event_error};
+    use std::io::{BufRead, IsTerminal, Write};
+    // Only a human at an interactive terminal, checked before any stop event
+    // is touched: an agent's own shell runs commands on pipes, and could
+    // otherwise lift the human's stop by running this.
+    if !std::io::stdin().is_terminal() {
+        eprintln!(
+            "ghost reset: refused - run it yourself in an interactive terminal; it shows a word for you to \
+             type back (a pipe or a script cannot)"
+        );
+        return ExitCode::from(2);
+    }
+    let word = challenge_word();
+    print!("Type {word} to lift the emergency stop: ");
+    let _ = std::io::stdout().flush();
+    let mut typed = String::new();
+    let _ = std::io::stdin().lock().read_line(&mut typed);
+    if !challenge_ok(&word, &typed) {
+        eprintln!("ghost reset: that was not {word}; the stop stays");
+        return ExitCode::from(2);
+    }
+    let (was_stopped, was_human) = (is_stopped(), human_stop_active());
+    crate::engine::input::hotkey::reset_human_stop();
+    if let Some(why) = stop_event_error() {
+        eprintln!("ghost: could not lift the stop - {why}");
+        return ExitCode::FAILURE;
+    }
+    match (was_stopped, was_human) {
+        (true, true) => println!("lifted the emergency stop the human raised (Ctrl+Alt+G); every Ghost process resumes"),
+        (true, false) => println!("lifted the emergency stop; every Ghost process resumes"),
+        _ => println!("no emergency stop was in force"),
+    }
+    ExitCode::SUCCESS
+}
+
+/// A short random word for `ghost reset` to have typed back: unguessable in
+/// advance, easy to read (no 0/O, 1/l/I).
+fn challenge_word() -> String {
+    use std::hash::{BuildHasher, Hasher};
+    const LETTERS: &[u8] = b"abcdefghjkmnpqrstuvwxyz";
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0));
+    h.write_u32(std::process::id());
+    let mut x = h.finish();
+    (0..5)
+        .map(|_| {
+            let c = LETTERS[(x % LETTERS.len() as u64) as usize] as char;
+            x /= LETTERS.len() as u64;
+            c
+        })
+        .collect()
+}
+
+fn challenge_ok(word: &str, typed: &str) -> bool {
+    typed.trim().eq_ignore_ascii_case(word)
 }
 
 async fn run(cli: Cli) -> Result<(), String> {
@@ -517,7 +592,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             }
         }
 
-        Command::Serve | Command::Doctor | Command::Verify { .. } => unreachable!("handled above"),
+        Command::Serve | Command::Doctor | Command::Verify { .. } | Command::Reset => unreachable!("handled above"),
     }
     Ok(())
 }
@@ -819,9 +894,20 @@ mod tests {
             let cli = parse(a).unwrap_or_else(|e| panic!("{a:?}: {e}"));
             assert!(cli_acts(&cli.command), "{a:?} must be refused while stopped");
         }
-        for a in [&["window"][..], &["list-windows"], &["see"], &["find", "--name", "OK"], &["get-clipboard"], &["doctor"]] {
+        for a in [&["window"][..], &["list-windows"], &["see"], &["find", "--name", "OK"], &["get-clipboard"], &["doctor"], &["reset"]] {
             let cli = parse(a).unwrap_or_else(|e| panic!("{a:?}: {e}"));
             assert!(!cli_acts(&cli.command), "{a:?} only reads and must stay available");
         }
+    }
+
+    #[test]
+    fn the_reset_challenge_is_random_readable_and_must_match() {
+        let (a, b) = (super::challenge_word(), super::challenge_word());
+        assert_eq!(a.len(), 5);
+        assert!(a.chars().all(|c| c.is_ascii_lowercase() && !"ilo".contains(c)), "{a}");
+        assert_ne!(a, b, "two challenges in a row should differ");
+        assert!(super::challenge_ok(&a, &format!("  {}\r\n", a.to_uppercase())));
+        assert!(!super::challenge_ok(&a, ""));
+        assert!(!super::challenge_ok(&a, "yes"));
     }
 }

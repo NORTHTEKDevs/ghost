@@ -308,15 +308,37 @@ pub mod hotkey {
     /// Emergency-stop flag, mirroring the Windows engine's `STOP_FLAG`.
     pub static STOP_FLAG: AtomicBool = AtomicBool::new(false);
 
+    /// Set with the stop when the human raised it (Ctrl+Alt+G). While it is
+    /// set, an agent's reset (`reset_stop`) cannot lift the stop.
+    static HUMAN_STOP: AtomicBool = AtomicBool::new(false);
+
     pub fn is_stopped() -> bool {
-        STOP_FLAG.load(Ordering::SeqCst)
+        STOP_FLAG.load(Ordering::SeqCst) || HUMAN_STOP.load(Ordering::SeqCst)
     }
 
+    pub fn human_stop_active() -> bool {
+        HUMAN_STOP.load(Ordering::SeqCst)
+    }
+
+    /// An agent's stop (`ghost_stop`).
     pub fn trigger_stop() {
         STOP_FLAG.store(true, Ordering::SeqCst);
     }
 
+    /// The human's stop (Ctrl+Alt+G): only `reset_human_stop` lifts it.
+    pub fn trigger_human_stop() {
+        HUMAN_STOP.store(true, Ordering::SeqCst);
+        STOP_FLAG.store(true, Ordering::SeqCst);
+    }
+
+    /// An agent's reset (`ghost_reset`): never lifts the human's stop.
     pub fn reset_stop() {
+        STOP_FLAG.store(false, Ordering::SeqCst);
+    }
+
+    /// The human's resume (Ctrl+Alt+Shift+G, or `ghost reset`).
+    pub fn reset_human_stop() {
+        HUMAN_STOP.store(false, Ordering::SeqCst);
         STOP_FLAG.store(false, Ordering::SeqCst);
     }
 
@@ -561,11 +583,17 @@ mod tests {
 
     #[test]
     fn stop_flag_round_trips() {
-        hotkey::reset_stop();
+        hotkey::reset_human_stop();
         assert!(!hotkey::is_stopped());
         hotkey::trigger_stop();
-        assert!(hotkey::is_stopped());
+        assert!(hotkey::is_stopped() && !hotkey::human_stop_active());
         hotkey::reset_stop();
+        assert!(!hotkey::is_stopped());
+        // A human stop survives an agent reset; only the human's resume lifts it.
+        hotkey::trigger_human_stop();
+        hotkey::reset_stop();
+        assert!(hotkey::is_stopped() && hotkey::human_stop_active());
+        hotkey::reset_human_stop();
         assert!(!hotkey::is_stopped());
     }
 }

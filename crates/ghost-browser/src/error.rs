@@ -33,7 +33,7 @@ pub enum BrowserError {
     #[error("browser connection is closed")]
     Closed,
 
-    #[error("emergency stop active: Ghost is stopped and refuses actions until the stop is lifted")]
+    #[error("{}", stop_text())]
     Stopped,
 
     #[error(transparent)]
@@ -50,9 +50,25 @@ pub type Result<T> = std::result::Result<T, BrowserError>;
 /// the platform engines), so the session installs the check at start-up.
 static STOP_CHECK: std::sync::OnceLock<fn() -> bool> = std::sync::OnceLock::new();
 
+/// What a refusal says (the session's text: fail closed, the human's stop, or
+/// a stop). Installed with the check.
+static STOP_TEXT: std::sync::OnceLock<fn() -> String> = std::sync::OnceLock::new();
+
 /// Install the emergency-stop check. The first call wins.
 pub fn set_stop_check(check: fn() -> bool) {
     let _ = STOP_CHECK.set(check);
+}
+
+/// Install the text a stop refusal carries. The first call wins.
+pub fn set_stop_text(text: fn() -> String) {
+    let _ = STOP_TEXT.set(text);
+}
+
+fn stop_text() -> String {
+    STOP_TEXT
+        .get()
+        .map(|t| t())
+        .unwrap_or_else(|| "emergency stop active: Ghost is stopped and refuses actions until the stop is lifted".into())
 }
 
 /// `Err(BrowserError::Stopped)` while the installed check says stopped. Every

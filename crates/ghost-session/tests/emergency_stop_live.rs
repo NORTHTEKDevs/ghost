@@ -83,6 +83,10 @@ impl Row {
     }
 }
 
+async fn tab_exists(s: &GhostSession, id: &str) -> bool {
+    s.browser_tabs("stoptest").await.map(|t| t.iter().any(|t| t.target_id == id)).unwrap_or(false)
+}
+
 fn is_stop_error(e: &str) -> bool {
     e.to_lowercase().contains("stop")
 }
@@ -234,7 +238,7 @@ async fn every_action_path_refuses_while_stopped_and_works_after_reset() {
     // CDP: a headless browser this test launches; a click changes the page title.
     match s.browser_launch_with("stoptest", "headless", None).await {
         Err(e) => eprintln!("CDP case skipped: no browser could be launched ({e})"),
-        Ok(_) => {
+        Ok(info) => {
             cleanup.browser = true;
             let page = "data:text/html,<title>0</title><button id=b onclick=\"document.title=+document.title+1\">b</button>";
             let tid = s.tab_open("stoptest", page).await.expect("tab");
@@ -274,6 +278,36 @@ async fn every_action_path_refuses_while_stopped_and_works_after_reset() {
                 state_unchanged: after_stopped == before,
                 works_after_reset: again.is_ok() && after_reset == "script ran",
             });
+
+            // Closing during a stop: a tab of the browser Ghost launched may be
+            // closed (it is Ghost's); the same tab reached through an ATTACHED
+            // entry (a browser Ghost did not launch - here the test's own browser
+            // attached a second time, so no human browser is involved) may not.
+            let port = info["port"].as_u64().expect("port") as u16;
+            s.browser_attach("stoptest-attached", port).await.expect("attach");
+            let doomed = s.tab_open("stoptest", "about:blank").await.expect("tab to close");
+            stop();
+            let attached = s.tab_close("stoptest-attached", &doomed).await;
+            let still_open = tab_exists(&s, &doomed).await;
+            let owned = s.tab_close("stoptest", &doomed).await;
+            resume();
+            let closed = !tab_exists(&s, &doomed).await;
+            rows.push(Row {
+                path: "close attached tab",
+                refused_while_stopped: attached.as_ref().err().is_some_and(|e| is_stop_error(&e.to_string())),
+                error: attached.err().map(|e| e.to_string()).unwrap_or_default(),
+                state_unchanged: still_open,
+                works_after_reset: true,
+            });
+            rows.push(Row {
+                path: "close owned tab",
+                // Inverted on purpose: Ghost's own tab closes DURING the stop.
+                refused_while_stopped: owned.is_ok(),
+                error: owned.err().map(|e| e.to_string()).unwrap_or_default(),
+                state_unchanged: closed,
+                works_after_reset: true,
+            });
+            let _ = s.browser_close("stoptest-attached").await;
         }
     }
 

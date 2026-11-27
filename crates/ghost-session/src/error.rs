@@ -6,8 +6,13 @@ pub enum GhostError {
     #[error("Element not interactable: {element} - {reason}")]
     ElementNotInteractable { element: String, reason: String },
 
-    #[error("emergency stop active (Ctrl+Alt+G or ghost_stop): Ghost is stopped and refuses actions until the stop is lifted; a stop the human raised is theirs to lift")]
+    /// Says which stop is in force (see `stop_refusal`).
+    #[error("{}", stop_refusal())]
     Stopped,
+
+    /// The stop was raised by the human (Ctrl+Alt+G): an agent cannot lift it.
+    #[error("{HUMAN_STOPPED}")]
+    HumanStopped,
 
     #[error("Timeout after {ms}ms waiting for: {action}")]
     Timeout { action: String, ms: u64 },
@@ -63,11 +68,30 @@ pub fn stop_event_error() -> Option<String> {
     None
 }
 
-/// The text an entry point (MCP, CLI, HTTP) refuses with while stopped: the
-/// stop, or - when the shared event cannot be read - that, with the fix.
-pub fn stop_refusal() -> String {
-    stop_event_error().unwrap_or_else(|| GhostError::Stopped.to_string())
+/// Whether the stop in force was raised by the human (Ctrl+Alt+G); an agent's
+/// `ghost_reset` cannot lift it.
+pub fn human_stop_active() -> bool {
+    crate::engine::input::hotkey::human_stop_active()
 }
+
+/// The text an entry point (MCP, CLI, HTTP) refuses with while stopped: when
+/// the shared event cannot be read, that and the fix; when the human raised
+/// the stop, that and how they resume; otherwise the stop.
+pub fn stop_refusal() -> String {
+    if let Some(why) = stop_event_error() {
+        return format!("Ghost is stopped (fail closed) - {why}");
+    }
+    if human_stop_active() {
+        return HUMAN_STOPPED.to_string();
+    }
+    STOPPED.to_string()
+}
+
+const STOPPED: &str = "emergency stop active (Ctrl+Alt+G or ghost_stop): Ghost is stopped and refuses actions \
+     until the stop is lifted; a stop the human raised is theirs to lift";
+
+/// Agent-facing: never says how the human resumes (see ghost-core stop.rs).
+const HUMAN_STOPPED: &str = "the human stopped Ghost (Ctrl+Alt+G); only the human can resume it - wait for them";
 
 /// `Err(GhostError::Stopped)` while the emergency stop is active, raised here
 /// or in any other Ghost process. Every state-changing path calls this first;

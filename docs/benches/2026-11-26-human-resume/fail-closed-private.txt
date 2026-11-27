@@ -1,0 +1,15 @@
+>>> ghost_act {"action":"click","name":"Count","window":"Ghost Testbed"}  (1ms)
+<<< ERR -32004: ghost_act refused: Ghost is stopped (fail closed) - cannot open the shared emergency-stop event Local\ghost-emergency-stop-event-isolated-fcfinal-27238 (Access is denied. (0x80070005)); a stop raised by another Ghost process would go unseen here, so this process refuses every action. End the Ghost process that created the event (one running elevated, or any other program using that name) and restart this one
+    hint: this Ghost cannot read the shared emergency-stop event, so it refuses every action; no stop was raised and ghost_reset will not help - end the Ghost process named in the error (often one running elevated) and restart this server
+
+>>> ghost_reset {}  (1ms)
+<<< ERR -32004: Ghost is stopped (fail closed) - cannot open the shared emergency-stop event Local\ghost-emergency-stop-event-isolated-fcfinal-27238 (Access is denied. (0x80070005)); a stop raised by another Ghost process would go unseen here, so this process refuses every action. End the Ghost process that created the event (one running elevated, or any other program using that name) and restart this one
+    hint: this Ghost cannot read the shared emergency-stop event, so it refuses every action; no stop was raised and ghost_reset will not help - end the Ghost process named in the error (often one running elevated) and restart this server
+
+ghost: Ghost is stopped (fail closed) - cannot open the shared emergency-stop event Local\ghost-emergency-stop-event-isolated-fcfinal-27238 (Access is denied. (0x80070005)); a stop raised by another Ghost process would go unseen here, so this process refuses every action. End the Ghost process that created the event (one running elevated, or any other program using that name) and restart this one
+$$ C:/Users/Krist/projects/active/ghost/target-private/debug/ghost.exe launch C:/Users/Krist/projects/active/ghost/target-private/debug/ghost-testbed.exe
+exit 1: ghost: Ghost is stopped (fail closed) - cannot open the shared emergency-stop event Local\ghost-emergency-stop-event-isolated-fcfinal-27238 (Access is denied. (0x80070005)); a stop raised by another Ghost process would go unseen here, so this process refuses every action. End the Ghost process that created the event (one running elevated, or any other program using that name) and restart this one
+
+[pty] challenge word: crsuw
+[pty] transcript: Type crsuw to lift the emergency stop: crsuw ghost: could not lift the stop - cannot open the shared emergency-stop event Local\ghost-emergency-stop-event-isolated-fcfinal-27238 (Access is denied. (0x80070005)); a stop raised by another Ghost process would go unseen here, so this process refuses every action. End the Ghost process that created the event (one running elevated, or any other program using that name) and restart this one
+[pty] exit code: 1

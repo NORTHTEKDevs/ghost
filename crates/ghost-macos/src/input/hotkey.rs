@@ -28,8 +28,27 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 pub static STOP_FLAG: AtomicBool = AtomicBool::new(false);
 
+/// Set with the stop when the human raised it; an agent reset cannot lift it.
+static HUMAN_STOP: AtomicBool = AtomicBool::new(false);
+
 pub fn is_stopped() -> bool {
-    STOP_FLAG.load(Ordering::Acquire)
+    STOP_FLAG.load(Ordering::Acquire) || HUMAN_STOP.load(Ordering::Acquire)
+}
+
+pub fn human_stop_active() -> bool {
+    HUMAN_STOP.load(Ordering::Acquire)
+}
+
+/// The human's stop: only `reset_human_stop` lifts it.
+pub fn trigger_human_stop() {
+    HUMAN_STOP.store(true, Ordering::Release);
+    STOP_FLAG.store(true, Ordering::Release);
+}
+
+/// The human's resume.
+pub fn reset_human_stop() {
+    HUMAN_STOP.store(false, Ordering::Release);
+    STOP_FLAG.store(false, Ordering::Release);
 }
 
 /// Trip the flag for this process. Every `is_stopped()` poll (in particular

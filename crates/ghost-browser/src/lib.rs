@@ -19,6 +19,6 @@ pub mod launch;
 pub mod tab;
 
 pub use browser::Browser;
-pub use error::{set_stop_check, BrowserError, Result};
+pub use error::{set_stop_check, set_stop_text, BrowserError, Result};
 pub use launch::{find_named_browser, installed_browsers, LaunchMode, LaunchOptions};
 pub use tab::{Tab, TabInfo};

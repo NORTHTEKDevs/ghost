@@ -42,6 +42,23 @@ fn sanitize_id(id: &str) -> String {
     }
 }
 
+/// Whether a close may run now. While the emergency stop is active only what
+/// Ghost itself created may be closed (a browser it launched and that
+/// browser's tabs, its own hidden desktops): closing those only reduces what
+/// Ghost can do. A browser Ghost only attached to belongs to the human, and
+/// stays untouched until the stop is lifted.
+fn may_close(stopped: bool, owned: bool) -> bool {
+    !stopped || owned
+}
+
+fn ensure_may_close(owned: bool) -> Result<()> {
+    if may_close(crate::error::is_stopped(), owned) {
+        Ok(())
+    } else {
+        Err(GhostError::Stopped)
+    }
+}
+
 impl GhostSession {
     // =======================================================================
     // Focus policy
@@ -198,8 +215,8 @@ impl GhostSession {
     /// Close a browser ghost launched and forget its tabs. Attached browsers are
     /// disconnected but left running - they belong to the user.
     pub async fn browser_close(&self, id: &str) -> Result<()> {
-        crate::error::ensure_not_stopped()?;
         let browser = self.browser_handle(id).await?;
+        ensure_may_close(browser.is_owned())?;
         browser
             .close()
             .await
@@ -255,8 +272,8 @@ impl GhostSession {
     }
 
     pub async fn tab_close(&self, browser_id: &str, target_id: &str) -> Result<()> {
-        crate::error::ensure_not_stopped()?;
         let browser = self.browser_handle(browser_id).await?;
+        ensure_may_close(browser.is_owned())?;
         browser
             .close_tab(target_id)
             .await
@@ -312,8 +329,10 @@ impl GhostSession {
     /// first: they have no visible window, so leaving them would strand them.
     #[cfg(windows)]
     pub async fn desktop_close(&self, id: &str) -> Result<serde_json::Value> {
-        crate::error::ensure_not_stopped()?;
+        // Every desktop in the registry is one Ghost created: closing it is
+        // allowed while stopped (it only ends what Ghost started).
         let d = self.desktop_handle(id).await?;
+        ensure_may_close(true)?;
         let mut killed = Vec::new();
         if let Ok(windows) = d.all_windows() {
             let mut pids: Vec<u32> = windows.into_iter().map(|w| w.pid).collect();
@@ -484,5 +503,18 @@ mod tests {
         assert_eq!(sanitize_id(r"a\b/c:d"), "a_b_c_d");
         assert_eq!(sanitize_id(""), "default");
         assert!(sanitize_id(&"x".repeat(100)).len() <= 48);
+    }
+}
+
+#[cfg(test)]
+mod close_tests {
+    use super::may_close;
+
+    #[test]
+    fn while_stopped_only_what_ghost_owns_may_be_closed() {
+        assert!(may_close(false, false), "not stopped: any close");
+        assert!(may_close(false, true));
+        assert!(may_close(true, true), "stopped: Ghost's own browser, tab or desktop");
+        assert!(!may_close(true, false), "stopped: never a browser Ghost only attached to");
     }
 }
