@@ -1662,22 +1662,23 @@ impl GhostSession {
     /// send Ctrl+V, then restore the original clipboard. This is the reliable
     /// path for rich-text web editors (Monaco, ProseMirror, Slate) that ignore
     /// both ValuePattern.SetValue and synthesized per-char keystrokes but DO
-    /// honor a real paste. The clipboard is always restored, even on error.
+    /// honor a real paste. The clipboard is always restored: on error, and when
+    /// the call is aborted mid-paste (see `paste_via_clipboard`). The restore
+    /// is not refused by a stop that landed mid-paste. Ctrl is released inside
+    /// `hotkey`, which has no await between press and release.
     pub async fn paste_text(&self, text: &str) -> Result<()> {
         if is_stopped() { return Err(GhostError::Stopped); }
-        // Best-effort save of the existing clipboard (may be empty/non-text).
-        let saved = core_get_clipboard().ok();
-        core_set_clipboard(text).map_err(GhostError::Core)?;
-        // Small settle so the clipboard write is visible to the target app.
-        tokio::time::sleep(Duration::from_millis(20)).await;
-        let paste_result = self.hotkey(&["Ctrl"], "v").await;
-        // Let the paste consume the clipboard before we overwrite it back.
-        tokio::time::sleep(Duration::from_millis(40)).await;
-        // Hand-back: the restore is not refused by a stop that landed mid-paste.
-        if let Some(prev) = saved {
-            let _ = core_restore_clipboard(&prev);
-        }
-        paste_result
+        paste_via_clipboard(
+            text,
+            // Best-effort save of the existing clipboard (may be empty/non-text).
+            || core_get_clipboard().ok(),
+            |t| core_set_clipboard(t).map_err(GhostError::Core),
+            |prev| {
+                let _ = core_restore_clipboard(prev);
+            },
+            self.hotkey(&["Ctrl"], "v"),
+        )
+        .await
     }
 
     /// Bring the window whose title contains `name` to the foreground and confirm it,
@@ -2109,6 +2110,21 @@ impl GhostSession {
         if target_hwnd == 0 || fg_before == 0 || fg_before == target_hwnd {
             return None;
         }
+        // Its own task: an abort of the call (deadline, notifications/cancelled)
+        // landing at one of the awaits below must not leave the human's
+        // foreground with the target.
+        run_to_completion(Self::foreground_hand_back(target_hwnd, target_pid, fg_before, fallback_fg, settle_ms))
+            .await
+            .flatten()
+    }
+
+    async fn foreground_hand_back(
+        target_hwnd: isize,
+        target_pid: u32,
+        fg_before: isize,
+        fallback_fg: isize,
+        settle_ms: u64,
+    ) -> Option<serde_json::Value> {
         let is_targets = |h: isize| {
             h != 0 && (h == target_hwnd || (target_pid != 0 && crate::engine::system::window_pid(h) == target_pid))
         };
@@ -3370,6 +3386,57 @@ impl<'a> OpsDispatcher for SessionOpsDispatcher<'a> {
 /// accepts, for up to `settle_ms`, and answer that window. The foreground is
 /// checked at once and then every 20 ms, and every check comes before the
 /// deadline test, so a theft is still seen when a sleep overshoots.
+/// Run `fut` as its own task and wait for it. A tool deadline or
+/// notifications/cancelled aborts the tool's task at whatever await it is
+/// parked on; work that must finish (handing the foreground back) runs here,
+/// so the abort cuts only the wait for it. A panic inside is re-raised.
+async fn run_to_completion<T: Send + 'static>(fut: impl std::future::Future<Output = T> + Send + 'static) -> Option<T> {
+    match tokio::spawn(fut).await {
+        Ok(v) => Some(v),
+        Err(e) if e.is_panic() => std::panic::resume_unwind(e.into_panic()),
+        Err(_) => None,
+    }
+}
+
+/// Runs its closure when dropped, including when the future that owns it is
+/// dropped mid-await by an abort.
+struct OnDrop<F: FnOnce()>(Option<F>);
+
+impl<F: FnOnce()> Drop for OnDrop<F> {
+    fn drop(&mut self) {
+        if let Some(f) = self.0.take() {
+            f();
+        }
+    }
+}
+
+/// `paste_text`'s clipboard steps, with the clipboard and the paste passed in
+/// so a test can use a fake. The restore of the saved clipboard is a drop
+/// guard: it runs on return, on error, and when the future is dropped at
+/// either settle (an aborted call never leaves automation text on the human's
+/// clipboard). Nothing saved (empty or non-text clipboard): nothing restored.
+async fn paste_via_clipboard(
+    text: &str,
+    get: impl FnOnce() -> Option<String>,
+    set: impl FnOnce(&str) -> Result<()>,
+    restore: impl FnOnce(&str),
+    paste: impl std::future::Future<Output = Result<()>>,
+) -> Result<()> {
+    let saved = get();
+    let _restore = OnDrop(Some(move || {
+        if let Some(prev) = saved {
+            restore(&prev);
+        }
+    }));
+    set(text)?;
+    // Small settle so the clipboard write is visible to the target app.
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    let result = paste.await;
+    // Let the paste consume the clipboard before it is overwritten back.
+    tokio::time::sleep(Duration::from_millis(40)).await;
+    result
+}
+
 async fn wait_for_theft(
     fg_before: isize,
     settle_ms: u64,
@@ -3641,6 +3708,98 @@ mod clipboard_gate_tests {
         let gate = body.find("ensure_not_stopped()?").expect("no stop gate in set_clipboard");
         let write = body.find("core_set_clipboard(").expect("no write in set_clipboard");
         assert!(gate < write, "the stop gate must come before the write:\n{body}");
+    }
+}
+
+/// An abort (tool deadline, notifications/cancelled) drops the tool's future at
+/// whatever await it is parked on. These pin that the clipboard restore and the
+/// foreground hand-back still run. A fake clipboard only: never the real one.
+#[cfg(test)]
+mod abort_cleanup_tests {
+    use super::{paste_via_clipboard, run_to_completion};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    type Log = Arc<Mutex<Vec<String>>>;
+
+    fn fake_paste(log: &Log, saved: Option<&str>) -> impl std::future::Future<Output = crate::error::Result<()>> + Send {
+        let (g, s, r, p) = (log.clone(), log.clone(), log.clone(), log.clone());
+        let saved = saved.map(str::to_string);
+        async move {
+            paste_via_clipboard(
+                "automation text",
+                move || {
+                    g.lock().unwrap().push("get".into());
+                    saved
+                },
+                move |t: &str| {
+                    s.lock().unwrap().push(format!("set {t}"));
+                    Ok(())
+                },
+                move |t: &str| r.lock().unwrap().push(format!("restore {t}")),
+                async move {
+                    p.lock().unwrap().push("ctrl+v".into());
+                    Ok(())
+                },
+            )
+            .await
+        }
+    }
+
+    #[tokio::test]
+    async fn an_abort_mid_paste_still_restores_the_clipboard() {
+        let log: Log = Arc::default();
+        // Dropped during the 20 ms settle after the clipboard was set.
+        let r = tokio::time::timeout(Duration::from_millis(5), fake_paste(&log, Some("human text"))).await;
+        assert!(r.is_err(), "the fake paste should still have been parked");
+        assert_eq!(*log.lock().unwrap(), ["get", "set automation text", "restore human text"]);
+    }
+
+    #[tokio::test]
+    async fn a_completed_paste_restores_exactly_once() {
+        let log: Log = Arc::default();
+        fake_paste(&log, Some("human text")).await.unwrap();
+        assert_eq!(*log.lock().unwrap(), ["get", "set automation text", "ctrl+v", "restore human text"]);
+        // Nothing saved (empty or non-text clipboard): nothing to restore.
+        let log: Log = Arc::default();
+        fake_paste(&log, None).await.unwrap();
+        assert_eq!(*log.lock().unwrap(), ["get", "set automation text", "ctrl+v"]);
+    }
+
+    #[tokio::test]
+    async fn work_run_to_completion_survives_its_caller_being_dropped() {
+        let done = Arc::new(AtomicBool::new(false));
+        let d = done.clone();
+        let caller = run_to_completion(async move {
+            tokio::time::sleep(Duration::from_millis(30)).await;
+            d.store(true, Ordering::SeqCst);
+        });
+        assert!(tokio::time::timeout(Duration::from_millis(5), caller).await.is_err());
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        assert!(done.load(Ordering::SeqCst), "the hand-back was cut by the abort");
+    }
+
+    #[test]
+    fn the_foreground_hand_back_runs_to_completion() {
+        let src = include_str!("session.rs");
+        let start = src.find("pub async fn foreground_guard_end_within(").expect("guard");
+        let body = &src[start..start + src[start..].find("\n    }\n").expect("end")];
+        assert!(
+            body.contains("run_to_completion(Self::foreground_hand_back("),
+            "the hand-back is not abort-proof:\n{body}"
+        );
+        let start = src.find("async fn foreground_hand_back(").expect("hand-back fn");
+        let hand_back = &src[start..start + src[start..].find("\n    }\n").expect("end")];
+        assert!(hand_back.contains("ensure_foreground("), "{hand_back}");
+    }
+
+    #[test]
+    fn paste_text_goes_through_the_restoring_helper() {
+        let src = include_str!("session.rs");
+        let start = src.find("pub async fn paste_text(").expect("paste_text");
+        let body = &src[start..start + src[start..].find("\n    }\n").expect("end")];
+        assert!(body.contains("paste_via_clipboard("), "{body}");
     }
 }
 
