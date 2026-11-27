@@ -157,10 +157,23 @@ fn title_rank(title: &str, query_lc: &str) -> Option<u8> {
 /// which is z-order for the user desktop (topmost first) and creation order on
 /// hidden desktops. Pure so it is unit-testable without a desktop.
 pub fn pick<'a>(candidates: &'a [Candidate], query: &str) -> Option<&'a Candidate> {
+    pick_preferring(candidates, query, None)
+}
+
+/// `pick`, except that the anchored window (`hwnd` on `surface`) wins a tie at
+/// the best rank: a window Ghost launched on a hidden desktop must not lose to
+/// a same-titled window on the human's desktop that happens to be listed first.
+fn pick_preferring<'a>(
+    candidates: &'a [Candidate],
+    query: &str,
+    anchor: Option<(isize, &Surface)>,
+) -> Option<&'a Candidate> {
     let q = query.trim().to_lowercase();
     if q.is_empty() {
         return None;
     }
+    let is_anchor =
+        |c: &Candidate| anchor.is_some_and(|(h, s)| c.hwnd == h && &c.surface == s);
     let mut best: Option<(u8, &Candidate)> = None;
     for c in candidates {
         let Some(rank) = title_rank(&c.title, &q) else {
@@ -168,7 +181,8 @@ pub fn pick<'a>(candidates: &'a [Candidate], query: &str) -> Option<&'a Candidat
         };
         let rank = rank * 2 + u8::from(c.minimized);
         match best {
-            Some((r, _)) if r <= rank => {}
+            Some((r, _)) if r < rank => {}
+            Some((r, b)) if r == rank && (is_anchor(b) || !is_anchor(c)) => {}
             _ => best = Some((rank, c)),
         }
     }
@@ -196,7 +210,7 @@ pub fn resolve_static<'a>(
     anchor: Option<(isize, &Surface)>,
     history: &[String],
 ) -> Option<(&'a Candidate, bool)> {
-    if let Some(c) = pick(candidates, query) {
+    if let Some(c) = pick_preferring(candidates, query, anchor) {
         return Some((c, false));
     }
     let (hwnd, surface) = anchor?;
@@ -635,6 +649,36 @@ mod tests {
         assert!(!drifted);
         assert!(resolve_static(&cands, "Calculator", Some((7, &Surface::User)), &history).is_none());
         assert!(resolve_static(&cands, "   ", Some((7, &Surface::User)), &history).is_none());
+    }
+
+    #[test]
+    fn the_anchor_wins_a_tie_with_a_same_titled_window_on_the_human_desktop() {
+        // Ghost launched Notepad on its hidden desktop and anchored it; the
+        // human has their own "Untitled - Notepad" open, listed first.
+        let hidden = Surface::Hidden { desktop: "auto".into() };
+        let mut mine = c("Untitled - Notepad", false, 2);
+        mine.surface = hidden.clone();
+        let cands = vec![c("Untitled - Notepad", false, 1), mine];
+        let (hit, drifted) =
+            resolve_static(&cands, "Untitled - Notepad", Some((2, &hidden)), &[]).unwrap();
+        assert_eq!(hit.hwnd, 2);
+        assert!(!drifted);
+        // Same at substring rank.
+        let (hit, _) = resolve_static(&cands, "notepad", Some((2, &hidden)), &[]).unwrap();
+        assert_eq!(hit.hwnd, 2);
+        // Without an anchor, list order still decides.
+        let (hit, _) = resolve_static(&cands, "Untitled - Notepad", None, &[]).unwrap();
+        assert_eq!(hit.hwnd, 1);
+    }
+
+    #[test]
+    fn a_better_ranked_window_still_beats_the_anchor() {
+        let hidden = Surface::Hidden { desktop: "auto".into() };
+        let mut mine = c("Untitled - Notepad", false, 2);
+        mine.surface = hidden.clone();
+        let cands = vec![c("Notepad", false, 1), mine];
+        let (hit, _) = resolve_static(&cands, "notepad", Some((2, &hidden)), &[]).unwrap();
+        assert_eq!(hit.hwnd, 1, "an exact title beats the anchor's substring match");
     }
 
     #[test]
