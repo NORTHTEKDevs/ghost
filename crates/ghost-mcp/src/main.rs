@@ -518,7 +518,7 @@ async fn async_main() {
                     jsonrpc: "2.0",
                     id,
                     result: None,
-                    error: Some(json!({ "code": -32603i64, "message": e })),
+                    error: Some(json!({ "code": rpc_error_code(&e), "message": e })),
                 },
             };
             let _ = out_tx.send(encode_response(&resp));
@@ -1605,20 +1605,45 @@ fn initialize_response() -> Value {
     })
 }
 
+/// Prefix of a JSON-RPC "method not found" error; `rpc_error_code` maps it to -32601.
+const METHOD_NOT_FOUND: &str = "method not found: ";
+
+/// Protocol methods answered without the session or the emergency-stop gate
+/// (`ping` must answer while stopped). None means a tool: route it to dispatch.
+fn protocol_method(method: &str) -> Option<std::result::Result<Value, String>> {
+    match method {
+        "initialize" => Some(Ok(initialize_response())),
+        "ping" => Some(Ok(json!({}))),
+        "tools/list" => Some(Ok(json!({ "tools": tools_schema() }))),
+        "tools/call" => None,
+        // Notifications get no response; never let one reach a tool.
+        m if m == "initialized" || m.starts_with("notifications/") => Some(Ok(json!({}))),
+        // Legacy raw-name dispatch: every tool is named ghost_*.
+        m if m.starts_with("ghost_") => None,
+        m => Some(Err(format!("{METHOD_NOT_FOUND}{m}"))),
+    }
+}
+
+/// JSON-RPC error code for a handler error string.
+fn rpc_error_code(e: &str) -> i64 {
+    if e.starts_with(METHOD_NOT_FOUND) {
+        -32601
+    } else {
+        -32603
+    }
+}
+
 async fn handle(
     session: &GhostSession,
     method: &str,
     params: Option<&Value>,
 ) -> std::result::Result<Value, String> {
+    if let Some(reply) = protocol_method(method) {
+        return reply;
+    }
     let p = params.cloned().unwrap_or(json!({}));
 
     match method {
-        // MCP protocol handshake
-        "initialize" => Ok(initialize_response()),
-        "initialized" | "notifications/initialized" => Ok(json!({})),
-        "tools/list" => {
-            Ok(json!({ "tools": tools_schema() }))
-        }
         // MCP spec-compliant tools/call
         "tools/call" => {
             match p["name"].as_str() {
@@ -4349,6 +4374,21 @@ mod tests {
         // Legacy raw-method params carry the arguments at the top level.
         let raw = json!({ "timeout_ms": 500_000 });
         assert_eq!(tool_deadline(Some(&raw)).as_millis(), 510_000);
+    }
+
+    #[test]
+    fn ping_is_answered_by_the_protocol_layer_never_the_stop_gate() {
+        // `ping` must answer {} even while stopped: it never reaches dispatch_tool.
+        assert_eq!(protocol_method("ping"), Some(Ok(json!({}))));
+        assert!(protocol_method("ghost_see").is_none(), "tool names route to dispatch");
+        assert!(protocol_method("tools/call").is_none());
+    }
+
+    #[test]
+    fn unknown_non_tool_methods_are_method_not_found() {
+        let e = protocol_method("resources/list").expect("answered").expect_err("unknown");
+        assert_eq!(rpc_error_code(&e), -32601, "{e}");
+        assert_eq!(rpc_error_code("ghost_x timed out"), -32603);
     }
 
     #[test]
