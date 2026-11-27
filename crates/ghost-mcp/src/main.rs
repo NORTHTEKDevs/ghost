@@ -1719,6 +1719,28 @@ fn validate_args(name: &str, args: &Value) -> std::result::Result<Option<Value>,
             }
         }
     }
+    if name == "ghost_act" || name == "ghost_find" {
+        // An empty name is a substring of every name: it acted on whatever
+        // element came first.
+        for key in ["name", "role"] {
+            if args[key].as_str().is_some_and(|s| s.trim().is_empty()) {
+                return Err(format!(
+                    "{INVALID_PARAMS}{name} {key} is empty; give the element's {key} or omit it"
+                ));
+            }
+        }
+        const LOCATE_MODES: [&str; 3] = ["instant", "deliberate", "instant_only"];
+        match args.get("mode") {
+            None | Some(Value::Null) => {}
+            Some(Value::String(m)) if LOCATE_MODES.contains(&m.as_str()) => {}
+            Some(v) => {
+                return Err(format!(
+                    "{INVALID_PARAMS}{name} mode must be one of {} (got {v})",
+                    LOCATE_MODES.join("|")
+                ))
+            }
+        }
+    }
     if name == "ghost_key" {
         if let Some((_, k)) = args["keys"].as_str().and_then(key_hold) {
             if k.trim().is_empty() {

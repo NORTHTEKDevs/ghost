@@ -68,6 +68,39 @@ mod see_mode {
     }
 }
 
+mod act_args {
+    //! L6: an empty name must not match (and click) the first element, and an
+    //! unknown dispatch mode must not silently mean "instant".
+    use crate::validate_args;
+    use serde_json::json;
+
+    #[test]
+    fn an_empty_name_or_role_is_invalid_params() {
+        for verb in ["ghost_act", "ghost_find"] {
+            for args in [
+                json!({ "action": "click", "name": "" }),
+                json!({ "action": "click", "name": "   " }),
+                json!({ "action": "click", "role": "" }),
+            ] {
+                let e = validate_args(verb, &args).unwrap_err();
+                assert!(e.starts_with("invalid params: "), "{verb} {args}: {e}");
+            }
+        }
+        assert!(validate_args("ghost_act", &json!({ "action": "click", "name": "OK" })).unwrap().is_none());
+    }
+
+    #[test]
+    fn an_unknown_mode_is_invalid_params_naming_the_modes() {
+        for verb in ["ghost_act", "ghost_find"] {
+            let e = validate_args(verb, &json!({ "action": "click", "name": "OK", "mode": "bogus" })).unwrap_err();
+            assert!(e.starts_with("invalid params: ") && e.contains("instant|deliberate|instant_only"), "{e}");
+            for m in ["instant", "deliberate", "instant_only"] {
+                assert!(validate_args(verb, &json!({ "name": "OK", "mode": m })).is_ok());
+            }
+        }
+    }
+}
+
 mod key_spec {
     //! L7: keys='down:Shift' / 'up:Shift' and unknown key names answer with a
     //! message naming the value, never "Win32 error 0x00000000".
