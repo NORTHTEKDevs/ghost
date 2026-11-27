@@ -121,6 +121,8 @@ struct ShellSession {
     pending: Option<u64>,
     created: Instant,
     pid: Option<u32>,
+    /// The process group this shell leads (Linux), for `end_shell`.
+    group: Option<(u32, u64)>,
     /// The stop generation when this shell started: if a stop ended shells
     /// since, this one was among them (see `ended_by_stop`).
     born_gen: u64,
@@ -625,10 +627,28 @@ mod platform {
         GROUPS.lock().unwrap().0.len()
     }
 
-    /// [`ProcTable::group_still_ours`] against the live process table.
-    #[cfg(test)]
+    /// [`ProcTable::group_still_ours`] against the live process table (a
+    /// full read only when the leader has exited).
     pub(super) fn group_still_ours(pgid: u32, leader_start: u64) -> bool {
-        ProcTable::read().group_still_ours(pgid, leader_start)
+        match start_time(pgid) {
+            Some(t) => t == leader_start,
+            None => ProcTable::read().group_still_ours(pgid, leader_start),
+        }
+    }
+
+    /// Kill group `pgid` if it is still the one Ghost started.
+    pub(super) fn end_group(pgid: u32, leader_start: u64) {
+        if group_still_ours(pgid, leader_start) {
+            kill_group(pgid);
+        }
+    }
+
+    fn kill_group(pgid: u32) {
+        let _ = std::process::Command::new("kill")
+            .args(["-KILL", "--", &format!("-{pgid}")])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
     }
 
     /// The groups of `groups` still to be signalled, judged against one read
@@ -649,16 +669,57 @@ mod platform {
             return;
         }
         for pgid in groups_to_end(&groups, &ProcTable::read()) {
-            let _ = std::process::Command::new("kill")
-                .args(["-KILL", "--", &format!("-{pgid}")])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status();
+            kill_group(pgid);
         }
     }
 }
 
 use platform::confine;
+
+/// The process group a shell leads (Linux) and its leader's start time,
+/// recorded at spawn so a later kill can tell the group from a reused id.
+fn group_of(pid: Option<u32>) -> Option<(u32, u64)> {
+    #[cfg(unix)]
+    return pid.and_then(|p| Some((p, platform::start_time(p)?)));
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        None
+    }
+}
+
+/// End a shell Ghost is giving up on (a timeout, `op=kill`): on Linux its
+/// whole process group, so what its command started ends with it.
+fn end_shell(child: &mut Child, group: Option<(u32, u64)>) {
+    end_group(group);
+    let _ = child.start_kill();
+}
+
+/// Kill a shell's process group while it is still the one Ghost started.
+fn end_group(group: Option<(u32, u64)>) {
+    #[cfg(unix)]
+    if let Some((pgid, leader_start)) = group {
+        platform::end_group(pgid, leader_start);
+    }
+    #[cfg(not(unix))]
+    let _ = group;
+}
+
+/// Ends a one-shot command's group if the call is dropped before the command
+/// finished (the request was cancelled); `disarm` once it has finished.
+struct GroupGuard(Option<(u32, u64)>);
+
+impl GroupGuard {
+    fn disarm(&mut self) {
+        self.0 = None;
+    }
+}
+
+impl Drop for GroupGuard {
+    fn drop(&mut self) {
+        end_group(self.0.take());
+    }
+}
 
 /// Start a shell in its own process group (Linux), so the stop can end the
 /// group: the shell and everything its command started.
@@ -732,6 +793,7 @@ fn spawn_driver(cwd: Option<&str>) -> Result<ShellSession> {
         created: Instant::now(),
         pid,
         born_gen,
+        group: group_of(pid),
     })
 }
 
@@ -901,6 +963,8 @@ impl GhostSession {
             .spawn()
             .map_err(|e| GhostError::Config(format!("failed to spawn {shell}: {e}")))?;
         confine(child.id());
+        let group = group_of(child.id());
+        let mut guard = GroupGuard(group);
         let mut stdout = child.stdout.take().unwrap();
         let mut stderr = child.stderr.take().unwrap();
 
@@ -919,9 +983,10 @@ impl GhostSession {
             _ = wait_for_stop() => { stopped = true; }
         }
         if timed_out || stopped {
-            let _ = child.start_kill();
+            end_shell(&mut child, group);
         }
         let status = child.wait().await.ok();
+        guard.disarm();
 
         if stopped {
             return Err(GhostError::Stopped);
@@ -998,7 +1063,7 @@ impl GhostSession {
                 }))
             }
             ReadOutcome::TimedOut { output } => {
-                let _ = sess.child.start_kill();
+                end_shell(&mut sess.child, sess.group);
                 let (output, truncated) = cap_output(output);
                 Ok(json!({
                     "ok": false, "output": output, "exit_code": Value::Null,
@@ -1205,7 +1270,7 @@ impl GhostSession {
             .sessions
             .remove(&id)
             .ok_or_else(|| GhostError::Config(format!("ghost_shell: no session '{id}'")))?;
-        let _ = sess.child.start_kill();
+        end_shell(&mut sess.child, sess.group);
         let _ = sess.child.wait().await;
         Ok(json!({ "ok": true, "id": id, "killed": true }))
     }
@@ -1726,6 +1791,91 @@ mod stop_reach_tests {
         let _ = live.wait();
         assert!(ended, "the live group survived the stop");
         assert!(took < Duration::from_millis(200), "the stop took {took:?} over 5000 dead groups");
+    }
+
+    /// A bash leading its own group with a background `sleep`; returns the
+    /// sleep's pid too.
+    #[cfg(target_os = "linux")]
+    async fn shell_with_a_child() -> (Child, Option<(u32, u64)>, u32) {
+        use tokio::io::AsyncBufReadExt;
+        let mut cmd = Command::new("bash");
+        cmd.args(["-c", "sleep 45 & echo $!; wait"]).stdout(Stdio::piped()).kill_on_drop(true);
+        in_own_group(&mut cmd);
+        let mut child = cmd.spawn().expect("bash");
+        let group = group_of(child.id());
+        let mut line = String::new();
+        let mut out = tokio::io::BufReader::new(child.stdout.take().unwrap());
+        out.read_line(&mut line).await.unwrap();
+        (child, group, line.trim().parse().expect("sleep pid"))
+    }
+
+    /// Whether `pid` is gone (or a zombie) within 3 s.
+    #[cfg(target_os = "linux")]
+    fn ends(pid: u32) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let alive = std::fs::read_to_string(format!("/proc/{pid}/stat"))
+                .ok()
+                .and_then(|s| s.rsplit_once(')').map(|r| r.1.split_whitespace().next() != Some("Z")))
+                .unwrap_or(false);
+            if !alive {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                // Ours: started by this test.
+                let _ = std::process::Command::new("kill").args(["-KILL", &pid.to_string()]).status();
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn rt() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap()
+    }
+
+    /// Linux: a timeout or `op=kill` ends what the shell's command started,
+    /// not just the shell.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn giving_up_on_a_shell_ends_its_whole_group() {
+        let (sleeper, ended) = rt().block_on(async {
+            let (mut child, group, sleeper) = shell_with_a_child().await;
+            end_shell(&mut child, group);
+            let _ = child.wait().await;
+            (sleeper, ends(sleeper))
+        });
+        assert!(ended, "sleep {sleeper} outlived its shell's timeout/kill");
+    }
+
+    /// Linux: a call dropped mid-command (the request was cancelled) ends the
+    /// command's group; one that finished leaves its background programs be.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_dropped_call_ends_its_group_and_a_finished_one_does_not() {
+        let (sleeper, ended) = rt().block_on(async {
+            let (child, group, sleeper) = shell_with_a_child().await;
+            let guard = GroupGuard(group);
+            drop(guard);
+            drop(child);
+            (sleeper, ends(sleeper))
+        });
+        assert!(ended, "sleep {sleeper} outlived a dropped call");
+
+        let (sleeper, alive) = rt().block_on(async {
+            let (mut child, group, sleeper) = shell_with_a_child().await;
+            let mut guard = GroupGuard(group);
+            guard.disarm();
+            drop(guard);
+            let _ = child.start_kill();
+            let _ = child.wait().await;
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            (sleeper, std::path::Path::new(&format!("/proc/{sleeper}")).exists())
+        });
+        // Ours: started by this test.
+        let _ = std::process::Command::new("kill").args(["-KILL", &sleeper.to_string()]).status();
+        assert!(alive, "a finished call ended its background program {sleeper}");
     }
 
     /// The pure decision, over an injected process table: 5000 groups that
