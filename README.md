@@ -350,8 +350,13 @@ then drive the new terminal window with `ghost_see` / `ghost_act` / `ghost_key`.
 **Security:** shell access is powerful. Set `GHOST_SHELL=off` in the server's env to
 disable the verb entirely - every op then returns a clear refusal, leaving the GUI
 automation verbs fully usable. The launch verbs (`ghost_launch`, `ghost_window op=launch`,
-`ghost_desktop_launch`) then also refuse command interpreters and script hosts (cmd,
-PowerShell, wscript, python, ...). This is not a sandbox: keyboard input can still start programs.
+`ghost_desktop_launch`) then also refuse command interpreters, terminals, script hosts
+and programs that start other programs (cmd, PowerShell, wscript, python, wmic, explorer,
+xdg-open, env, ...), judged by the program's real name (8.3 aliases and symlinks resolved).
+That filter is a denylist and cannot be complete. For a strict rule set
+`GHOST_LAUNCH_ALLOW` to a comma-separated list of basenames or full paths
+(`notepad,C:\Tools\viewer.exe`): with the shell off, only those programs launch.
+This is not a sandbox either way: typing and clicking can still start programs.
 
 ## Quick Start - CLI
 
@@ -548,7 +553,7 @@ start-up, so the host's log always answers the question.
 | Setting | Default | What "on" means |
 | --- | --- | --- |
 | Keep Ghost off your mouse and keyboard (`GHOST_FOCUS_LOCK`) | **on** | The agent can never raise the focus policy, so it drives windows in the background and cannot take your cursor. Turn it off only if you want an agent to use your real input. |
-| Allow shell commands (`GHOST_SHELL`) | **on** | `ghost_shell` runs programs with your account's rights, which is how an agent runs builds, git and scripts - and it is why most agents use Ghost. It is full access to the machine. Turn it off and every shell call refuses; windows, screen reading and input still work. |
+| Allow shell commands (`GHOST_SHELL`) | **on** | `ghost_shell` runs programs with your account's rights, which is how an agent runs builds, git and scripts - and it is why most agents use Ghost. It is full access to the machine. Turn it off and every shell call refuses and the launch verbs refuse shells and launchers (a denylist that cannot be complete; set `GHOST_LAUNCH_ALLOW` for a strict list); windows, screen reading and input still work, and typing can still start programs. |
 
 The shell is on by default deliberately. It is the capability, not a bonus, and
 a tool that quietly ships without the thing people install it for is worse than

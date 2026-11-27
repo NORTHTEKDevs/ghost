@@ -26,9 +26,13 @@ So the security boundary is the transport, not the verbs:
   takes `application/json`. It is a local convenience for scripts, not a
   service: any local process can still call it.
 - `ghost_shell` runs arbitrary commands. `GHOST_SHELL=off` disables that verb
-  entirely, and the launch verbs then refuse command interpreters and script
-  hosts. It is not a sandbox: keyboard input and clicks can still start
-  programs, so it does not contain an agent you do not trust.
+  entirely, and the launch verbs then refuse command interpreters, terminals,
+  script hosts and proxy launchers (wmic, explorer, schtasks, xdg-open, env,
+  ...), judged by the program's resolved long name / symlink target. That is a
+  denylist and cannot be complete; `GHOST_LAUNCH_ALLOW` (comma-separated
+  basenames or full paths) is the strict option: with the shell off, only the
+  listed programs launch. Neither is a sandbox: keyboard input and clicks can
+  still start programs, so it does not contain an agent you do not trust.
 
 Reports that amount to "an MCP client can make Ghost click things" describe the
 intended behaviour. Reports about **privilege boundaries being crossed** are in
