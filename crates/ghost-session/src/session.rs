@@ -378,28 +378,44 @@ fn settext_ok(ctrl: isize, control_type: u32) -> bool {
 /// accessible value asynchronously (Chromium's AX tree in particular), so poll
 /// briefly instead of judging one stale read. Judged against the value read
 /// before the dispatch (see `judge_typed`); `None` when there is nothing to
-/// judge. Returns at once on `Landed`, and on any other changed value once it
-/// has held still for three reads (a reformatting field never reads `Landed`).
+/// judge. Returns at once on `Landed`, early on a `Reformatted` value that has
+/// held still for three reads (a reformatting field never reads `Landed`), and
+/// otherwise at the deadline.
 async fn read_back_matches(
     el: crate::GhostElement,
     before: &str,
     want: &str,
     replace: bool,
 ) -> (crate::GhostElement, Option<Typed>) {
+    poll_read_back(el, |e| e.typed_value(), before, want, replace).await
+}
+
+/// [`read_back_matches`] over any value source. The source is owned and
+/// handed back, so no borrow of it is held across an await (a GhostElement is
+/// not Sync).
+async fn poll_read_back<E>(
+    mut src: E,
+    read: impl Fn(&mut E) -> String,
+    before: &str,
+    want: &str,
+    replace: bool,
+) -> (E, Option<Typed>) {
     let deadline = std::time::Instant::now() + Duration::from_millis(600);
     let mut last: Option<String> = None;
     let mut still = 0;
     loop {
-        let now = el.typed_value();
+        let now = read(&mut src);
         let verdict = crate::engine::input::readback::judge_typed(before, &now, want, replace);
+        // Only a Reformatted value may end the poll by holding still: a
+        // Changed one can be a partial read ("he" of "hello") that Chromium's
+        // AX tree shows for longer than three reads, so it polls to the deadline.
         match verdict {
-            None | Some(Typed::Landed) => return (el, verdict),
-            Some(Typed::Unchanged) => still = 0,
-            Some(_) if last.as_deref() == Some(now.as_str()) => still += 1,
+            None | Some(Typed::Landed) => return (src, verdict),
+            Some(Typed::Reformatted) if last.as_deref() == Some(now.as_str()) => still += 1,
             Some(_) => still = 0,
         }
         if still >= 3 || std::time::Instant::now() >= deadline {
-            return (el, verdict);
+            return (src, verdict);
         }
         last = Some(now);
         tokio::time::sleep(Duration::from_millis(25)).await;
@@ -3910,6 +3926,40 @@ mod wiring_tests {
                 assert!(!b.contains(global), "{sig} searches the whole desktop via {global}:\n{b}");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod read_back_poll_tests {
+    use super::poll_read_back;
+    use crate::engine::input::readback::Typed;
+
+    /// Reads `values` in order, then repeats the last one.
+    async fn poll(values: &[&str], want: &str) -> Option<Typed> {
+        let src: std::collections::VecDeque<String> = values.iter().map(|v| v.to_string()).collect();
+        let read = |q: &mut std::collections::VecDeque<String>| {
+            if q.len() > 1 { q.pop_front().unwrap_or_default() } else { q.front().cloned().unwrap_or_default() }
+        };
+        poll_read_back(src, read, "", want, true).await.1
+    }
+
+    #[tokio::test]
+    async fn a_partial_value_that_holds_still_is_not_the_verdict() {
+        // Chromium's AX tree can show "he" of "hello" for a while before the
+        // whole text arrives; the poll must keep going to the deadline.
+        assert_eq!(poll(&["he", "he", "he", "he", "hello"], "hello").await, Some(Typed::Landed));
+    }
+
+    #[tokio::test]
+    async fn a_reformatted_value_that_holds_still_ends_the_poll_early() {
+        let start = std::time::Instant::now();
+        assert_eq!(poll(&["Hello"], "hello").await, Some(Typed::Reformatted));
+        assert!(start.elapsed() < std::time::Duration::from_millis(400), "{:?}", start.elapsed());
+    }
+
+    #[tokio::test]
+    async fn a_value_that_stays_partial_is_changed_at_the_deadline() {
+        assert_eq!(poll(&["he"], "hello").await, Some(Typed::Changed));
     }
 }
 
