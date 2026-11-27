@@ -5,6 +5,16 @@ dash, what that release was about. Versions follow [Semantic
 Versioning](https://semver.org/); Ghost is pre-1.0, so a minor version can
 change behaviour.
 
+## [Unreleased]
+
+### Changed
+
+- sonic-rs 0.3 -> 0.5 for MCP response encoding. One visible difference: a
+  float printed with an exponent (magnitude 1e16 and up) now reads `1e+16`
+  instead of `1e16`, which is what serde_json, Ghost's fallback encoder,
+  already printed. Strings, escaping, key order and integers are byte-identical
+  (compared on about 2.6 million values).
+
 ## [0.24.5] - a Linux install that works from the archive
 
 The Linux archive's own installer could not install it, and `ghost_browser_launch`
