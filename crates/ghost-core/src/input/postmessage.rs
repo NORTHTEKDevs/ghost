@@ -177,7 +177,11 @@ impl BackgroundClicker {
 
     /// Click a standard button-class control via BM_CLICK - the cleanest
     /// non-activating way to press a real Win32 button (no cursor, no foreground).
-    /// SendMessageTimeout with ABORTIFHUNG so a wedged target can't block us.
+    ///
+    /// Posted, not sent: a button whose handler opens a modal dialog does not
+    /// return from a sent BM_CLICK until the dialog closes, so a bounded send
+    /// timed out and reported a click that worked as an error. `Ok` means
+    /// dispatched; the caller's click verification decides whether it took.
     pub fn button_click(hwnd_raw: isize) -> Result<(), CoreError> {
         crate::stop::ensure_not_stopped()?;
         let hwnd = hwnd_of(hwnd_raw);
@@ -185,15 +189,8 @@ impl BackgroundClicker {
             if !IsWindow(hwnd).as_bool() {
                 return Err(CoreError::WindowGone);
             }
-            let mut result: usize = 0;
-            // Nonzero function return = delivered; 0 = timed out / target hung.
-            let ret = SendMessageTimeoutW(
-                hwnd, BM_CLICK, WPARAM(0), LPARAM(0),
-                SEND_MESSAGE_TIMEOUT_FLAGS(SMTO_ABORTIFHUNG), 2000, Some(&mut result),
-            );
-            if ret.0 == 0 {
-                return Err(CoreError::Win32 { code: 0, context: "BM_CLICK send timed out / target hung" });
-            }
+            PostMessageW(hwnd, BM_CLICK, WPARAM(0), LPARAM(0))
+                .map_err(|e| CoreError::ComInit(format!("PostMessage BM_CLICK: {e}")))?;
         }
         Ok(())
     }
@@ -510,6 +507,83 @@ mod tests {
     #[test]
     fn button_click_returns_error_when_hwnd_is_zero() {
         assert!(matches!(BackgroundClicker::button_click(0), Err(CoreError::WindowGone)));
+    }
+
+    /// A button whose handler opens a modal dialog does not return from
+    /// BM_CLICK until the dialog closes. The click worked; it must not be
+    /// reported as a failure, nor hold the caller for the dialog's lifetime.
+    /// The "button" is this test's own message-only window (no desktop, no
+    /// input), whose BM_CLICK handler runs a 2.5 s message loop like a modal.
+    #[test]
+    fn a_click_whose_handler_runs_a_modal_loop_is_dispatched_not_failed() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::time::{Duration, Instant};
+        use windows::core::w;
+        use windows::Win32::Foundation::LRESULT;
+        use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, PeekMessageW,
+            PostQuitMessage, RegisterClassW, HWND_MESSAGE, MSG, PM_REMOVE, WINDOW_EX_STYLE,
+            WINDOW_STYLE, WM_CLOSE, WM_DESTROY, WNDCLASSW,
+        };
+        static HANDLED: AtomicBool = AtomicBool::new(false);
+
+        unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+            match m {
+                BM_CLICK => {
+                    let end = Instant::now() + Duration::from_millis(2500);
+                    let mut msg = MSG::default();
+                    while Instant::now() < end {
+                        while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                            DispatchMessageW(&msg);
+                        }
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    HANDLED.store(true, Ordering::SeqCst);
+                    LRESULT(0)
+                }
+                WM_DESTROY => {
+                    PostQuitMessage(0);
+                    LRESULT(0)
+                }
+                _ => DefWindowProcW(h, m, wp, lp),
+            }
+        }
+
+        let (tx, rx) = std::sync::mpsc::channel::<isize>();
+        let worker = std::thread::spawn(move || unsafe {
+            let inst = GetModuleHandleW(None).expect("module");
+            let class = w!("GhostTestModalButton");
+            let wc = WNDCLASSW { lpfnWndProc: Some(proc), hInstance: inst.into(), lpszClassName: class, ..Default::default() };
+            RegisterClassW(&wc);
+            let h = CreateWindowExW(
+                WINDOW_EX_STYLE(0), class, w!(""), WINDOW_STYLE(0), 0, 0, 0, 0,
+                HWND_MESSAGE, None, inst, None,
+            )
+            .expect("message-only window");
+            tx.send(h.0 as isize).unwrap();
+            let mut msg = MSG::default();
+            while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+                DispatchMessageW(&msg);
+            }
+        });
+        let h = rx.recv().unwrap();
+
+        let t0 = Instant::now();
+        let r = BackgroundClicker::button_click(h);
+        let took = t0.elapsed();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !HANDLED.load(Ordering::SeqCst) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        unsafe {
+            let _ = PostMessageW(hwnd_of(h), WM_CLOSE, WPARAM(0), LPARAM(0));
+        }
+        worker.join().unwrap();
+
+        assert!(r.is_ok(), "the click was delivered: {r:?}");
+        assert!(took < Duration::from_millis(500), "held the caller for {took:?}");
+        assert!(HANDLED.load(Ordering::SeqCst), "the button never received BM_CLICK");
     }
 
     #[test]
