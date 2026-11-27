@@ -2237,7 +2237,14 @@ impl GhostSession {
         let mut last_seq = bus.seq();
         loop {
             if is_stopped() { return Err(GhostError::Stopped); }
-            let probe = self.find_in_hwnd(hwnd, &by, "wait_for_element")?;
+            let probe = match self.find_in_hwnd(hwnd, &by, "wait_for_element") {
+                Ok(p) => p,
+                // The scoped lookup fails once the window itself is gone. For
+                // appears=false (a "Saving..." dialog going away) that is the
+                // wait succeeding, not an error.
+                Err(_) if closed_window_is_vanished(appears, window_gone(hwnd)) => return Ok(()),
+                Err(e) => return Err(e),
+            };
             if probe.is_some() == appears {
                 return Ok(());
             }
@@ -3386,6 +3393,26 @@ impl<'a> OpsDispatcher for SessionOpsDispatcher<'a> {
 /// accepts, for up to `settle_ms`, and answer that window. The foreground is
 /// checked at once and then every 20 ms, and every check comes before the
 /// deadline test, so a theft is still seen when a sleep overshoots.
+/// `wait_for_element`: a window-scoped lookup failed and the window itself has
+/// gone. The element went with it, so a wait for it to vanish is satisfied; a
+/// wait for it to appear is not.
+fn closed_window_is_vanished(appears: bool, window_gone: bool) -> bool {
+    !appears && window_gone
+}
+
+/// Whether `hwnd` no longer names a window. `GetWindowThreadProcessId` gives
+/// no process for a destroyed handle. Other platforms cannot tell here, so a
+/// failed lookup stays an error there.
+#[cfg(windows)]
+fn window_gone(hwnd: isize) -> bool {
+    crate::engine::system::window_pid(hwnd) == 0
+}
+
+#[cfg(not(windows))]
+fn window_gone(_hwnd: isize) -> bool {
+    false
+}
+
 /// Run `fut` as its own task and wait for it. A tool deadline or
 /// notifications/cancelled aborts the tool's task at whatever await it is
 /// parked on; work that must finish (handing the foreground back) runs here,
@@ -3800,6 +3827,32 @@ mod abort_cleanup_tests {
         let start = src.find("pub async fn paste_text(").expect("paste_text");
         let body = &src[start..start + src[start..].find("\n    }\n").expect("end")];
         assert!(body.contains("paste_via_clipboard("), "{body}");
+    }
+}
+
+#[cfg(test)]
+mod wait_vanish_tests {
+    use super::closed_window_is_vanished;
+
+    #[test]
+    fn a_closed_target_window_satisfies_a_wait_for_it_to_go() {
+        // Waiting for a "Saving..." dialog to go away: the dialog closing IS
+        // the element vanishing.
+        assert!(closed_window_is_vanished(false, true));
+        // Waiting for something to appear in a window that closed: an error.
+        assert!(!closed_window_is_vanished(true, true));
+        // The window is still there: the lookup error is real.
+        assert!(!closed_window_is_vanished(false, false));
+        assert!(!closed_window_is_vanished(true, false));
+    }
+
+    #[test]
+    fn wait_for_element_checks_the_window_before_failing_the_lookup() {
+        let src = include_str!("session.rs");
+        let start = src.find("pub async fn wait_for_element(").expect("wait_for_element");
+        let body = &src[start..start + src[start..].find("\n    }\n").expect("end")];
+        assert!(body.contains("closed_window_is_vanished(appears, window_gone(hwnd))"), "{body}");
+        assert!(!body.contains("find_in_hwnd(hwnd, &by, \"wait_for_element\")?"), "a failed lookup still errors out first:\n{body}");
     }
 }
 
