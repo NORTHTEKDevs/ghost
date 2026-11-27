@@ -85,7 +85,7 @@ Two features make network requests, both only when you ask for them:
 - **Browser control.** `ghost_browser_*` talks to a browser's DevTools endpoint
   on `127.0.0.1`. That request never leaves the machine.
 
-`ghost_http` binds to localhost and is off unless started.
+`ghost-http` binds to localhost and is off unless started.
 
 Ghost reads a great deal *locally* - window contents, the screen, other
 processes' command lines - because that is what a desktop automation tool is.

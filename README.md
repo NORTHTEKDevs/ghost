@@ -555,6 +555,14 @@ a tool that quietly ships without the thing people install it for is worse than
 one that tells you plainly what it can do. If that is more than you want to
 hand over, the checkbox is right there and the refusal is explicit.
 
+Three more environment variables change behaviour; none is set by default:
+
+| Variable | Effect |
+| --- | --- |
+| `GHOST_HTTP_ALLOW_PRIVATE=1` | lets `ghost_http_get`/`ghost_http_post` reach loopback, private and link-local addresses (refused otherwise) |
+| `GHOST_BROWSER_PATH` | the Chromium-family browser `ghost_browser_launch` starts, instead of the one Ghost finds |
+| `GHOST_TOOL_DEADLINE_MS` | the per-call deadline for a tool, default 180000 ms (a call's own `timeout_ms` raises it) |
+
 A locked policy still leaves one thing outside Ghost's control: an application
 can activate its OWN window, and Chromium does exactly that when an agent types
 into a page or clicks a button through the accessibility API. Nothing outside

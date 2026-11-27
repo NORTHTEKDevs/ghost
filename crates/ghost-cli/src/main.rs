@@ -39,8 +39,8 @@ mod engine {
 #[command(
     name = "ghost",
     version,
-    about = "Windows desktop automation - UIA + SendInput, no CDP, MCP-native",
-    long_about = "Automate Windows apps via UI Automation and SendInput.\n\
+    about = "Desktop and browser automation for agents - Windows UIA, Linux AT-SPI, CDP",
+    long_about = "Automate desktop apps (UI Automation on Windows, AT-SPI on Linux) and browsers (CDP).\n\
                   Use subcommands for one-shot actions or `run` to execute a JSON intent."
 )]
 struct Cli {
