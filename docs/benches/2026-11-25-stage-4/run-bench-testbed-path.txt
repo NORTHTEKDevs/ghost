@@ -1,4 +1,4 @@
 <stdin>:4: SyntaxWarning: "\g" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\g"? A raw string is also an option.
-exe         C:\Users\Krist\projects\active\ghost\target-improve\release\ghost-mcp.exe
-testbed     C:\Users\Krist\projects\active\ghost\target-improve\release\ghost-testbed.exe exists: True
+exe         <repo>\target-improve\release\ghost-mcp.exe
+testbed     <repo>\target-improve\release\ghost-testbed.exe exists: True
 value_equals_assert -> (True, "read_back='Field' assert_passed=True", None)

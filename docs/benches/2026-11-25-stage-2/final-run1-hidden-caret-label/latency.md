@@ -1,4 +1,4 @@
-exe: C:\Users\Krist\projects\active\ghost\target-improve\release\ghost-mcp.exe
+exe: <repo>\target-improve\release\ghost-mcp.exe
 surface: hidden
 control: caret-label
 

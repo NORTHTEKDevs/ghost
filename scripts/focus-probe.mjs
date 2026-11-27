@@ -119,7 +119,7 @@ async function op(label, name, args) {
   return r;
 }
 
-await op('A  web input: type (ValuePattern rung)', 'ghost_act', { window: W, name: 'First name', role: 'edit', action: 'type', text_input: 'Kristian' });
+await op('A  web input: type (ValuePattern rung)', 'ghost_act', { window: W, name: 'First name', role: 'edit', action: 'type', text_input: 'Ada' });
 await op('B  web button: click (Invoke rung)', 'ghost_act', { window: W, name: 'Save changes', role: 'button', action: 'click' });
 await op('C  web textarea: type (ValuePattern rung)', 'ghost_act', { window: W, name: 'Notes', role: 'edit', action: 'type', text_input: 'a note' });
 await op('D  contenteditable: type (posted keys)', 'ghost_act', { window: W, name: 'Rich editor', action: 'type', text_input: 'rich' });

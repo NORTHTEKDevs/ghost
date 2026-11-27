@@ -1,3 +1,3 @@
-    Checking ghost-mcp v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-mcp)
+    Checking ghost-mcp v0.23.4 (<repo>\crates\ghost-mcp)
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.65s
 exit=0

@@ -6,7 +6,7 @@ description = "Background browser automation for Ghost via the Chrome DevTools P
 keywords = ["automation", "browser", "cdp", "chrome", "agent"]
 categories = ["os::windows-apis", "asynchronous"]
 license = "MIT"
-repository = "https://github.com/FrostbyteDevTeam/ghost"
+repository = "https://github.com/NORTHTEKDevs/ghost"
 readme = "../../README.md"
 
 [dependencies]

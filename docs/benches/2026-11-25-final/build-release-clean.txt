@@ -160,9 +160,9 @@
    Compiling clap_derive v4.6.1
    Compiling axum-macros v0.4.2
    Compiling rand_chacha v0.3.1
-   Compiling ghost-mcp v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-mcp)
-   Compiling ghost-http v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-http)
-   Compiling ghost-cli v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-cli)
+   Compiling ghost-mcp v0.23.4 (<repo>\crates\ghost-mcp)
+   Compiling ghost-http v0.23.4 (<repo>\crates\ghost-http)
+   Compiling ghost-cli v0.23.4 (<repo>\crates\ghost-cli)
    Compiling rand v0.8.7
    Compiling rustls-webpki v0.103.13
    Compiling zerofrom-derive v0.1.7
@@ -176,11 +176,11 @@
    Compiling axum-core v0.4.5
    Compiling windows v0.58.0
    Compiling serde_urlencoded v0.7.1
-   Compiling ghost-ground v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-ground)
+   Compiling ghost-ground v0.23.4 (<repo>\crates\ghost-ground)
    Compiling faststr v0.2.34
    Compiling serde_yaml v0.9.34+deprecated
-   Compiling ghost-linux v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-linux)
-   Compiling ghost-platform v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-platform)
+   Compiling ghost-linux v0.23.4 (<repo>\crates\ghost-linux)
+   Compiling ghost-platform v0.23.4 (<repo>\crates\ghost-platform)
    Compiling zerofrom v0.1.7
    Compiling sonic-rs v0.3.17
    Compiling yoke v0.8.2
@@ -198,7 +198,7 @@
    Compiling tower v0.5.3
    Compiling tokio-rustls v0.26.4
    Compiling tokio-tungstenite v0.24.0
-   Compiling ghost-macos v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-macos)
+   Compiling ghost-macos v0.23.4 (<repo>\crates\ghost-macos)
    Compiling idna v1.1.0
    Compiling url v2.5.8
    Compiling tower-http v0.6.8
@@ -206,11 +206,11 @@
    Compiling hyper-rustls v0.27.9
    Compiling axum v0.7.9
    Compiling reqwest v0.12.28
-   Compiling ghost-cache v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-cache)
-   Compiling ghost-core v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-core)
-   Compiling ghost-browser v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-browser)
-   Compiling ghost-intent v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-intent)
-   Compiling ghost-session v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-session)
-   Compiling ghost-testbed v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-testbed)
+   Compiling ghost-cache v0.23.4 (<repo>\crates\ghost-cache)
+   Compiling ghost-core v0.23.4 (<repo>\crates\ghost-core)
+   Compiling ghost-browser v0.23.4 (<repo>\crates\ghost-browser)
+   Compiling ghost-intent v0.23.4 (<repo>\crates\ghost-intent)
+   Compiling ghost-session v0.23.4 (<repo>\crates\ghost-session)
+   Compiling ghost-testbed v0.23.4 (<repo>\crates\ghost-testbed)
     Finished `release` profile [optimized] target(s) in 1m 11s
 exit=0 wall_s=72 compiled=214 target_dir=target-final (fresh)

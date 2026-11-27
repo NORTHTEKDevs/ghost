@@ -1,4 +1,4 @@
-   Compiling ghost-mcp v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-mcp)
+   Compiling ghost-mcp v0.23.4 (<repo>\crates\ghost-mcp)
     Finished `test` profile [unoptimized + debuginfo] target(s) in 5.81s
      Running unittests src\lib.rs (target-improve\debug\deps\ghost_browser-784c1be5f8b6ae89.exe)
 

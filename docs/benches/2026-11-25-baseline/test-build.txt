@@ -191,9 +191,9 @@
    Compiling axum-core v0.4.5
    Compiling clap v4.6.1
    Compiling zerofrom v0.1.7
-   Compiling ghost-mcp v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-mcp)
-   Compiling ghost-cli v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-cli)
-   Compiling ghost-http v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-http)
+   Compiling ghost-mcp v0.23.4 (<repo>\crates\ghost-mcp)
+   Compiling ghost-cli v0.23.4 (<repo>\crates\ghost-cli)
+   Compiling ghost-http v0.23.4 (<repo>\crates\ghost-http)
    Compiling yoke v0.8.2
    Compiling zerovec v0.11.6
    Compiling zerotrie v0.2.4
@@ -209,13 +209,13 @@
    Compiling tower-http v0.6.8
    Compiling rand_chacha v0.3.1
    Compiling serde_urlencoded v0.7.1
-   Compiling ghost-ground v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-ground)
+   Compiling ghost-ground v0.23.4 (<repo>\crates\ghost-ground)
    Compiling tinytemplate v1.2.1
    Compiling faststr v0.2.34
    Compiling serde_yaml v0.9.34+deprecated
-   Compiling ghost-macos v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-macos)
-   Compiling ghost-linux v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-linux)
-   Compiling ghost-platform v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-platform)
+   Compiling ghost-macos v0.23.4 (<repo>\crates\ghost-macos)
+   Compiling ghost-linux v0.23.4 (<repo>\crates\ghost-linux)
+   Compiling ghost-platform v0.23.4 (<repo>\crates\ghost-platform)
    Compiling ciborium-ll v0.2.2
    Compiling sonic-rs v0.3.17
    Compiling rand v0.8.7
@@ -233,12 +233,12 @@
    Compiling axum v0.7.9
    Compiling url v2.5.8
    Compiling reqwest v0.12.28
-   Compiling ghost-core v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-core)
-   Compiling ghost-cache v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-cache)
-   Compiling ghost-browser v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-browser)
-   Compiling ghost-intent v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-intent)
-   Compiling ghost-session v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-session)
-   Compiling ghost-testbed v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-testbed)
+   Compiling ghost-core v0.23.4 (<repo>\crates\ghost-core)
+   Compiling ghost-cache v0.23.4 (<repo>\crates\ghost-cache)
+   Compiling ghost-browser v0.23.4 (<repo>\crates\ghost-browser)
+   Compiling ghost-intent v0.23.4 (<repo>\crates\ghost-intent)
+   Compiling ghost-session v0.23.4 (<repo>\crates\ghost-session)
+   Compiling ghost-testbed v0.23.4 (<repo>\crates\ghost-testbed)
     Finished `test` profile [unoptimized + debuginfo] target(s) in 54.93s
   Executable unittests src\lib.rs (target-improve\debug\deps\ghost_browser-784c1be5f8b6ae89.exe)
   Executable unittests src\lib.rs (target-improve\debug\deps\ghost_cache-41e9a78a7746efb6.exe)

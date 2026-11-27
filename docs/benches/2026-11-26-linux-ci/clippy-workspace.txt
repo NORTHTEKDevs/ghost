@@ -23,15 +23,15 @@
     Checking atspi-proxies v0.14.0
     Checking atspi-connection v0.14.0
     Checking atspi v0.30.0
-    Checking ghost-linux v0.24.0 (C:\Users\Krist\projects\active\ghost\crates\ghost-linux)
+    Checking ghost-linux v0.24.0 (<repo>\crates\ghost-linux)
    Compiling rustls v0.23.46
     Checking rustls-webpki v0.103.17
     Checking tokio-rustls v0.26.4
     Checking hyper-rustls v0.27.9
     Checking reqwest v0.12.28
-    Checking ghost-browser v0.24.0 (C:\Users\Krist\projects\active\ghost\crates\ghost-browser)
-    Checking ghost-session v0.24.0 (C:\Users\Krist\projects\active\ghost\crates\ghost-session)
-    Checking ghost-cli v0.24.0 (C:\Users\Krist\projects\active\ghost\crates\ghost-cli)
-    Checking ghost-mcp v0.24.0 (C:\Users\Krist\projects\active\ghost\crates\ghost-mcp)
-    Checking ghost-http v0.24.0 (C:\Users\Krist\projects\active\ghost\crates\ghost-http)
+    Checking ghost-browser v0.24.0 (<repo>\crates\ghost-browser)
+    Checking ghost-session v0.24.0 (<repo>\crates\ghost-session)
+    Checking ghost-cli v0.24.0 (<repo>\crates\ghost-cli)
+    Checking ghost-mcp v0.24.0 (<repo>\crates\ghost-mcp)
+    Checking ghost-http v0.24.0 (<repo>\crates\ghost-http)
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 27.71s

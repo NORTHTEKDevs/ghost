@@ -1,6 +1,6 @@
-    Checking ghost-session v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-session)
-    Checking ghost-http v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-http)
-    Checking ghost-mcp v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-mcp)
-    Checking ghost-cli v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-cli)
+    Checking ghost-session v0.23.4 (<repo>\crates\ghost-session)
+    Checking ghost-http v0.23.4 (<repo>\crates\ghost-http)
+    Checking ghost-mcp v0.23.4 (<repo>\crates\ghost-mcp)
+    Checking ghost-cli v0.23.4 (<repo>\crates\ghost-cli)
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.06s
 exit=0 wall_s=3

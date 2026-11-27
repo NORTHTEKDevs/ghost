@@ -112,7 +112,7 @@
     Checking simdutf8 v0.1.5
     Checking thiserror v2.0.18
     Checking ref-cast v1.0.25
-   Compiling ghost-mcp v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-mcp)
+   Compiling ghost-mcp v0.23.4 (<repo>\crates\ghost-mcp)
     Checking sonic-number v0.1.2
     Checking sonic-simd v0.1.4
     Checking mime v0.3.17
@@ -123,8 +123,8 @@
     Checking crossbeam-deque v0.8.6
     Checking tinystr v0.8.3
     Checking potential_utf v0.1.5
-   Compiling ghost-http v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-http)
-   Compiling ghost-cli v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-cli)
+   Compiling ghost-http v0.23.4 (<repo>\crates\ghost-http)
+   Compiling ghost-cli v0.23.4 (<repo>\crates\ghost-cli)
     Checking matchit v0.7.3
     Checking plotters-svg v0.3.7
     Checking png v0.18.1
@@ -157,8 +157,8 @@
     Checking serde_urlencoded v0.7.1
     Checking faststr v0.2.34
     Checking serde_yaml v0.9.34+deprecated
-    Checking ghost-linux v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-linux)
-    Checking ghost-platform v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-platform)
+    Checking ghost-linux v0.23.4 (<repo>\crates\ghost-linux)
+    Checking ghost-platform v0.23.4 (<repo>\crates\ghost-platform)
     Checking mio v1.2.0
     Checking socket2 v0.6.3
     Checking anstyle-query v1.1.5
@@ -166,7 +166,7 @@
     Checking winapi-util v0.1.11
     Checking is-terminal v0.4.17
     Checking nu-ansi-term v0.50.3
-    Checking ghost-ground v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-ground)
+    Checking ghost-ground v0.23.4 (<repo>\crates\ghost-ground)
     Checking tinytemplate v1.2.1
     Checking regex v1.12.3
     Checking ppv-lite86 v0.2.21
@@ -193,17 +193,17 @@
     Checking tower v0.5.3
     Checking tokio-rustls v0.26.4
     Checking tokio-tungstenite v0.24.0
-    Checking ghost-macos v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-macos)
+    Checking ghost-macos v0.23.4 (<repo>\crates\ghost-macos)
     Checking tower-http v0.6.8
     Checking hyper-util v0.1.20
     Checking hyper-rustls v0.27.9
     Checking axum v0.7.9
     Checking reqwest v0.12.28
-    Checking ghost-core v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-core)
-    Checking ghost-cache v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-cache)
-    Checking ghost-browser v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-browser)
-    Checking ghost-testbed v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-testbed)
-    Checking ghost-intent v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-intent)
-    Checking ghost-session v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-session)
+    Checking ghost-core v0.23.4 (<repo>\crates\ghost-core)
+    Checking ghost-cache v0.23.4 (<repo>\crates\ghost-cache)
+    Checking ghost-browser v0.23.4 (<repo>\crates\ghost-browser)
+    Checking ghost-testbed v0.23.4 (<repo>\crates\ghost-testbed)
+    Checking ghost-intent v0.23.4 (<repo>\crates\ghost-intent)
+    Checking ghost-session v0.23.4 (<repo>\crates\ghost-session)
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 21.75s
 exit=0 wall_s=22

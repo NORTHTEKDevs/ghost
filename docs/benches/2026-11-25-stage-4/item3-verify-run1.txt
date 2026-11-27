@@ -12,4 +12,4 @@ ghost verify - proving the product claims on this machine
   [PASS] foreground never taken by Ghost                hwnd 50072408 -> 50072408
 
 ALL CLAIMS HOLD: 10 checks passed in 4.9s. Ghost operates as advertised on this machine.
-exit=0 GHOST_MCP_PATH=C:\Users\Krist\projects\active\ghost\target-improve\release\ghost-mcp.exe
+exit=0 GHOST_MCP_PATH=<repo>\target-improve\release\ghost-mcp.exe

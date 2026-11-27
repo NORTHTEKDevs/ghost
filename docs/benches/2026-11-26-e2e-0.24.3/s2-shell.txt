@@ -18,7 +18,7 @@
 [PASS]
 
 >>> ghost_shell {"cmd":"(Get-Location).Path","cwd":"~"}  (181ms)
-<<< ok {"duration_ms":125,"exit_code":0,"ok":true,"output":"C:\\Users\\Krist\r\n","shell":"powershell","timed_out":false,"truncated":false,"warm":true}
+<<< ok {"duration_ms":125,"exit_code":0,"ok":true,"output":"C:\\Users\\<user>\r\n","shell":"powershell","timed_out":false,"truncated":false,"warm":true}
 [PASS]
 
 >>> ghost_shell {"cmd":"Start-Sleep 30","timeout_ms":1500}  (1649ms)

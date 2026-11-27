@@ -58,9 +58,9 @@
 
 ### Task 3: scrub tracked files
 
-- [ ] Step 1: replace `C:\Users\Krist\projects\active\ghost` (all slash/escape variants) with `<repo>`, then any remaining `Users\Krist` with `Users\<user>`, in `git grep -I -l` hits only.
+- [ ] Step 1: replace the maintainer's checkout path (all slash and JSON-escape variants) with `<repo>`, then any remaining home-directory path with `Users\<user>`, in `git grep -I -l` hits only.
 - [ ] Step 2: `crates/ghost-browser/Cargo.toml` repository -> NORTHTEKDevs; drop the generator comment in CRYSTAL.md.
-- [ ] Step 3: verify: `git grep -I -c -E 'Users[\\/]+Krist'` -> no output; secret pattern scan -> no output.
+- [ ] Step 3: verify: a `git grep` for the home-directory path -> no output; secret pattern scan -> no output.
 - [ ] Step 4: commit `chore: scrub personal paths from tracked bench logs`.
 
 ### Task 4: docs/ for users, internal records labelled

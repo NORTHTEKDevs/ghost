@@ -1,5 +1,5 @@
-   Compiling ghost-mcp v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-mcp)
-   Compiling ghost-cli v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-cli)
+   Compiling ghost-mcp v0.23.4 (<repo>\crates\ghost-mcp)
+   Compiling ghost-cli v0.23.4 (<repo>\crates\ghost-cli)
     Finished `test` profile [unoptimized + debuginfo] target(s) in 4.44s
      Running unittests src\lib.rs (target-improve\debug\deps\ghost_browser-784c1be5f8b6ae89.exe)
 
@@ -266,6 +266,6 @@ test uia::event_bus::tests::wait_times_out_when_no_events ... ok
 error: test failed, to rerun pass `-p ghost-core --lib`
 
 Caused by:
-  process didn't exit successfully: `C:\Users\Krist\projects\active\ghost\target-improve\debug\deps\ghost_core-0e0f6a9d9b12b14f.exe` (exit code: 1)
+  process didn't exit successfully: `<repo>\target-improve\debug\deps\ghost_core-0e0f6a9d9b12b14f.exe` (exit code: 1)
 note: test exited abnormally; to see the full output pass --no-capture to the harness.
 exit=1

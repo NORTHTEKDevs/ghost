@@ -1,7 +1,7 @@
-   Compiling ghost-session v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-session)
-   Compiling ghost-mcp v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-mcp)
-   Compiling ghost-http v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-http)
-   Compiling ghost-cli v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-cli)
+   Compiling ghost-session v0.23.4 (<repo>\crates\ghost-session)
+   Compiling ghost-mcp v0.23.4 (<repo>\crates\ghost-mcp)
+   Compiling ghost-http v0.23.4 (<repo>\crates\ghost-http)
+   Compiling ghost-cli v0.23.4 (<repo>\crates\ghost-cli)
     Finished `test` profile [unoptimized + debuginfo] target(s) in 10.53s
      Running unittests src\lib.rs (target-improve\debug\deps\ghost_browser-784c1be5f8b6ae89.exe)
 

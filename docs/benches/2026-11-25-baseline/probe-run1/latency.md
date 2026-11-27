@@ -1,4 +1,4 @@
-exe: C:\Users\Krist\projects\active\ghost\target-improve\release\ghost-mcp.exe
+exe: <repo>\target-improve\release\ghost-mcp.exe
 
 cold start (spawn->initialize, n=10): median 18.7 ms, p95 34.8 ms
 tools/list: 54 tools, 32094 bytes

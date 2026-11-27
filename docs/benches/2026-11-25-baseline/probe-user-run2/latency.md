@@ -1,4 +1,4 @@
-exe: C:\Users\Krist\projects\active\ghost\target-improve\release\ghost-mcp.exe
+exe: <repo>\target-improve\release\ghost-mcp.exe
 surface: user
 
 cold start (spawn->initialize, n=10): median 17.5 ms, p95 31.3 ms

@@ -1,4 +1,4 @@
-    Checking ghost-session v0.24.0 (C:\Users\Krist\projects\active\ghost\crates\ghost-session)
+    Checking ghost-session v0.24.0 (<repo>\crates\ghost-session)
 error: struct `Cover` is never constructed
   --> crates\ghost-session\src\session.rs:74:19
    |

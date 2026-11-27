@@ -167,9 +167,9 @@ async function op(phase, label, name, args, expect = {}) {
 
 async function coreVerbs(phase) {
   await op(phase, 'see (text)', 'ghost_see', { ...on, mode: 'text', limit: 300 });
-  await op(phase, 'type into web input (ValuePattern)', 'ghost_act', { ...on, name: 'First name', role: 'edit', action: 'type', text_input: 'Kristian' });
+  await op(phase, 'type into web input (ValuePattern)', 'ghost_act', { ...on, name: 'First name', role: 'edit', action: 'type', text_input: 'Ada' });
   await op(phase, 'click web button (Invoke)', 'ghost_act', { ...on, name: 'Save changes', role: 'button', action: 'click' });
-  await op(phase, 'assert value-contains', 'ghost_assert', { ...on, predicate: 'value-contains', name: 'First name', role: 'edit', text: 'Kristian' });
+  await op(phase, 'assert value-contains', 'ghost_assert', { ...on, predicate: 'value-contains', name: 'First name', role: 'edit', text: 'Ada' });
   await op(phase, 'posted key Tab', 'ghost_key', { ...on, keys: 'Tab' });
   await op(phase, 'posted wheel scroll', 'ghost_scroll', { ...on, direction: 'down', amount: 3 });
   await op(phase, 'posted click at button (ghost_run)', 'ghost_run', { steps: [{ op: 'ghost_find', ...on, name: 'Retitle', role: 'button' }, { op: 'ghost_click_at', ...on, x: '${steps.0.center.x}', y: '${steps.0.center.y}' }] });

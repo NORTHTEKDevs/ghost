@@ -50,14 +50,14 @@
    Compiling rayon v1.12.0
    Compiling regex v1.12.3
    Compiling tinytemplate v1.2.1
-   Compiling ghost-ground v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-ground)
+   Compiling ghost-ground v0.23.4 (<repo>\crates\ghost-ground)
    Compiling half v2.7.1
    Compiling ciborium-ll v0.2.2
    Compiling ciborium v0.2.2
    Compiling criterion v0.5.1
-   Compiling ghost-cache v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-cache)
-   Compiling ghost-core v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-core)
-   Compiling ghost-intent v0.23.4 (C:\Users\Krist\projects\active\ghost\crates\ghost-intent)
+   Compiling ghost-cache v0.23.4 (<repo>\crates\ghost-cache)
+   Compiling ghost-core v0.23.4 (<repo>\crates\ghost-core)
+   Compiling ghost-intent v0.23.4 (<repo>\crates\ghost-intent)
     Finished `bench` profile [optimized] target(s) in 28.38s
      Running benches\convert.rs (target-improve\release\deps\convert-75f16f52cdcf3522.exe)
 Gnuplot not found, using plotters backend
