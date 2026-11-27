@@ -18,6 +18,11 @@ updates:
     schedule:
       interval: monthly
     open-pull-requests-limit: 5
+    # ort is an exact pin on a release candidate behind the optional yolo
+    # feature, which CI does not build: rc.12 and rc.15 both broke that build.
+    # Move it by hand, with `cargo check -p ghost-ground --features yolo`.
+    ignore:
+      - dependency-name: ort
     groups:
       cargo-minor-and-patch:
         update-types: [minor, patch]
