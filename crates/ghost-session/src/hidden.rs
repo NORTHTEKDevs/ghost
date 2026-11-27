@@ -219,8 +219,10 @@ fn find_in_once(
 /// typing, so name-based lookups of edits are not stable there - use role.
 /// This used `get_text`, whose name fallback is never empty, so the window
 /// text was never read and a wait for an EDIT's value compared its label.
+/// Only a non-editable role with no ValuePattern falls back to its name
+/// (see [`crate::element::pick_value`]).
 pub(crate) fn element_value(el: &UiaElement) -> String {
-    crate::element::typed_value(el)
+    crate::element::read_value(el)
 }
 
 /// [`crate::session`]'s `poll_click_effect` for the hidden desktop's worker
@@ -553,7 +555,7 @@ impl GhostSession {
                     })?;
                     let t0 = Instant::now();
                     // Judged against what the field held before (see typed_ok).
-                    let before = crate::element::typed_value(&el);
+                    let before = crate::element::read_value(&el);
                     if composited {
                         // Same ~2 s wait for SetValue. The window is active on
                         // its own (undisplayed) desktop, so a posted click gives
@@ -592,7 +594,7 @@ impl GhostSession {
                     let deadline = Instant::now() + Duration::from_millis(600);
                     use ghost_core::input::readback::{judge_typed, Typed};
                     let outcome = loop {
-                        let got = crate::element::typed_value(&el);
+                        let got = crate::element::read_value(&el);
                         let verdict = judge_typed(&before, &got, &value, replace);
                         if matches!(verdict, None | Some(Typed::Landed)) || Instant::now() >= deadline {
                             break verdict;

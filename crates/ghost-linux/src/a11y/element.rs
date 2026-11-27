@@ -132,6 +132,15 @@ impl A11yElement {
             .unwrap_or_default()
     }
 
+    /// The Text/Value content only, never the accessible name.
+    pub fn value_text(&self) -> Option<String> {
+        let addr = self.addr.clone();
+        self.bridge
+            .run_default(move |ctx| Box::pin(async move { ops::read_value(ctx, &addr).await }))
+            .ok()
+            .flatten()
+    }
+
     pub fn set_focus(&self) -> Result<()> {
         let addr = self.addr.clone();
         let ok = self

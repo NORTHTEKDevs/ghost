@@ -3587,7 +3587,7 @@ async fn handle_ghost_assert(
                     .find(by)
                     .await
                     .map_err(|e| format!("assert failed: element not found - {e}"))?
-                    .get_text(),
+                    .typed_value(),
             };
             let passed = if predicate == "value-equals" {
                 actual == expected

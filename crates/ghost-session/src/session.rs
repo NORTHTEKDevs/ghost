@@ -3189,13 +3189,9 @@ impl GhostSession {
             None => None,
         };
         match el {
-            // On Windows a classic EDIT can report an empty UIA value while its
-            // text is readable from the control itself; elsewhere the
-            // accessibility value is all there is.
-            #[cfg(windows)]
-            Some(e) => Ok(crate::hidden::element_value(&e)),
-            #[cfg(not(windows))]
-            Some(e) => Ok(e.get_text()),
+            // One rule on every platform: the value, else (Windows) the
+            // control's own text, else the name for a non-editable role only.
+            Some(e) => Ok(crate::element::read_value(&e)),
             None => Err(GhostError::ElementNotFound {
                 query: format!("{:?} in window {hwnd:#x}", name.unwrap_or_default()),
                 screenshot: None,

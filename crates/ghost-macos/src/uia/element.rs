@@ -81,6 +81,10 @@ impl UiaElement {
     pub fn get_text(&self) -> String {
         String::new()
     }
+
+    pub fn value_text(&self) -> Option<String> {
+        None
+    }
 }
 
 /// Identical to `ghost_core::uia::element::role_id_to_name` / the

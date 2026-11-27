@@ -85,13 +85,11 @@ impl GhostElement {
         self.inner.get_text()
     }
 
-    /// The text a typing read-back may judge: the ValuePattern value, else the
-    /// control's WM_GETTEXT. Never the element name (see `UiaElement::value_text`).
+    /// The element's value for a read or a typing read-back: the ValuePattern
+    /// value, else the control's WM_GETTEXT; the name only for a non-editable
+    /// role with no ValuePattern (see [`pick_value`]).
     pub fn typed_value(&self) -> String {
-        #[cfg(windows)]
-        return typed_value(&self.inner);
-        #[cfg(not(windows))]
-        return self.inner.get_text();
+        read_value(&self.inner)
     }
 
     /// Get the element's current text SELECTION via TextPattern (empty if none /
@@ -159,52 +157,98 @@ pub(crate) fn refuse_as_disabled(enabled: Option<bool>) -> bool {
     enabled == Some(false)
 }
 
-/// [`GhostElement::typed_value`] for a bare UIA element.
+/// The value a read reports for a bare element: see [`pick_value`].
+pub(crate) fn read_value(el: &crate::engine::uia::element::UiaElement) -> String {
+    let role = crate::engine::uia::element::role_id_to_name(el.control_type());
+    pick_value(role, el.value_text(), || window_text(el), || el.name())
+}
+
 #[cfg(windows)]
-pub(crate) fn typed_value(el: &crate::engine::uia::element::UiaElement) -> String {
-    pick_value(el.value_text(), || {
-        let ctrl = el.native_window_handle();
-        if ctrl == 0 {
-            return None;
-        }
-        crate::engine::input::BackgroundClicker::read_text(ctrl)
-    })
+fn window_text(el: &crate::engine::uia::element::UiaElement) -> Option<String> {
+    let ctrl = el.native_window_handle();
+    if ctrl == 0 {
+        return None;
+    }
+    crate::engine::input::BackgroundClicker::read_text(ctrl)
+}
+
+#[cfg(not(windows))]
+fn window_text(_el: &crate::engine::uia::element::UiaElement) -> Option<String> {
+    None
 }
 
 /// An element's value: the ValuePattern value when it has text, else the
-/// control's own window text, else empty. Never the element name: a wait or
-/// read-back that fell back to the name compared against a label ("Field"),
-/// not against what the field contains.
-#[cfg_attr(not(windows), allow(dead_code))]
-pub(crate) fn pick_value(value: Option<String>, window_text: impl FnOnce() -> Option<String>) -> String {
+/// control's own window text. An editable role (edit/document/combobox) never
+/// reads its name: a wait that fell back to the name compared against a label
+/// ("Field"), not against what the field contains. Any other role with no
+/// ValuePattern at all (`value` is `None`) reads its name, because for a
+/// windowless label or status text (WPF/UWP/Chromium text, a status bar) the
+/// name IS the visible text.
+pub(crate) fn pick_value(
+    role: &str,
+    value: Option<String>,
+    window_text: impl FnOnce() -> Option<String>,
+    name: impl FnOnce() -> String,
+) -> String {
+    let has_value_pattern = value.is_some();
     if let Some(v) = value.filter(|v| !v.is_empty()) {
         return v;
     }
-    window_text().unwrap_or_default()
+    if let Some(t) = window_text().filter(|t| !t.is_empty()) {
+        return t;
+    }
+    if has_value_pattern || is_editable_role_name(role) {
+        return String::new();
+    }
+    name()
+}
+
+/// [`crate::engine::uia::patterns::is_editable_role`] by role name.
+pub(crate) fn is_editable_role_name(role: &str) -> bool {
+    matches!(role, "edit" | "document" | "combobox")
 }
 
 #[cfg(test)]
 mod value_read_tests {
-    //! M7: a value read takes the ValuePattern value, else the control's own
-    //! window text. The element name is not an input at all.
+    //! A value read takes the ValuePattern value, else the control's own
+    //! window text. Only a non-editable role with no ValuePattern reads its name.
     use super::pick_value;
+
+    fn no_name() -> String {
+        panic!("an editable role must never read its name")
+    }
 
     #[test]
     fn the_value_pattern_wins_when_it_has_text() {
-        assert_eq!(pick_value(Some("hello".into()), || panic!("not needed")), "hello");
+        assert_eq!(pick_value("edit", Some("hello".into()), || panic!("not needed"), no_name), "hello");
     }
 
     #[test]
     fn an_empty_value_falls_back_to_the_window_text() {
         // A classic Win32 EDIT: the proxy's value is empty, WM_GETTEXT has it.
-        assert_eq!(pick_value(Some(String::new()), || Some("hello".into())), "hello");
-        assert_eq!(pick_value(None, || Some("hello".into())), "hello");
+        assert_eq!(pick_value("edit", Some(String::new()), || Some("hello".into()), no_name), "hello");
+        assert_eq!(pick_value("edit", None, || Some("hello".into()), no_name), "hello");
     }
 
     #[test]
-    fn nothing_readable_is_empty_never_the_name() {
-        assert_eq!(pick_value(None, || None), "");
-        assert_eq!(pick_value(Some(String::new()), || None), "");
+    fn an_editable_role_with_nothing_readable_is_empty_never_the_name() {
+        for role in ["edit", "document", "combobox"] {
+            assert_eq!(pick_value(role, None, || None, no_name), "", "{role}");
+            assert_eq!(pick_value(role, Some(String::new()), || None, no_name), "", "{role}");
+        }
+    }
+
+    #[test]
+    fn a_windowless_label_or_status_text_reads_its_name() {
+        for role in ["text", "statusbar"] {
+            assert_eq!(pick_value(role, None, || None, || "Done".into()), "Done", "{role}");
+        }
+    }
+
+    #[test]
+    fn a_non_editable_role_with_a_value_pattern_does_not_read_its_name() {
+        // An empty ValuePattern is an answer: the control has a value and it is empty.
+        assert_eq!(pick_value("text", Some(String::new()), || None, || "Done".into()), "");
     }
 }
 

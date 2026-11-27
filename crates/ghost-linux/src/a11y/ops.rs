@@ -257,6 +257,17 @@ pub async fn set_text_value(ctx: &Ctx, addr: &ObjAddr, text: &str) -> Result<boo
 /// Read an element's text: Text interface first, then Value, then the
 /// accessible name -- which for buttons and labels *is* the visible text.
 pub async fn read_text(ctx: &Ctx, addr: &ObjAddr) -> Result<String> {
+    if let Some(v) = read_value(ctx, addr).await? {
+        return Ok(v);
+    }
+    let acc = accessible(ctx, addr).await?;
+    Ok(acc.name().await.unwrap_or_default())
+}
+
+/// [`read_text`] without the name fallback: `None` when the element has no
+/// Text or Value content to read. A value read must not report a field's
+/// label as what the field contains.
+pub async fn read_value(ctx: &Ctx, addr: &ObjAddr) -> Result<Option<String>> {
     let acc = accessible(ctx, addr).await?;
     let ifaces = acc.get_interfaces().await.unwrap_or_default();
 
@@ -267,7 +278,7 @@ pub async fn read_text(ctx: &Ctx, addr: &ObjAddr) -> Result<String> {
         let count = t.character_count().await.unwrap_or(0);
         if count > 0 {
             if let Ok(s) = t.get_text(0, count).await {
-                return Ok(s);
+                return Ok(Some(s));
             }
         }
     }
@@ -275,12 +286,12 @@ pub async fn read_text(ctx: &Ctx, addr: &ObjAddr) -> Result<String> {
     if ifaces.contains(Interface::Value) {
         if let Ok(v) = value_iface(ctx, addr).await {
             if let Ok(cur) = v.current_value().await {
-                return Ok(format!("{cur}"));
+                return Ok(Some(format!("{cur}")));
             }
         }
     }
 
-    Ok(acc.name().await.unwrap_or_default())
+    Ok(None)
 }
 
 /// Currently selected text within an element.
