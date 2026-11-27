@@ -1216,6 +1216,7 @@ dependencies = [
  "atspi",
  "evdev",
  "image",
+ "libc",
  "serde",
  "serde_json",
  "thiserror 1.0.69",

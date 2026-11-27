@@ -320,6 +320,14 @@ pub mod hotkey {
     //! `stop_event_error` says why. Processes of one user that see different
     //! `XDG_RUNTIME_DIR` values do not share a stop.
     //!
+    //! Known denial of service, by design: on a multi-user host where
+    //! `XDG_RUNTIME_DIR` is unset, another local user can create
+    //! `/tmp/ghost-stop-<uid>` first (or a symlink there). That directory
+    //! fails the checks, so this user's Ghost counts as stopped until it is
+    //! removed - fail closed: a stop marker that cannot be trusted is treated
+    //! as a stop, never ignored. Setting `XDG_RUNTIME_DIR` (a login session
+    //! does) avoids the shared `/tmp`.
+    //!
     //! `STOP_FLAG` stays process-local: `ghost_stop scope=process` sets it
     //! alone.
 
@@ -338,10 +346,11 @@ pub mod hotkey {
     /// human's resume removes it.
     const HUMAN: &str = "human-stop";
 
-    /// This process's effective uid, from `/proc/self/status`.
-    fn euid() -> Option<u32> {
-        let status = std::fs::read_to_string("/proc/self/status").ok()?;
-        status.lines().find(|l| l.starts_with("Uid:"))?.split_whitespace().nth(2)?.parse().ok()
+    /// This process's effective uid. One syscall that cannot fail: it runs
+    /// on every `is_stopped`, i.e. before every action.
+    fn euid() -> u32 {
+        // SAFETY: geteuid has no preconditions and always succeeds.
+        unsafe { libc::geteuid() }
     }
 
     /// The marker directory this process uses.
@@ -360,8 +369,7 @@ pub mod hotkey {
         match std::env::var_os("XDG_RUNTIME_DIR").filter(|d| !d.is_empty()) {
             Some(d) => Ok(PathBuf::from(d).join("ghost")),
             None => {
-                let uid = euid().ok_or("cannot read this process's uid from /proc/self/status")?;
-                Ok(PathBuf::from(format!("/tmp/ghost-stop-{uid}")))
+                Ok(PathBuf::from(format!("/tmp/ghost-stop-{}", euid())))
             }
         }
     }
@@ -376,7 +384,7 @@ pub mod hotkey {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
             Err(e) => return Err(format!("cannot read the stop marker dir {}: {e}", dir.display())),
         };
-        let uid = euid().ok_or("cannot read this process's uid from /proc/self/status")?;
+        let uid = euid();
         if !meta.file_type().is_dir() {
             Err(format!("the stop marker dir {} is not a directory", dir.display()))
         } else if meta.uid() != uid {
@@ -536,6 +544,27 @@ pub mod hotkey {
         let Ok(b) = super::backend() else { return };
         for sym in MODIFIERS {
             let _ = b.key(super::VirtualKey(sym), false);
+        }
+    }
+
+    #[cfg(test)]
+    mod uid_tests {
+        /// `is_stopped` runs on every action: the uid comes from the kernel
+        /// (one syscall), not from parsing `/proc/self/status` each time.
+        #[test]
+        fn euid_is_the_syscall_not_a_proc_read() {
+            let src = include_str!("mod.rs");
+            let start = src.find("    fn euid()").expect("euid");
+            let body = &src[start..start + src[start..].find("
+    }").expect("end")];
+            assert!(!body.contains("/proc/self/status"), "euid still reads /proc:
+{body}");
+            assert!(body.contains("geteuid"), "{body}");
+        }
+
+        #[test]
+        fn euid_matches_the_kernel() {
+            assert_eq!(super::euid(), unsafe { libc::geteuid() });
         }
     }
 }

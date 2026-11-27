@@ -52,6 +52,14 @@ none.
 - Emergency stop: **Ctrl+Alt+G** halts automation on Windows and on X11. Wayland
   does not permit clients to grab keys globally, so there the stop path is the
   `ghost_stop` verb.
+- On Linux the shared stop is marker files in `$XDG_RUNTIME_DIR/ghost/`, or
+  `/tmp/ghost-stop-<uid>/` when `XDG_RUNTIME_DIR` is unset. A marker directory
+  that is not this user's private directory fails closed (every Ghost process
+  of that user counts as stopped). On a multi-user host without
+  `XDG_RUNTIME_DIR`, another local user can therefore pre-create that `/tmp`
+  path and hold the stop up: a denial of service, accepted by design rather
+  than ever ignoring a stop. Run Ghost in a login session (which sets
+  `XDG_RUNTIME_DIR`) to avoid it.
 
 ## Supported versions
 

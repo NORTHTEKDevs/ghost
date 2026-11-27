@@ -20,6 +20,8 @@ serde = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 image = { workspace = true }
+# geteuid() for the stop-marker owner check (already in the tree via tokio).
+libc = "0.2"
 serde_json = { workspace = true }
 
 # AT-SPI2 over D-Bus. Pure Rust (zbus) - no at-spi2-core-devel needed to build.
