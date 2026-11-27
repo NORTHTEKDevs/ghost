@@ -3558,3 +3558,19 @@ mod refusal_kind_tests {
         assert!(matches!(PickMiss::HintMinimized.explain("ghost_key", "Bed"), GhostError::ElementNotInteractable { .. }));
     }
 }
+
+/// The session's clipboard writer checks the stop before it writes. Read from
+/// the source, not called: a test that called it would write to the human's
+/// real clipboard if the gate ever regressed.
+#[cfg(test)]
+mod clipboard_gate_tests {
+    #[test]
+    fn set_clipboard_checks_the_stop_before_writing() {
+        let src = include_str!("session.rs");
+        let start = src.find("pub async fn set_clipboard(").expect("set_clipboard");
+        let body = &src[start..start + src[start..].find("\n    }").expect("end")];
+        let gate = body.find("ensure_not_stopped()?").expect("no stop gate in set_clipboard");
+        let write = body.find("core_set_clipboard(").expect("no write in set_clipboard");
+        assert!(gate < write, "the stop gate must come before the write:\n{body}");
+    }
+}

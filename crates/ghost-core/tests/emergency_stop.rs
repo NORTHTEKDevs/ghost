@@ -9,7 +9,7 @@
 //!
 //! What is called after a reset targets nothing real: hwnd 0, a window name and
 //! a program that do not exist. Primitives whose un-gated call would touch
-//! the real desktop (SendInput, the clipboard, raising the window under a
+//! the real desktop (SendInput, raising the window under a
 //! point) are only called while stopped.
 
 #![cfg(windows)]
@@ -84,7 +84,9 @@ fn window_process_and_clipboard_primitives_refuse_while_stopped() {
         )));
         assert!(is_stopped_err(ghost_core::uia::tree::focus_window_under_point(1, 1)));
         assert!(is_stopped_err(ghost_core::process::launch("ghost-emergency-stop-test-no-such-program.exe")));
-        assert!(is_stopped_err(ghost_core::system::clipboard::set_clipboard("must not land")));
+        // set_clipboard is deliberately not called: if its gate regressed, the
+        // call would overwrite the human's real clipboard. Its stop decision is
+        // tested with a fake writer in system::clipboard's unit tests.
         assert!(is_stopped_err(ghost_core::desktop::scroll_window(0, 1, false)));
         assert!(is_stopped_err(ghost_core::input::mouse::click(1, 1)));
         assert!(is_stopped_err(ghost_core::input::keyboard::press_key(

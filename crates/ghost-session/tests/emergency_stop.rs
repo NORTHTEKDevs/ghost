@@ -37,7 +37,9 @@ async fn session_actions_refuse_while_stopped_and_run_after_reset() {
     refused("focus_window", s.focus_window(NO_SUCH).await);
     refused("ensure_window_foreground", s.ensure_window_foreground(NO_SUCH).await);
     refused("window_state", s.window_state(NO_SUCH, "minimize").await);
-    refused("set_clipboard", s.set_clipboard("must not land").await);
+    // set_clipboard is deliberately not called: if its gate regressed, the call
+    // would overwrite the human's real clipboard (see
+    // `set_clipboard_checks_the_stop_before_writing` in session.rs).
     refused("execute_intent", s.execute_intent("{}").await);
     refused("desktop_create", s.desktop_create("stoptest").await);
     refused("desktop_launch", s.desktop_launch("stoptest", "x.exe").await);
