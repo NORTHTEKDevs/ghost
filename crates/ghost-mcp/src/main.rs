@@ -1696,6 +1696,12 @@ async fn prepare_window_target(
                     m.remove("window");
                 }
             }
+            // ghost_wait searches only the window reported as its target, so
+            // the foreground it was resolved to must not be re-read later.
+            if name == "ghost_wait" && target.hwnd != 0 && !target.is_hidden() {
+                let a = new_args.get_or_insert_with(|| args.clone());
+                a["_target_hwnd"] = json!(target.hwnd);
+            }
         }
     }
     Ok(PreparedTarget { args: new_args, target: Some(target) })
@@ -2486,7 +2492,8 @@ async fn handle_tool(
             let text = p["text"].as_str().ok_or("missing param: text")?;
             let appears = p["appears"].as_bool().unwrap_or(true);
             let timeout_ms = p["timeout_ms"].as_u64().unwrap_or(5000);
-            session.click_and_wait_for_text(by, text, appears, timeout_ms).await.map_err(|e| e.to_string())?;
+            let hwnd = wait_scope_hwnd(session, p).await?;
+            session.click_and_wait_for_text(hwnd, by, text, appears, timeout_ms).await.map_err(|e| e.to_string())?;
             Ok(json!({ "ok": true }))
         }
         "ghost_fill_form" => {
@@ -2593,7 +2600,8 @@ async fn handle_tool(
             let appears = p["appears"].as_bool().unwrap_or(true);
             let timeout_ms = p["timeout_ms"].as_u64().unwrap_or(5000);
             let by = parse_by(p)?;
-            session.wait_for_element(by, appears, timeout_ms).await.map_err(|e| e.to_string())?;
+            let hwnd = wait_scope_hwnd(session, p).await?;
+            session.wait_for_element(hwnd, by, appears, timeout_ms).await.map_err(|e| e.to_string())?;
             Ok(json!({ "ok": true, "appeared": appears }))
         }
         "ghost_wait_for_value" => {
@@ -2601,7 +2609,8 @@ async fn handle_tool(
             let expected = p["text"].as_str().unwrap_or("");
             let timeout_ms = p["timeout_ms"].as_u64().unwrap_or(5000);
             let by = parse_by(p)?;
-            let value = session.wait_for_value(by, pred, expected, timeout_ms).await.map_err(|e| e.to_string())?;
+            let hwnd = wait_scope_hwnd(session, p).await?;
+            let value = session.wait_for_value(hwnd, by, pred, expected, timeout_ms).await.map_err(|e| e.to_string())?;
             Ok(json!({ "ok": true, "value": value }))
         }
         "ghost_wait_for_event" => {
@@ -3102,6 +3111,33 @@ fn parse_key_combo(keys: &str) -> std::result::Result<(Vec<String>, String), Str
         return Err(format!("ghost_key: malformed 'keys' value {keys:?} - empty modifier segment (e.g. 'Ctrl++Shift' is invalid)"));
     }
     Ok((modifiers.into_iter().map(String::from).collect(), key.to_string()))
+}
+
+/// The window a ghost_wait for=text|element|value searches: the handle the
+/// resolver chose (`_target_hwnd`), else the window resolved now from
+/// `window=` / the anchor / the foreground (`(hwnd, hidden)`). Never the whole
+/// desktop: with no user-desktop window there is nothing to search.
+fn wait_scope(hint: Option<isize>, resolved: Option<(isize, bool)>) -> std::result::Result<isize, String> {
+    if let Some(h) = hint.filter(|h| *h != 0) {
+        return Ok(h);
+    }
+    match resolved {
+        Some((h, false)) if h != 0 => Ok(h),
+        Some((_, true)) => Err("ghost_wait: the target is on a hidden desktop; call ghost_wait with window=<title> so it routes to that desktop".into()),
+        _ => Err("ghost_wait: no target window - pass window=<title> (or anchor one with ghost_window op=anchor); a wait never searches the whole desktop".into()),
+    }
+}
+
+async fn wait_scope_hwnd(session: &GhostSession, p: &Value) -> std::result::Result<isize, String> {
+    let hint = p["_target_hwnd"].as_i64().map(|h| h as isize).filter(|h| *h != 0);
+    let resolved = match hint {
+        Some(_) => None,
+        None => {
+            let t = session.resolve_target(p["window"].as_str()).await.map_err(|e| e.to_string())?;
+            Some((t.hwnd, t.is_hidden()))
+        }
+    };
+    wait_scope(hint, resolved)
 }
 
 /// `ghost_wait(for=idle|text|event|cond|ms, ...)` - unified wait dispatch.
@@ -4851,6 +4887,19 @@ mod tests {
             let raw = format!(r#"{{"jsonrpc":"2.0","id":9,"method":"ghost_stop","params":{args}}}"#);
             assert_eq!(stop_request(&raw), None, "{args}");
         }
+    }
+
+    /// ghost_wait for=text|element|value searches exactly the resolved window:
+    /// the handle the resolver chose wins, a resolved user-desktop window is
+    /// next, and with neither there is no desktop-wide fallback.
+    #[test]
+    fn ghost_wait_searches_only_the_resolved_window() {
+        assert_eq!(wait_scope(Some(0x1234), Some((0x55, false))), Ok(0x1234));
+        assert_eq!(wait_scope(None, Some((0x55, false))), Ok(0x55));
+        assert!(wait_scope(None, Some((0x55, true))).is_err(), "hidden window is not a user-desktop search");
+        assert!(wait_scope(None, Some((0, false))).is_err(), "no window resolved");
+        assert!(wait_scope(None, None).is_err());
+        assert!(wait_scope(Some(0), None).is_err());
     }
 
     #[test]

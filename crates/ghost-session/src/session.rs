@@ -2122,25 +2122,42 @@ impl GhostSession {
         }))
     }
 
-    /// Click an element, then wait for `expected_text` to appear (or disappear) on screen.
-    /// Uses scoped (foreground-window) search instead of full desktop describe walks.
+    /// Name/role lookup inside window `hwnd` only. A window that has gone is an
+    /// error, never a fallback to the foreground or the desktop.
+    fn find_in_hwnd(&self, hwnd: isize, by: &By, what: &str) -> Result<Option<crate::engine::uia::element::UiaElement>> {
+        match by {
+            By::Name(n) => self.tree.find_by_name_in_hwnd(hwnd, n).map_err(GhostError::Core),
+            By::Role(r) => self.tree.find_by_role_in_hwnd(hwnd, r).map_err(GhostError::Core),
+            By::Description(_) => Err(GhostError::Vision(format!("{what} supports name or role, not description"))),
+        }
+    }
+
+    /// Click an element in window `hwnd`, then wait for `expected_text` to
+    /// appear (or disappear) in that same window. Both searches are scoped to
+    /// `hwnd`: a same-named button in the human's window is never clicked.
     #[tracing::instrument(skip(self), fields(text = %expected_text, appears, timeout_ms))]
     pub async fn click_and_wait_for_text(
         &self,
+        hwnd: isize,
         target: By,
         expected_text: &str,
         appears: bool,
         timeout_ms: u64,
     ) -> Result<()> {
-        let el = self.find(target).await?;
-        el.click()?;
+        let el = self
+            .find_in_hwnd(hwnd, &target, "wait_for_text")?
+            .ok_or_else(|| GhostError::ElementNotFound {
+                query: format!("{target:?} in window {hwnd:#x}"),
+                screenshot: None,
+            })?;
+        crate::GhostElement::new(el).click()?;
         let start = std::time::Instant::now();
         let deadline = Duration::from_millis(timeout_ms);
         let bus = EventBus::global();
         let mut last_seq = bus.seq();
         loop {
             if is_stopped() { return Err(GhostError::Stopped); }
-            let probe = self.tree.find_by_name_fast(expected_text)
+            let probe = self.tree.find_by_name_in_hwnd(hwnd, expected_text)
                 .map_err(GhostError::Core)?;
             let found = probe.is_some();
             if found == appears {
@@ -2162,23 +2179,20 @@ impl GhostSession {
     }
 
     /// Wait until an element matching `by` (name or role) appears (`appears=true`)
-    /// or disappears (`appears=false`) in the foreground window, WITHOUT clicking
+    /// or disappears (`appears=false`) in window `hwnd`, WITHOUT clicking
     /// anything first. The common "wait until the Save button exists" primitive.
+    /// Scoped to `hwnd`: the same name elsewhere on the desktop neither satisfies
+    /// nor blocks it, and a closed window is an error, not "disappeared".
     /// Event-bus-driven backoff, same schedule as click_and_wait_for_text.
     #[tracing::instrument(skip(self), fields(?by, appears, timeout_ms))]
-    pub async fn wait_for_element(&self, by: By, appears: bool, timeout_ms: u64) -> Result<()> {
+    pub async fn wait_for_element(&self, hwnd: isize, by: By, appears: bool, timeout_ms: u64) -> Result<()> {
         let start = std::time::Instant::now();
         let deadline = Duration::from_millis(timeout_ms);
         let bus = EventBus::global();
         let mut last_seq = bus.seq();
         loop {
             if is_stopped() { return Err(GhostError::Stopped); }
-            let probe = match &by {
-                By::Name(n) => self.tree.find_by_name_fast(n).map_err(GhostError::Core)?,
-                By::Role(r) => self.tree.find_by_role_fast(r).map_err(GhostError::Core)?,
-                By::Description(_) => return Err(GhostError::Vision(
-                    "wait_for_element supports name or role, not description".into())),
-            };
+            let probe = self.find_in_hwnd(hwnd, &by, "wait_for_element")?;
             if probe.is_some() == appears {
                 return Ok(());
             }
@@ -2201,19 +2215,23 @@ impl GhostSession {
     /// value observed at call start). Returns the final value on success. Polls with
     /// the same event-bus backoff as wait_for_element. The "wait until this field
     /// fills / the total updates / autofill lands" primitive.
-    pub async fn wait_for_value(&self, by: By, pred: &str, expected: &str, timeout_ms: u64) -> Result<String> {
+    /// Scoped to window `hwnd`, like wait_for_element.
+    pub async fn wait_for_value(&self, hwnd: isize, by: By, pred: &str, expected: &str, timeout_ms: u64) -> Result<String> {
         let start = std::time::Instant::now();
         let deadline = Duration::from_millis(timeout_ms);
         let bus = EventBus::global();
         let mut last_seq = bus.seq();
+        let read = |by: &By| -> Result<String> {
+            Ok(self
+                .find_in_hwnd(hwnd, by, "wait_for_value")?
+                .map(|el| crate::GhostElement::new(el).get_text())
+                .unwrap_or_default())
+        };
         // Baseline for "changes".
-        let initial = self.find(by.clone()).await.ok().map(|e| e.get_text()).unwrap_or_default();
+        let initial = read(&by)?;
         loop {
             if is_stopped() { return Err(GhostError::Stopped); }
-            let current = match self.find(by.clone()).await {
-                Ok(el) => el.get_text(),
-                Err(_) => String::new(),
-            };
+            let current = read(&by)?;
             let satisfied = match pred {
                 "equals" => current == expected,
                 "contains" => current.contains(expected),
