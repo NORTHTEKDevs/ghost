@@ -595,12 +595,10 @@ mod platform {
     }
 
     /// Put a just-started shell in the job; its children join it as they start.
-    pub(super) fn confine(pid: Option<u32>) {
-        if let (Some(job), Some(pid)) = (job(), pid) {
-            if let Err(e) = job.adopt(pid) {
-                tracing::warn!(pid, "could not put the shell in the stop job: {e}");
-            }
-        }
+    pub(super) fn confine(pid: Option<u32>) -> Result<(), String> {
+        let pid = pid.ok_or("the shell has no process id")?;
+        let job = job().ok_or("the stop job could not be created")?;
+        job.adopt(pid).map_err(|e| format!("could not put the shell in the stop job: {e}"))
     }
 
     /// The processes in this server's stop job.
@@ -910,22 +908,24 @@ mod platform {
         }
     }
 
-    pub(super) fn confine(pid: Option<u32>) {
-        if let Some(pid) = pid {
-            if let Some(t) = start_time(pid) {
-                let mut g = GROUPS.lock().unwrap();
-                g.0.push((pid, t));
-                // Forget groups that have ended, once the list has doubled
-                // since the last prune: one /proc read amortized over many
-                // shells, so a long-lived server's list stays bounded.
-                if g.0.len() >= g.1 {
-                    let table = ProcTable::read();
-                    g.0.retain(|&(pgid, start)| table.group_still_ours(pgid, start));
-                    g.1 = (g.0.len() * 2).max(MIN_PRUNE_AT);
-                }
+    pub(super) fn confine(pid: Option<u32>) -> Result<(), String> {
+        let pid = pid.ok_or("the shell has no process id")?;
+        let t = start_time(pid)
+            .ok_or("could not read the shell's start time, so a stop could not tell its group from a reused id")?;
+        {
+            let mut g = GROUPS.lock().unwrap();
+            g.0.push((pid, t));
+            // Forget groups that have ended, once the list has doubled
+            // since the last prune: one /proc read amortized over many
+            // shells, so a long-lived server's list stays bounded.
+            if g.0.len() >= g.1 {
+                let table = ProcTable::read();
+                g.0.retain(|&(pgid, start)| table.group_still_ours(pgid, start));
+                g.1 = (g.0.len() * 2).max(MIN_PRUNE_AT);
             }
-            super::stop_kill::ensure_watcher();
         }
+        super::stop_kill::ensure_watcher();
+        Ok(())
     }
 
     #[cfg(test)]
@@ -1001,18 +1001,35 @@ use platform::confine;
 /// `adopt_delay` is zero except in tests, which widen the window between
 /// start and adoption to prove nothing escapes through it.
 fn spawn_confined(command: &mut Command, adopt_delay: Duration) -> std::io::Result<Child> {
+    spawn_confined_with(command, adopt_delay, &confine)
+}
+
+/// [`spawn_confined`] with the confining step injected, so a test can make it fail.
+fn spawn_confined_with(
+    command: &mut Command,
+    adopt_delay: Duration,
+    confine: &dyn Fn(Option<u32>) -> std::result::Result<(), String>,
+) -> std::io::Result<Child> {
     #[cfg(windows)]
     {
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         const CREATE_SUSPENDED: u32 = 0x0000_0004;
         command.creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED);
     }
-    #[allow(unused_mut)]
     let mut child = command.spawn()?;
     if !adopt_delay.is_zero() {
         std::thread::sleep(adopt_delay);
     }
-    confine(child.id());
+    // Fail closed: a shell the stop cannot reach never runs (on Windows it is
+    // still suspended here).
+    if let Err(e) = confine(child.id()) {
+        let _ = child.start_kill();
+        let until = Instant::now() + Duration::from_secs(2);
+        while matches!(child.try_wait(), Ok(None)) && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        return Err(std::io::Error::other(format!("refused to run the shell, the emergency stop could not reach it: {e}")));
+    }
     #[cfg(windows)]
     if let Err(e) = child.id().ok_or_else(|| "no pid".to_string()).and_then(platform::resume) {
         let _ = child.start_kill();
@@ -2321,7 +2338,7 @@ mod stop_reach_tests {
                 .creation_flags(CREATE_NO_WINDOW)
                 .spawn()
                 .expect("spawn ping");
-            platform::confine(Some(ping.id()));
+            platform::confine(Some(ping.id())).expect("confine");
             platform::snapshot(); // the watcher does this within a second
             println!("PING {}", ping.id());
             use std::io::Write;
@@ -2420,7 +2437,7 @@ mod stop_reach_tests {
     fn confined_sleeper() -> std::process::Child {
         use std::os::unix::process::CommandExt;
         let child = std::process::Command::new("sleep").arg("39").process_group(0).spawn().expect("sleep");
-        platform::confine(Some(child.id()));
+        platform::confine(Some(child.id())).expect("confine");
         child
     }
 
@@ -2584,7 +2601,7 @@ mod stop_reach_tests {
             .spawn()
             .expect("bash");
         let pgid = bash.id();
-        platform::confine(Some(pgid));
+        platform::confine(Some(pgid)).expect("confine");
         std::thread::sleep(Duration::from_millis(300));
         // The sleep in that group.
         let in_group = |pid: &str| {
@@ -2751,6 +2768,53 @@ mod session_tests {
             let _ = shell.wait().await;
             let ping = ping.expect("cmd never started ping");
             assert!(in_job, "ping {ping} started before its shell was adopted, outside the stop job");
+        });
+    }
+
+    /// A shell the stop could not reach is never let run: when confining it
+    /// fails, the spawn fails naming why and the suspended shell is ended.
+    #[test]
+    fn a_shell_that_cannot_be_confined_is_killed_not_resumed() {
+        rt().block_on(async {
+            #[cfg(windows)]
+            let mut cmd = {
+                let mut c = Command::new("cmd");
+                c.args(["/S", "/C", "ping -n 2 127.0.0.1 >nul"]);
+                no_console_window(&mut c);
+                c
+            };
+            #[cfg(unix)]
+            let mut cmd = {
+                let mut c = Command::new("sleep");
+                c.arg("1");
+                c
+            };
+            cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true);
+            in_own_group(&mut cmd);
+            let seen = std::sync::Mutex::new(None);
+            let failing = |pid: Option<u32>| {
+                *seen.lock().unwrap() = pid;
+                Err("injected adopt failure".to_string())
+            };
+            let res = spawn_confined_with(&mut cmd, Duration::ZERO, &failing);
+            let pid = seen.lock().unwrap().expect("confine saw the pid");
+            let mut child = match res {
+                Err(e) => {
+                    assert!(e.to_string().contains("injected adopt failure"), "{e}");
+                    None
+                }
+                Ok(c) => Some(c),
+            };
+            #[cfg(windows)]
+            let alive = platform::creation_time(pid).is_some();
+            #[cfg(unix)]
+            let alive = platform::start_time(pid).is_some();
+            if let Some(c) = child.as_mut() {
+                let _ = c.start_kill();
+                let _ = c.wait().await;
+            }
+            assert!(child.is_none(), "spawn must fail closed when confining fails");
+            assert!(!alive, "shell {pid} still exists after a failed confine");
         });
     }
 
