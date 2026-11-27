@@ -21,6 +21,32 @@ use std::sync::Arc;
 pub struct BrowserRegistry {
     pub(crate) browsers: HashMap<String, Arc<ghost_browser::Browser>>,
     pub(crate) tabs: HashMap<String, Arc<ghost_browser::Tab>>,
+    /// Ids (sanitized) of launches in flight, so two concurrent launches of one
+    /// id cannot both start a browser on the same profile directory.
+    launching: std::collections::HashSet<String>,
+}
+
+impl BrowserRegistry {
+    /// Claim `id` for a launch. Refused at once when a launch of it is in
+    /// flight or a browser is registered under it (or under an id that maps to
+    /// the same profile directory) - the second launch used to hang 20 s on the
+    /// locked profile and then report "did not publish a DevTools port".
+    pub(crate) fn reserve_launch(&mut self, id: &str) -> std::result::Result<(), String> {
+        let key = sanitize_id(id);
+        let taken =
+            self.launching.contains(&key) || self.browsers.keys().any(|k| sanitize_id(k) == key);
+        if taken {
+            return Err(format!(
+                "a browser is already registered as '{id}' (or is launching); use a different id, or ghost_browser_close it first"
+            ));
+        }
+        self.launching.insert(key);
+        Ok(())
+    }
+
+    pub(crate) fn release_launch(&mut self, id: &str) {
+        self.launching.remove(&sanitize_id(id));
+    }
 }
 
 /// Keep a caller-supplied id safe to use as a directory name.
@@ -128,6 +154,18 @@ impl GhostSession {
         which: Option<&str>,
     ) -> Result<serde_json::Value> {
         crate::error::ensure_not_stopped()?;
+        self.browsers.lock().await.reserve_launch(id).map_err(GhostError::Intent)?;
+        let result = self.launch_reserved(id, mode, which).await;
+        self.browsers.lock().await.release_launch(id);
+        result
+    }
+
+    async fn launch_reserved(
+        &self,
+        id: &str,
+        mode: &str,
+        which: Option<&str>,
+    ) -> Result<serde_json::Value> {
         let mode: ghost_browser::LaunchMode =
             mode.parse().unwrap_or(ghost_browser::LaunchMode::Headless);
         let executable = match which {
@@ -497,6 +535,22 @@ impl GhostSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_second_launch_of_one_id_is_refused_at_once() {
+        let mut reg = BrowserRegistry::default();
+        assert!(reg.reserve_launch("work").is_ok());
+        let e = reg.reserve_launch("work").expect_err("in flight");
+        assert!(e.contains("'work'") && e.contains("already"), "{e}");
+        // Same profile directory after sanitizing.
+        assert!(reg.reserve_launch("w/ork").is_ok(), "different dir is fine");
+        assert!(reg.reserve_launch("w:ork").is_err(), "w/ork and w:ork share a profile dir");
+        // A failed launch releases the id so a retry works.
+        reg.release_launch("work");
+        assert!(reg.reserve_launch("work").is_ok());
+        // Other ids are unaffected.
+        assert!(reg.reserve_launch("other").is_ok());
+    }
 
     #[test]
     fn ids_are_safe_as_directory_names() {
