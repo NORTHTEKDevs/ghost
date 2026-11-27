@@ -4,7 +4,8 @@
 //! empty page.
 //!
 //! Uses a headless browser the test launches itself and local pages served
-//! slowly on purpose; skipped when no browser is installed.
+//! slowly on purpose; skipped when no browser is installed, unless
+//! GHOST_REQUIRE_BROWSER=1.
 
 use ghost_session::GhostSession;
 use std::io::{BufRead, BufReader, Write};
@@ -92,6 +93,11 @@ async fn exercise(s: &GhostSession) -> Result<Seen, String> {
 async fn tab_open_returns_once_the_page_has_loaded() {
     let s = GhostSession::new().expect("session");
     if let Err(e) = s.browser_launch_with("tabwait", "headless", None).await {
+        // CI sets GHOST_REQUIRE_BROWSER=1 so this cannot pass by skipping there.
+        assert!(
+            std::env::var("GHOST_REQUIRE_BROWSER").as_deref() != Ok("1"),
+            "GHOST_REQUIRE_BROWSER=1 but no browser could be launched: {e}"
+        );
         eprintln!("skipped: no browser could be launched ({e})");
         return;
     }

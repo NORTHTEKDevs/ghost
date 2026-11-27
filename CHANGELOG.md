@@ -20,6 +20,13 @@ change behaviour.
   1x1 picture, because 0 was taken as the size to shrink to instead of "no
   resize". Found while recording the README demo. The schema now also says what
   0 does: no resize everywhere, and a lossless PNG only with `full=true`.
+- **`ghost_browser_launch` finds Chrome, Chromium, Edge and Brave on Linux.**
+  Discovery only looked in the Windows install folders, so on Linux every
+  launch without `GHOST_BROWSER_PATH` failed with "no browser found" and
+  `ghost_browser_list_installed` was empty. It now searches `PATH`
+  (`google-chrome`, `chromium`, `microsoft-edge`, `brave-browser`, and their
+  variants) under the same names as on Windows. The tab-wait tests now run
+  against a real headless browser in Linux CI instead of skipping.
 - **The Linux archive's `install.sh` installs the binaries it ships with.** Run
   from an extracted `ghost-linux-x86_64.tar.gz`, it used to look for a source
   checkout one directory up and stop with "cargo not found" (or try to build

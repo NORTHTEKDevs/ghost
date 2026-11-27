@@ -94,6 +94,7 @@ pub fn profiles_root() -> PathBuf {
 /// All of them speak CDP identically, so "which browser" is purely a user choice:
 /// Comet when the automation should look like the user's own browsing environment,
 /// Chrome for the most-tested target, Edge because it ships on every install.
+#[cfg(windows)]
 const KNOWN_BROWSERS: &[(&str, &str)] = &[
     ("chrome", r"Google\Chrome\Application\chrome.exe"),
     ("comet", r"Perplexity\Comet\Application\comet.exe"),
@@ -104,6 +105,18 @@ const KNOWN_BROWSERS: &[(&str, &str)] = &[
     ),
 ];
 
+/// Outside Windows, the executable names each browser installs on PATH. The
+/// names match the Windows list so the tool schema is the same everywhere;
+/// Chromium answers to "chrome", and Comet has no Linux build.
+#[cfg(not(windows))]
+const KNOWN_BROWSERS: &[(&str, &[&str])] = &[
+    ("chrome", &["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"]),
+    ("comet", &[]),
+    ("edge", &["microsoft-edge", "microsoft-edge-stable"]),
+    ("brave", &["brave-browser", "brave"]),
+];
+
+#[cfg(windows)]
 fn install_roots() -> Vec<PathBuf> {
     ["PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA"]
         .iter()
@@ -111,13 +124,44 @@ fn install_roots() -> Vec<PathBuf> {
         .collect()
 }
 
+/// The first of `names` that is a file in a directory of `path` (a PATH
+/// value), trying each name across the whole PATH before the next name.
+#[cfg_attr(windows, allow(dead_code))]
+fn search_path(path: &std::ffi::OsStr, names: &[&str]) -> Option<PathBuf> {
+    names.iter().find_map(|name| {
+        std::env::split_paths(path)
+            .map(|dir| dir.join(name))
+            .find(|c| c.is_file())
+    })
+}
+
+/// Where a known browser is installed, if it is.
+fn locate(spec: &KnownBrowser) -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        install_roots()
+            .into_iter()
+            .map(|r| r.join(spec))
+            .find(|c| c.exists())
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var_os("PATH").and_then(|p| search_path(&p, spec))
+    }
+}
+
+#[cfg(windows)]
+type KnownBrowser = str;
+#[cfg(not(windows))]
+type KnownBrowser = [&'static str];
+
 /// Locate a specific browser by its short name ("chrome", "comet", "edge", "brave").
 pub fn find_named_browser(name: &str) -> Result<PathBuf> {
     let want = name.trim().to_lowercase();
-    let rel = KNOWN_BROWSERS
+    let spec = KNOWN_BROWSERS
         .iter()
         .find(|(n, _)| *n == want)
-        .map(|(_, rel)| *rel)
+        .map(|(_, spec)| *spec)
         .ok_or_else(|| {
             BrowserError::Launch(format!(
                 "unknown browser '{name}'; known: {}",
@@ -128,29 +172,16 @@ pub fn find_named_browser(name: &str) -> Result<PathBuf> {
                     .join(", ")
             ))
         })?;
-    for root in install_roots() {
-        let candidate = root.join(rel);
-        if candidate.exists() {
-            return Ok(candidate);
-        }
-    }
-    Err(BrowserError::Launch(format!(
-        "'{name}' is not installed on this machine"
-    )))
+    locate(spec).ok_or_else(|| {
+        BrowserError::Launch(format!("'{name}' is not installed on this machine"))
+    })
 }
 
 /// Every known browser that is actually installed, as (name, path).
 pub fn installed_browsers() -> Vec<(String, PathBuf)> {
-    let roots = install_roots();
     KNOWN_BROWSERS
         .iter()
-        .filter_map(|(name, rel)| {
-            roots
-                .iter()
-                .map(|r| r.join(rel))
-                .find(|c| c.exists())
-                .map(|p| (name.to_string(), p))
-        })
+        .filter_map(|(name, spec)| locate(spec).map(|p| (name.to_string(), p)))
         .collect()
 }
 
@@ -819,6 +850,28 @@ fn move_browser_offscreen(_pid: u32) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Outside Windows a browser is found on PATH. Before, only the Windows
+    /// install roots were searched, so ghost_browser_launch on Linux found
+    /// nothing unless GHOST_BROWSER_PATH was set.
+    #[test]
+    fn path_search_finds_the_first_listed_name_in_path_order() {
+        let root = std::env::temp_dir().join(format!("ghost-path-search-{}", std::process::id()));
+        let (a, b) = (root.join("a"), root.join("b"));
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        std::fs::write(b.join("chromium"), b"").unwrap();
+        std::fs::write(a.join("chromium"), b"").unwrap();
+        std::fs::create_dir_all(a.join("google-chrome")).unwrap(); // a directory, not a browser
+        let path = std::env::join_paths([&a, &b]).unwrap();
+
+        let found = search_path(&path, &["google-chrome", "chromium"]);
+        let none = search_path(&path, &["brave-browser"]);
+        let _ = std::fs::remove_dir_all(&root);
+
+        assert_eq!(found, Some(a.join("chromium")));
+        assert_eq!(none, None);
+    }
 
     fn sleeper() -> std::process::Child {
         let mut c = if cfg!(windows) {
