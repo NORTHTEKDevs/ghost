@@ -35,3 +35,6 @@ ghost-macos = { path = "../ghost-macos" }
 
 [build-dependencies]
 winresource = "0.1.31"
+
+[dev-dependencies]
+ghost-browser = { path = "../ghost-browser" }

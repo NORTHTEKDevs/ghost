@@ -26,6 +26,36 @@ const PAGE: &str = r#"<!doctype html><body><input id="f"><button id="b"
 onclick="document.getElementById('o').innerText='OK:'+f.value">go</button>
 <div id="o">-</div></body>"#;
 
+/// Serve `page` over loopback http for as long as verify runs and return its
+/// URL. Tabs open only http(s) and about:blank, so a file: page is refused.
+/// Each connection gets the page whatever it asked for, then is closed.
+fn serve_page(page: &'static str) -> std::io::Result<String> {
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0))?;
+    let port = listener.local_addr()?.port();
+    std::thread::spawn(move || {
+        // One thread per connection: a browser's idle preconnect socket must
+        // not hold up the tabs' real requests.
+        for conn in listener.incoming().flatten() {
+            std::thread::spawn(move || {
+                let _ = conn.set_read_timeout(Some(Duration::from_secs(2)));
+                let mut reader = BufReader::new(&conn);
+                let mut line = String::new();
+                // Headers end at the first empty line (CRLF or a bare LF).
+                while reader.read_line(&mut line).is_ok_and(|n| n > 0) && !line.trim_end().is_empty() {
+                    line.clear();
+                }
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    page.len()
+                );
+                let mut out = &conn;
+                let _ = out.write_all(head.as_bytes()).and_then(|_| out.write_all(page.as_bytes()));
+            });
+        }
+    });
+    Ok(format!("http://127.0.0.1:{port}/"))
+}
+
 /// One running ghost-mcp server driven over stdio.
 struct Server {
     child: Child,
@@ -322,9 +352,10 @@ pub fn run(strict_cursor: bool) -> i32 {
     }
 
     // ---- Claim: browser tabs drive in the background, fast -------------------
-    let page = std::env::temp_dir().join(format!("ghost_verify_{}.html", std::process::id()));
-    let _ = std::fs::write(&page, PAGE);
-    let url = format!("file:///{}", page.display().to_string().replace('\\', "/"));
+    let url = serve_page(PAGE).unwrap_or_else(|e| {
+        println!("  [note] could not serve the test page on loopback ({e}); the tab claims will fail");
+        "about:blank".to_string()
+    });
 
     let t = Instant::now();
     let launch = s.call("ghost_browser_launch", json!({"id": "v", "mode": "headless"}), &mut pending);
@@ -545,8 +576,6 @@ pub fn run(strict_cursor: bool) -> i32 {
         println!("  [note] cursor moved during the run - that is you, unless --strict-cursor fails");
     }
 
-    let _ = std::fs::remove_file(&page);
-
     println!();
     let failed: Vec<&(String, bool)> = a.rows.iter().filter(|(_, ok)| !ok).collect();
     if failed.is_empty() {
@@ -568,6 +597,32 @@ pub fn run(strict_cursor: bool) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The page verify drives must be one a tab may open: 0.24.3 refuses
+    /// file: URLs, so a file: page failed every tab claim. It is served over
+    /// loopback http, and what is served is the page.
+    #[test]
+    fn the_verify_page_is_served_at_a_url_tabs_may_open() {
+        let url = serve_page(PAGE).expect("serve the page");
+        ghost_browser::policy::check_nav_url(&url).expect("tabs must be allowed to open the verify page");
+        let rest = url.strip_prefix("http://127.0.0.1:").expect("loopback http");
+        let port: u16 = rest.trim_end_matches('/').parse().expect("port");
+        // An idle connection (a browser's preconnect) is held open throughout:
+        // it must not delay the real requests, which are answered at once, not
+        // after the 2 s read timeout.
+        let _idle = std::net::TcpStream::connect(("127.0.0.1", port)).expect("idle connect");
+        for request in [&b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"[..], b"GET /x HTTP/1.1\nHost: 127.0.0.1\n\n"] {
+            let t = Instant::now();
+            let mut c = std::net::TcpStream::connect(("127.0.0.1", port)).expect("connect");
+            c.write_all(request).unwrap();
+            let mut body = String::new();
+            std::io::Read::read_to_string(&mut c, &mut body).unwrap();
+            assert!(t.elapsed() < Duration::from_secs(1), "answered after {:?}", t.elapsed());
+            assert!(body.starts_with("HTTP/1.1 200"), "{body}");
+            assert!(body.contains("text/html"), "{body}");
+            assert!(body.ends_with(PAGE), "{body}");
+        }
+    }
 
     fn inc(to_hwnd: i64, in_flight: &[&str]) -> FgIncident {
         FgIncident { epoch_ms: 1_000, to_hwnd, in_flight: in_flight.iter().map(|s| s.to_string()).collect(), during_input: false }

@@ -1128,6 +1128,7 @@ name = "ghost-cli"
 version = "0.24.3"
 dependencies = [
  "clap",
+ "ghost-browser",
  "ghost-core",
  "ghost-intent",
  "ghost-linux",
