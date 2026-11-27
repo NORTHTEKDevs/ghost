@@ -521,70 +521,134 @@ mod platform {
 
 #[cfg(unix)]
 mod platform {
+    use std::collections::HashMap;
     use std::sync::Mutex;
 
     /// Process groups of the shells this process started (a shell is its
     /// group's leader, so the group id is its pid), with the leader's start
-    /// time.
-    static GROUPS: Mutex<Vec<(u32, u64)>> = Mutex::new(Vec::new());
+    /// time; and the list length at which ended groups are next pruned.
+    static GROUPS: Mutex<(Vec<(u32, u64)>, usize)> = Mutex::new((Vec::new(), MIN_PRUNE_AT));
+
+    /// Prune no more often than this many remembered groups: pruning reads
+    /// all of /proc once.
+    const MIN_PRUNE_AT: usize = 64;
 
     /// A process's start time (clock ticks since boot, /proc/<pid>/stat field
     /// 22), to tell a group's leader from a later process that reused its id.
     pub(super) fn start_time(pid: u32) -> Option<u64> {
+        stat_fields(pid).map(|(_, t)| t)
+    }
+
+    /// (process group id, start time) of `pid`, from /proc/<pid>/stat.
+    fn stat_fields(pid: u32) -> Option<(u32, u64)> {
         let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
         // Fields after the command name, which is in parentheses and may hold spaces.
         let rest = stat.rsplit_once(')')?.1;
-        rest.split_whitespace().nth(19)?.parse().ok()
+        let f: Vec<&str> = rest.split_whitespace().collect();
+        Some((f.get(2)?.parse().ok()?, f.get(19)?.parse().ok()?))
+    }
+
+    /// One read of the process table: each process's start time, and the
+    /// start times of each group's members.
+    #[derive(Default)]
+    pub(super) struct ProcTable {
+        start: HashMap<u32, u64>,
+        groups: HashMap<u32, Vec<u64>>,
+    }
+
+    impl ProcTable {
+        /// Build from (pid, pgid, start time) rows.
+        pub(super) fn from_rows(rows: impl IntoIterator<Item = (u32, u32, u64)>) -> Self {
+            let mut t = ProcTable::default();
+            for (pid, pgid, start) in rows {
+                t.start.insert(pid, start);
+                t.groups.entry(pgid).or_default().push(start);
+            }
+            t
+        }
+
+        /// Read all of /proc once.
+        fn read() -> Self {
+            let Ok(dir) = std::fs::read_dir("/proc") else { return Self::default() };
+            Self::from_rows(dir.flatten().filter_map(|e| {
+                let pid = e.file_name().to_str()?.parse::<u32>().ok()?;
+                let (pgid, start) = stat_fields(pid)?;
+                Some((pid, pgid, start))
+            }))
+        }
+
+        /// Whether a group id may still be signalled: its leader is still the
+        /// process Ghost started, or the leader has exited (a group id cannot
+        /// be handed to a new process while the old group has members). A
+        /// process with that id but a different start time means the id was
+        /// reused.
+        pub(super) fn group_still_ours(&self, pgid: u32, leader_start: u64) -> bool {
+            match self.start.get(&pgid) {
+                Some(&t) => t == leader_start,
+                // The leader exited: signal only while the group still has a
+                // member that started after the leader (what the shell's
+                // command started). An empty group is left alone - its id may
+                // already be someone else's. One case cannot be told apart
+                // here: the id was reused by a new group leader that then
+                // exited too while its own group lives on, all between two
+                // stops (rare; documented).
+                None => self.groups.get(&pgid).is_some_and(|m| m.iter().any(|&t| t >= leader_start)),
+            }
+        }
     }
 
     pub(super) fn confine(pid: Option<u32>) {
         if let Some(pid) = pid {
             if let Some(t) = start_time(pid) {
-                GROUPS.lock().unwrap().push((pid, t));
+                let mut g = GROUPS.lock().unwrap();
+                g.0.push((pid, t));
+                // Forget groups that have ended, once the list has doubled
+                // since the last prune: one /proc read amortized over many
+                // shells, so a long-lived server's list stays bounded.
+                if g.0.len() >= g.1 {
+                    let table = ProcTable::read();
+                    g.0.retain(|&(pgid, start)| table.group_still_ours(pgid, start));
+                    g.1 = (g.0.len() * 2).max(MIN_PRUNE_AT);
+                }
             }
             super::stop_kill::ensure_watcher();
         }
     }
 
-    /// Whether a group id may still be signalled: its leader is still the
-    /// process Ghost started, or the leader has exited (a group id cannot be
-    /// handed to a new process while the old group has members). A process
-    /// with that id but a different start time means the id was reused.
-    pub(super) fn group_still_ours(pgid: u32, leader_start: u64) -> bool {
-        match start_time(pgid) {
-            Some(t) => t == leader_start,
-            // The leader exited: signal only while the group still has a
-            // member that started after the leader (what the shell's command
-            // started). An empty group is left alone - its id may already be
-            // someone else's. One case cannot be told apart here: the id was
-            // reused by a new group leader that then exited too while its own
-            // group lives on, all between two stops (rare; documented).
-            None => group_members_since(pgid, leader_start),
-        }
+    #[cfg(test)]
+    pub(super) fn remember_for_test(pgid: u32, leader_start: u64) {
+        GROUPS.lock().unwrap().0.push((pgid, leader_start));
     }
 
-    /// Whether some process in group `pgid` started at or after `since`.
-    fn group_members_since(pgid: u32, since: u64) -> bool {
-        let Ok(dir) = std::fs::read_dir("/proc") else { return false };
-        dir.flatten().any(|e| {
-            let name = e.file_name();
-            let Some(pid) = name.to_str().and_then(|n| n.parse::<u32>().ok()) else { return false };
-            let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else { return false };
-            let Some(rest) = stat.rsplit_once(')').map(|r| r.1) else { return false };
-            let f: Vec<&str> = rest.split_whitespace().collect();
-            f.get(2).and_then(|g| g.parse::<u32>().ok()) == Some(pgid)
-                && f.get(19).and_then(|t| t.parse::<u64>().ok()).is_some_and(|t| t >= since)
-        })
+    #[cfg(test)]
+    pub(super) fn remembered_for_test() -> usize {
+        GROUPS.lock().unwrap().0.len()
+    }
+
+    /// [`ProcTable::group_still_ours`] against the live process table.
+    #[cfg(test)]
+    pub(super) fn group_still_ours(pgid: u32, leader_start: u64) -> bool {
+        ProcTable::read().group_still_ours(pgid, leader_start)
+    }
+
+    /// The groups of `groups` still to be signalled, judged against one read
+    /// of the process table.
+    pub(super) fn groups_to_end(groups: &[(u32, u64)], table: &ProcTable) -> Vec<u32> {
+        groups.iter().filter(|&&(pgid, start)| table.group_still_ours(pgid, start)).map(|&(pgid, _)| pgid).collect()
     }
 
     /// Kill every group this process started that is still ours, then forget
     /// them all.
     pub(super) fn end_on_stop() {
-        let groups: Vec<(u32, u64)> = std::mem::take(&mut *GROUPS.lock().unwrap());
-        for (pgid, leader_start) in groups {
-            if !group_still_ours(pgid, leader_start) {
-                continue;
-            }
+        let groups: Vec<(u32, u64)> = {
+            let mut g = GROUPS.lock().unwrap();
+            g.1 = MIN_PRUNE_AT;
+            std::mem::take(&mut g.0)
+        };
+        if groups.is_empty() {
+            return;
+        }
+        for pgid in groups_to_end(&groups, &ProcTable::read()) {
             let _ = std::process::Command::new("kill")
                 .args(["-KILL", "--", &format!("-{pgid}")])
                 .stdout(std::process::Stdio::null())
@@ -1624,12 +1688,89 @@ mod stop_reach_tests {
         assert_eq!(left, 0, "the expired snapshot was not dropped");
     }
 
+    /// The Linux tests that end every group this process started run one at
+    /// a time, or one would end the other's groups mid-test.
+    #[cfg(target_os = "linux")]
+    static LINUX_GROUPS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// A process group of its own running `sleep`, confined as a shell is.
+    #[cfg(target_os = "linux")]
+    fn confined_sleeper() -> std::process::Child {
+        use std::os::unix::process::CommandExt;
+        let child = std::process::Command::new("sleep").arg("39").process_group(0).spawn().expect("sleep");
+        platform::confine(Some(child.id()));
+        child
+    }
+
+    /// Linux: thousands of remembered groups whose shells are long gone (a
+    /// long-lived server runs many commands) do not make the stop slow, and
+    /// the live group among them still ends.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_stop_over_thousands_of_dead_groups_is_fast() {
+        let _serial = LINUX_GROUPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // Ids above any pid_max: no process has them, as for exited shells.
+        for i in 0..5_000u32 {
+            platform::remember_for_test(4_200_000 + i, 1);
+        }
+        let mut live = confined_sleeper();
+        let started = Instant::now();
+        platform::end_on_stop();
+        let took = started.elapsed();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < deadline && matches!(live.try_wait(), Ok(None)) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let ended = !matches!(live.try_wait(), Ok(None));
+        let _ = live.kill();
+        let _ = live.wait();
+        assert!(ended, "the live group survived the stop");
+        assert!(took < Duration::from_millis(200), "the stop took {took:?} over 5000 dead groups");
+    }
+
+    /// The pure decision, over an injected process table: 5000 groups that
+    /// ended and one live group take one pass, and only the live group, a
+    /// group whose leader exited but whose command lives on, are signalled -
+    /// never a reused id.
+    #[cfg(unix)]
+    #[test]
+    fn the_groups_to_end_come_from_one_table_read() {
+        // (pid, pgid, start): a live leader 500 (start 10); group 600 whose
+        // leader exited but a child (start 21 >= 20) lives; id 700 reused by
+        // a different process (start 99, not 30).
+        let table = platform::ProcTable::from_rows([(500, 500, 10), (601, 600, 21), (700, 700, 99), (1, 1, 0)]);
+        let mut groups: Vec<(u32, u64)> = (0..5_000u32).map(|i| (4_200_000 + i, 1)).collect();
+        groups.extend([(500, 10), (600, 20), (700, 30)]);
+        let started = Instant::now();
+        let end = platform::groups_to_end(&groups, &table);
+        assert!(started.elapsed() < Duration::from_millis(200), "took {:?}", started.elapsed());
+        assert_eq!(end, vec![500, 600]);
+    }
+
+    /// Linux: groups whose processes have all exited are forgotten without a
+    /// stop, so the list does not grow for the life of the server.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn groups_that_ended_are_forgotten() {
+        let _serial = LINUX_GROUPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        platform::end_on_stop();
+        for i in 0..5_000u32 {
+            platform::remember_for_test(4_200_000 + i, 1);
+        }
+        let mut live = confined_sleeper();
+        let remembered = platform::remembered_for_test();
+        let _ = live.kill();
+        let _ = live.wait();
+        assert!(remembered <= 64, "{remembered} groups remembered; the dead ones were never pruned");
+    }
+
     /// (b) Linux: the stop kills the shell's whole process group, so what a
     /// command started (here `sleep`, started by bash) ends with it.
     #[cfg(target_os = "linux")]
     #[test]
     fn a_stop_kills_the_shells_process_group_on_linux() {
         use std::os::unix::process::CommandExt;
+        let _serial = LINUX_GROUPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut bash = std::process::Command::new("bash")
             .args(["-c", "sleep 37 & wait"])
             .process_group(0)
