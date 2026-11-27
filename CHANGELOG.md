@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.24.4] - the rough edges an end-to-end test found
+
+An end-to-end test of the published 0.24.3 zip (driving its `ghost-mcp` over
+stdio on Ghost-owned windows and browsers only) found one broken command and
+three rough edges. Evidence: `docs/benches/2026-11-26-e2e-0.24.3/` and
+`docs/benches/2026-11-26-e2e-0.24.4/`.
+
+### Fixed
+
+- **`ghost verify` passes again.** It opened its test page from a `file:`
+  URL, which 0.24.3 refuses in tabs, so the published `ghost verify` failed 3
+  of its 8 claims on every machine. The page is now served over loopback http.
+- **`ghost_tab_open` waits for the page to load**, like `ghost_tab_navigate`,
+  so a read straight after it sees the page instead of about:blank. New
+  options: `timeout_ms` (default 30000, max 600000; bounds the whole
+  navigation) and `wait=false` (answer at once, as before). A page that fails
+  to load or times out is an error, and the tab it opened is closed. The
+  response carries `loaded` and the `url` it landed on. A stop now ends a
+  page-load wait at once.
+- **`ghost_shell op=kill` ends the shell's whole process tree on Windows**, as
+  it ends the process group on Linux: each shell gets a job of its own, nested
+  in the stop job. An `op=run` timeout and a cancelled call end the tree too
+  (the warm spare included). What a finished command started still keeps
+  running until a stop, and server exit still ends nothing.
+- **`ghost-mcp --version` and `--help` print and exit.** They used to start
+  the server, with its input hooks and orphaned-browser sweep.
+
 ## [0.24.3] - a full quality pass
 
 A security audit, three code reviews, a docs review and two live probes of
