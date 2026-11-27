@@ -4153,7 +4153,7 @@ fn lean_tools_schema() -> Value {
               "shell": { "type": "string", "enum": shell_verb_enum(), "description": shell_verb_shell_description() },
               "id": { "type": "string", "description": "Session id (op=send|read|kill required; op=open optional custom name, else auto s1,s2,...)" },
               "cwd": { "type": "string", "description": "Working directory (op=run|open)" },
-              "timeout_ms": { "type": "integer", "description": "Per-command timeout, default 30000, max 600000. On timeout op=run kills the process; op=send leaves it running (drain via op=read)." }
+              "timeout_ms": { "type": "integer", "description": "Per-command timeout, default 30000, max 600000. On timeout op=run kills the process; op=send leaves it running (drain via op=read). op=read: how long to wait for the pending command, default 2000; output already written is always collected, even with 0." }
           }}},
         // --- Clipboard ---
         { "name": "ghost_clipboard",

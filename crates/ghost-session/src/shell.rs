@@ -330,6 +330,13 @@ const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 const MAX_TIMEOUT_MS: u64 = 600_000;
 /// How often the read loop wakes to check the stop flag / deadline.
 const POLL_MS: u64 = 200;
+/// How long `op=read` waits for the pending command when the caller names no
+/// `timeout_ms`. Zero made a bare `read` return before it had read anything.
+const DEFAULT_READ_WAIT_MS: u64 = 2_000;
+/// Past the deadline, a read still collects output the shell already wrote
+/// for up to this long: a pipe read needs a moment to complete even when the
+/// bytes are waiting, so a zero-wait read must not give up before trying.
+const DRAIN_GRACE_MS: u64 = 100;
 
 /// One persistent PowerShell process.
 struct ShellSession {
@@ -350,6 +357,10 @@ struct ShellSession {
     /// Set when a `send` timed out and its command is still running. Holds the
     /// nonce whose sentinel `read` must still drain before the session is usable.
     pending: Option<u64>,
+    /// Bytes of a line not yet ended by a newline. Kept across reads so a read
+    /// that times out mid-line loses nothing (`read_until` is cancel-safe only
+    /// with a buffer that outlives the call).
+    partial: Vec<u8>,
     created: Instant,
     pid: Option<u32>,
     /// The process group this shell leads (Linux), for `end_shell`.
@@ -1021,6 +1032,7 @@ fn spawn_driver(cwd: Option<&str>) -> Result<ShellSession> {
         nonce: 0,
         secret: session_secret(),
         pending: None,
+        partial: Vec::new(),
         created: Instant::now(),
         pid,
         born_gen,
@@ -1109,6 +1121,11 @@ pub(crate) fn default_shell() -> &'static str {
     {
         "powershell"
     }
+}
+
+/// How long `op=read` waits: the caller's `timeout_ms`, else a short default.
+fn read_wait(ms: Option<u64>) -> Duration {
+    clamp_timeout(Some(ms.unwrap_or(DEFAULT_READ_WAIT_MS)))
 }
 
 fn clamp_timeout(ms: Option<u64>) -> Duration {
@@ -1399,7 +1416,7 @@ impl GhostSession {
             .and_then(|v| v.as_str())
             .ok_or_else(|| GhostError::Config("ghost_shell op=read: missing 'id'".into()))?
             .to_string();
-        let dur = clamp_timeout(args.get("timeout_ms").and_then(|v| v.as_u64()).or(Some(0)));
+        let dur = read_wait(args.get("timeout_ms").and_then(|v| v.as_u64()));
 
         let mut sess = self
             .shells
@@ -1536,9 +1553,14 @@ fn sentinel_token(secret: &str, nonce: u64) -> String {
 /// Read lines from the session until the nonce-stamped sentinel appears, the
 /// deadline passes, the stop flag fires, or stdout hits EOF. Everything before
 /// the sentinel is the command's merged output.
+///
+/// The deadline is checked after a read attempt, never before one: output the
+/// shell already wrote is collected for up to `DRAIN_GRACE_MS` past the
+/// deadline, so a zero-wait read of a finished command returns it.
 async fn read_until_sentinel(sess: &mut ShellSession, token: &str, dur: Duration) -> ReadOutcome {
     let sentinel = format!("__GHOST_DONE_{token}__ ");
     let deadline = Instant::now() + dur;
+    let hard_end = deadline + Duration::from_millis(DRAIN_GRACE_MS);
     let mut output = String::new();
 
     loop {
@@ -1546,14 +1568,21 @@ async fn read_until_sentinel(sess: &mut ShellSession, token: &str, dur: Duration
             return ReadOutcome::Stopped;
         }
         let now = Instant::now();
-        if now >= deadline {
+        if now >= hard_end {
             return ReadOutcome::TimedOut { output };
         }
-        let slice = (deadline - now).min(Duration::from_millis(POLL_MS));
-        let mut line = String::new();
-        match tokio::time::timeout(slice, sess.reader.read_line(&mut line)).await {
-            Ok(Ok(0)) => return ReadOutcome::Eof { output }, // EOF: driver exited
+        let slice = (hard_end - now).min(Duration::from_millis(POLL_MS));
+        match tokio::time::timeout(slice, sess.reader.read_until(b'\n', &mut sess.partial)).await {
+            Ok(Ok(0)) => {
+                // EOF: the driver exited. A last line with no newline is output too.
+                output.push_str(&String::from_utf8_lossy(&std::mem::take(&mut sess.partial)));
+                return ReadOutcome::Eof { output };
+            }
             Ok(Ok(_)) => {
+                if sess.partial.last() != Some(&b'\n') {
+                    continue; // EOF mid-line: the next read reports it
+                }
+                let line = String::from_utf8_lossy(&std::mem::take(&mut sess.partial)).into_owned();
                 if let Some(rest) = line.strip_prefix(&sentinel) {
                     let exit_code = rest.trim().parse::<i64>().ok();
                     return ReadOutcome::Done { output, exit_code };
@@ -1561,7 +1590,13 @@ async fn read_until_sentinel(sess: &mut ShellSession, token: &str, dur: Duration
                 output.push_str(&line);
             }
             Ok(Err(_)) => return ReadOutcome::Eof { output }, // pipe error
-            Err(_) => { /* slice elapsed: loop to recheck stop/deadline */ }
+            Err(_) => {
+                // Nothing arrived in this slice. Past the deadline, that means
+                // everything already written has been drained.
+                if Instant::now() >= deadline {
+                    return ReadOutcome::TimedOut { output };
+                }
+            }
         }
     }
 }
@@ -2404,5 +2439,75 @@ mod stop_reach_tests {
         assert!(platform::group_still_ours(me, mine), "the same process");
         assert!(!platform::group_still_ours(me, mine + 1), "a different process under the same id");
         assert!(!platform::group_still_ours(u32::MAX - 7, 1), "no leader and no member: not ours");
+    }
+}
+
+/// Persistent-session behaviour against a real driver. Only harmless commands
+/// (echo, short sleeps, exit codes); every shell started here is ended here.
+#[cfg(test)]
+mod session_tests {
+    use super::*;
+
+    fn rt() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap()
+    }
+
+    /// Frame one command onto a driver and return its sentinel token.
+    async fn frame(sess: &mut ShellSession, cmd: &str) -> String {
+        sess.nonce += 1;
+        let token = sentinel_token(&sess.secret, sess.nonce);
+        let line = format!("{} {}\n", token, b64_encode(cmd.as_bytes()));
+        sess.stdin.write_all(line.as_bytes()).await.unwrap();
+        sess.stdin.flush().await.unwrap();
+        token
+    }
+
+    /// A driver that has answered one command, so cold start is not timed.
+    async fn warm_driver() -> ShellSession {
+        let mut sess = spawn_driver(None).expect("spawn driver");
+        let token = frame(&mut sess, "echo warm-up").await;
+        let first = read_until_sentinel(&mut sess, &token, Duration::from_secs(90)).await;
+        assert!(matches!(first, ReadOutcome::Done { .. }), "the driver never answered");
+        sess
+    }
+
+    fn sleep_then_q() -> &'static str {
+        if cfg!(target_os = "linux") {
+            "sleep 0.3; echo q"
+        } else {
+            "Start-Sleep -Milliseconds 300; 'q'"
+        }
+    }
+
+    /// M1: a bare `op=read` waits a little for the pending command instead of
+    /// returning before it reads anything; an explicit wait is honoured.
+    #[test]
+    fn a_read_with_no_timeout_waits_two_seconds() {
+        assert_eq!(read_wait(None), Duration::from_millis(2_000));
+        assert_eq!(read_wait(Some(0)), Duration::ZERO);
+        assert_eq!(read_wait(Some(999_999_999)), Duration::from_millis(MAX_TIMEOUT_MS));
+    }
+
+    /// M1: output the command already wrote is collected even when the read
+    /// has no wait left - the deadline is checked after a drain, not before.
+    #[test]
+    fn a_read_with_no_wait_left_still_collects_finished_output() {
+        rt().block_on(async {
+            let mut sess = warm_driver().await;
+            let token = frame(&mut sess, sleep_then_q()).await;
+            let first = read_until_sentinel(&mut sess, &token, Duration::from_millis(100)).await;
+            assert!(matches!(first, ReadOutcome::TimedOut { .. }), "should still be running");
+            tokio::time::sleep(Duration::from_millis(1500)).await;
+            let second = read_until_sentinel(&mut sess, &token, Duration::ZERO).await;
+            let _ = sess.child.start_kill();
+            match second {
+                ReadOutcome::Done { output, exit_code } => {
+                    assert!(output.contains('q'), "output was {output:?}");
+                    assert_eq!(exit_code, Some(0));
+                }
+                ReadOutcome::TimedOut { .. } => panic!("a zero-wait read never drained finished output"),
+                _ => panic!("unexpected outcome"),
+            }
+        });
     }
 }
