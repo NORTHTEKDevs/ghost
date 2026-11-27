@@ -403,13 +403,13 @@ const SYSTEM_PROMPT: &str = "You are a precise UI element locator. Always respon
 
 /// MEDIUM-7: route VLM response text through the typed ghost-ground parser which
 /// handles UI-TARS/Qwen norm-coord, action-call, bare-tuple, and prose-JSON formats.
-/// Pixel-space coords (> 1000 in either axis) are passed through directly.
-/// Norm-space coords (0-1000) are converted to pixels using `final_size`.
+/// build_prompt asks for pixel coordinates, so JSON x/y are read as pixels (never guessed from magnitude).
+/// UI-TARS start_box coords (0-1000 by definition) are converted to pixels using `final_size`.
 fn parse_vlm_response_to_coords(text: &str, final_size: (u32, u32)) -> Result<Option<(i32, i32)>> {
-    use ghost_ground::parser::{parse_vlm_response as gnd_parse, CoordSpace};
+    use ghost_ground::parser::{parse_vlm_response_in as gnd_parse, CoordSpace};
     use ghost_ground::types::norm_to_px;
 
-    match gnd_parse(text) {
+    match gnd_parse(text, CoordSpace::Pixels) {
         None => Ok(None),
         Some(r) if r.not_found => Ok(None),
         Some(r) => match r.coord {
@@ -751,6 +751,19 @@ mod tests {
         // Thinking models return content: null when the budget runs out in reasoning.
         let r: OaiResp = serde_json::from_str(r#"{"choices":[{"message":{"content":null,"reasoning_content":"..."}}]}"#).unwrap();
         assert_eq!(r.choices[0].message.content.clone().unwrap_or_default(), "");
+    }
+
+    #[test]
+    fn pixel_json_reply_is_not_rescaled_as_normalised() {
+        // build_prompt asks for pixel coords; {"x":500,"y":300} on 1024x576 is (500,300).
+        let r = parse_vlm_response_to_coords(r#"{"x":500,"y":300}"#, (1024, 576)).unwrap();
+        assert_eq!(r, Some((500, 300)));
+    }
+
+    #[test]
+    fn uitars_box_reply_is_still_normalised() {
+        let r = parse_vlm_response_to_coords("click(start_box='(500, 500)')", (1024, 576)).unwrap();
+        assert_eq!(r, Some((512, 288)));
     }
 
     #[test]

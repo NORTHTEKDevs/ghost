@@ -85,6 +85,18 @@ struct RawCoord {
 /// Returns `None` only on a completely unparseable input that is not a
 /// "not found" signal — callers should treat `None` the same as not-found.
 pub fn parse_vlm_response(text: &str) -> Option<ParsedVlmResponse> {
+    parse_inner(text, None)
+}
+
+/// Like [`parse_vlm_response`], but the caller states the coordinate space it
+/// asked the model for. JSON `x`/`y` and bare tuples are read in that space and
+/// never guessed from magnitude. Formats normalised by definition (UI-TARS
+/// `start_box`) stay [`CoordSpace::Norm`].
+pub fn parse_vlm_response_in(text: &str, asked: CoordSpace) -> Option<ParsedVlmResponse> {
+    parse_inner(text, Some(asked))
+}
+
+fn parse_inner(text: &str, asked: Option<CoordSpace>) -> Option<ParsedVlmResponse> {
     let text = text.trim();
 
     // 1. Try UI-TARS / Qwen action-style: `action(start_box='(x,y)')` or `action(point='(x,y)')`
@@ -93,16 +105,12 @@ pub fn parse_vlm_response(text: &str) -> Option<ParsedVlmResponse> {
     }
 
     // 2. Try bare / fenced / prose JSON
-    if let Some(r) = try_parse_json(text) {
+    if let Some(r) = try_parse_json(text, asked) {
         return Some(r);
     }
 
-    // 3. Try bare tuple `(x, y)`
-    if let Some(r) = try_parse_bare_tuple(text) {
-        return Some(r);
-    }
-
-    // 4. Try plain "not found" text markers
+    // 3. Plain "not found" text markers win over a bare tuple, so prose like
+    //    "not visible (3, 4)" is never read as a coordinate.
     let lower = text.to_lowercase();
     if lower.contains("not found")
         || lower.contains("not visible")
@@ -111,6 +119,11 @@ pub fn parse_vlm_response(text: &str) -> Option<ParsedVlmResponse> {
         || lower.contains("unable to find")
     {
         return Some(ParsedVlmResponse { coord: None, action: None, not_found: true });
+    }
+
+    // 4. Try bare tuple `(x, y)`
+    if let Some(r) = try_parse_bare_tuple(text, asked.unwrap_or(CoordSpace::Norm)) {
+        return Some(r);
     }
 
     None
@@ -195,9 +208,24 @@ fn extract_quoted_value(inner: &str, key: &str) -> Option<String> {
     let search = format!("{key}=");
     let pos = inner.find(search.as_str())?;
     let after = &inner[pos + search.len()..];
-    let after = after.trim_start_matches(['\'', '"']);
-    let end = after.find(['\'', '"']).unwrap_or(after.len());
-    Some(after[..end].to_string())
+    let quote = after.chars().next().filter(|c| matches!(c, '\'' | '"'));
+    let Some(q) = quote else {
+        let end = after.find([',', ' ']).unwrap_or(after.len());
+        return Some(after[..end].to_string());
+    };
+    let body = &after[1..];
+    // The closing quote is the first `q` followed by end-of-args or a comma,
+    // so an apostrophe inside the value (`'don't'`) does not end it.
+    let end = body
+        .char_indices()
+        .filter(|(_, c)| *c == q)
+        .map(|(i, _)| i)
+        .find(|&i| {
+            let rest = body[i + 1..].trim_start();
+            rest.is_empty() || rest.starts_with(',')
+        })
+        .unwrap_or(body.len());
+    Some(body[..end].to_string())
 }
 
 /// Extract a `key=<integer>` value.
@@ -221,7 +249,7 @@ fn parse_tuple_str(s: &str) -> Option<(i32, i32)> {
 }
 
 /// Try to parse a JSON object, including code-fenced and prose-wrapped variants.
-fn try_parse_json(text: &str) -> Option<ParsedVlmResponse> {
+fn try_parse_json(text: &str, asked: Option<CoordSpace>) -> Option<ParsedVlmResponse> {
     // Strip code fence.
     let text = text
         .trim_start_matches("```json")
@@ -260,16 +288,17 @@ fn try_parse_json(text: &str) -> Option<ParsedVlmResponse> {
         }
     }
 
-    // x/y fields: decide space by magnitude.
-    // Normalised coords are in [0, 1000]; pixel coords can exceed 1000.
-    // We treat them as Norm if both fit in [0, 1000].
+    // x/y fields: the caller's stated space wins. Only the legacy entry point
+    // (`asked == None`) falls back to guessing from magnitude.
     match (raw.x, raw.y) {
         (Some(x), Some(y)) => {
-            let space = if (0..=1000).contains(&x) && (0..=1000).contains(&y) {
-                CoordSpace::Norm
-            } else {
-                CoordSpace::Pixels
-            };
+            let space = asked.unwrap_or(
+                if (0..=1000).contains(&x) && (0..=1000).contains(&y) {
+                    CoordSpace::Norm
+                } else {
+                    CoordSpace::Pixels
+                },
+            );
             Some(ParsedVlmResponse {
                 coord: Some(ParsedCoord { x, y, space }),
                 action: None,
@@ -284,12 +313,12 @@ fn try_parse_json(text: &str) -> Option<ParsedVlmResponse> {
 }
 
 /// Try to parse a bare `(x, y)` tuple anywhere in the text.
-fn try_parse_bare_tuple(text: &str) -> Option<ParsedVlmResponse> {
+fn try_parse_bare_tuple(text: &str, space: CoordSpace) -> Option<ParsedVlmResponse> {
     // Find the first `(` followed by two numbers and `)`.
     let start = text.find('(')?;
     let (x, y) = parse_tuple_str(&text[start..])?;
     Some(ParsedVlmResponse {
-        coord: Some(ParsedCoord { x, y, space: CoordSpace::Norm }),
+        coord: Some(ParsedCoord { x, y, space }),
         action: None,
         not_found: false,
     })
@@ -469,5 +498,59 @@ mod tests {
     fn edge_coords_max_norm() {
         let c = coord("click(start_box='(1000, 1000)')").unwrap();
         assert_eq!((c.x, c.y), (1000, 1000));
+    }
+
+    #[test]
+    fn json_xy_in_pixel_space_is_never_guessed_from_magnitude() {
+        let c = parse_vlm_response_in(r#"{"x": 500, "y": 300}"#, CoordSpace::Pixels)
+            .unwrap()
+            .coord
+            .unwrap();
+        assert_eq!((c.x, c.y, c.space), (500, 300, CoordSpace::Pixels));
+    }
+
+    #[test]
+    fn json_xy_in_norm_space_stays_norm_even_above_1000() {
+        let c = parse_vlm_response_in(r#"{"x": 1500, "y": 300}"#, CoordSpace::Norm)
+            .unwrap()
+            .coord
+            .unwrap();
+        assert_eq!(c.space, CoordSpace::Norm);
+    }
+
+    #[test]
+    fn uitars_box_is_norm_even_when_caller_asked_pixels() {
+        let c = parse_vlm_response_in("click(start_box='(250, 375)')", CoordSpace::Pixels)
+            .unwrap()
+            .coord
+            .unwrap();
+        assert_eq!((c.x, c.y, c.space), (250, 375, CoordSpace::Norm));
+    }
+
+    #[test]
+    fn bare_tuple_follows_caller_space() {
+        let c = parse_vlm_response_in("(500, 300)", CoordSpace::Pixels).unwrap().coord.unwrap();
+        assert_eq!(c.space, CoordSpace::Pixels);
+    }
+
+    #[test]
+    fn prose_with_parenthesised_numbers_is_not_a_coordinate() {
+        for t in ["not visible (see 3, 4)", "button not visible (3, 4)"] {
+            let r = parse_vlm_response(t).unwrap();
+            assert!(r.coord.is_none(), "{t}");
+            assert!(r.not_found, "{t}");
+        }
+    }
+
+    #[test]
+    fn type_content_keeps_embedded_apostrophe() {
+        let r = parse_vlm_response("type(start_box='(300,400)', content='don't')").unwrap();
+        assert_eq!(r.action, Some(ParsedAction::Type("don't".into())));
+    }
+
+    #[test]
+    fn type_content_double_quoted_with_apostrophe_then_more_args() {
+        let r = parse_vlm_response("type(content=\"it's\", start_box='(1,2)')").unwrap();
+        assert_eq!(r.action, Some(ParsedAction::Type("it's".into())));
     }
 }

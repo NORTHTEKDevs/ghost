@@ -19,5 +19,5 @@ pub mod yolo;
 
 pub use types::{CoordNorm, Grounded, Target, Tier};
 pub use engine::{GroundingEngine, GroundingStats, LocateMode, TierResult, GroundingTier};
-pub use parser::{ParsedVlmResponse, parse_vlm_response};
+pub use parser::{ParsedVlmResponse, parse_vlm_response, parse_vlm_response_in};
 pub use marks::{Region, remove_overlapping, som_id_to_region, som_id_to_grounded};
