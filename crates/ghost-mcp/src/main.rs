@@ -4497,7 +4497,10 @@ async fn run_batch_op(
     // Batch ops go straight to handle_tool, past dispatch_tool_inner's gate:
     // check each one, so a stop raised mid-batch holds the rest back.
     stop_gate(method, params, ghost_session::error::is_stopped()).map_err(|e| with_stop_reason(method, e))?;
-    Box::pin(handle_tool(session, method, params)).await
+    // ...and the same argument checks, which also clamp timeout_ms.
+    let validated = validate_args(method, params)?;
+    let args: &Value = validated.as_ref().unwrap_or(params);
+    Box::pin(handle_tool(session, method, args)).await
 }
 
 /// Short op names (ghost_batch_actions ops, ghost_run's documented `{op:'find'}`)
@@ -4584,6 +4587,28 @@ fn base64_encode(data: &[u8]) -> String {
         out.push(if chunk.len() > 2 { TABLE[b2 & 0x3f] as char } else { '=' });
     }
     out
+}
+
+/// L1: a batch op reaches handle_tool past dispatch_tool_inner, so it must
+/// run the same argument validation itself (an empty name, an unknown mode or
+/// an oversized timeout_ms would otherwise go through). Read from the source.
+#[cfg(test)]
+mod batch_validation_wiring {
+    #[test]
+    fn a_batch_op_validates_its_arguments_before_dispatch() {
+        let src = include_str!("main.rs");
+        let start = src.find("async fn run_batch_op(").expect("run_batch_op");
+        let body = &src[start..start + src[start..].find("
+}
+").expect("end")];
+        let validate = body.find("validate_args(method, params)").unwrap_or_else(|| panic!("no validate_args:
+{body}"));
+        let dispatch = body.find("handle_tool(session, method, ").expect("handle_tool");
+        assert!(validate < dispatch, "validation must come first:
+{body}");
+        assert!(!body.contains("handle_tool(session, method, params)"), "the validated args must be the ones dispatched:
+{body}");
+    }
 }
 
 /// F1 wiring: every ghost_wait search arm resolves its window through
