@@ -244,9 +244,106 @@ fn http_client() -> &'static reqwest::Client {
             .user_agent("ghost-mcp/0.2.0")
             // HIGH-5 (SSRF): disable redirect following to prevent redirect-chain bypass.
             .redirect(reqwest::redirect::Policy::none())
+            // DNS names resolving to blocked space are refused at connect time;
+            // no proxy, or the proxy would resolve the name instead.
+            .dns_resolver(std::sync::Arc::new(FilteringResolver::new(std::sync::Arc::new(SystemResolver))))
+            .no_proxy()
             .build()
             .expect("failed to build reqwest client")
     })
+}
+
+fn allow_private() -> bool {
+    std::env::var("GHOST_HTTP_ALLOW_PRIVATE").as_deref() == Ok("1")
+}
+
+/// True for an address ghost_http_get/post must not reach: this machine, private
+/// and link-local networks, CGNAT (100.64/10, Tailscale), "this network" (0/8),
+/// benchmarking (198.18/15), multicast and reserved space. One predicate for
+/// both the URL-literal check and the DNS filter.
+fn is_blocked(ip: std::net::IpAddr) -> bool {
+    use std::net::IpAddr;
+    // An IPv4-mapped IPv6 address (::ffff:127.0.0.1) reaches the IPv4 host.
+    let ip = match ip {
+        IpAddr::V6(v6) => v6.to_ipv4_mapped().map_or(IpAddr::V6(v6), IpAddr::V4),
+        v4 => v4,
+    };
+    match ip {
+        IpAddr::V4(v4) => {
+            let o = v4.octets();
+            v4.is_loopback()                        // 127/8
+                || v4.is_private()                  // 10/8, 172.16/12, 192.168/16
+                || v4.is_link_local()               // 169.254/16 (metadata endpoints)
+                || v4.is_broadcast()
+                || o[0] == 0                        // 0/8 "this network"
+                || (o[0] == 100 && (o[1] & 0xc0) == 64) // 100.64/10 CGNAT
+                || (o[0] == 198 && (o[1] & 0xfe) == 18) // 198.18/15 benchmarking
+                || o[0] >= 224 // 224/4 multicast, 240/4 reserved
+        }
+        IpAddr::V6(v6) => {
+            let o = v6.octets();
+            v6.is_loopback()                        // ::1
+                || v6.is_unspecified()              // ::
+                || (o[0] & 0xfe) == 0xfc            // fc00::/7 unique local
+                || (o[0] == 0xfe && (o[1] & 0xc0) == 0x80) // fe80::/10 link-local
+                || o[0] == 0xff // ff00::/8 multicast
+        }
+    }
+}
+
+/// A caller-supplied `Host` header would let a public URL carry a request for
+/// another virtual host (or a DevTools endpoint's Host check); refuse it.
+fn check_headers(h: Option<&serde_json::Map<String, Value>>) -> std::result::Result<(), String> {
+    if h.is_some_and(|h| h.keys().any(|k| k.trim().eq_ignore_ascii_case("host"))) {
+        return Err("a caller-supplied Host header is not allowed (SSRF prevention); the URL's host is sent".into());
+    }
+    Ok(())
+}
+
+/// The http client's DNS resolver: resolves with `inner`, then drops every
+/// blocked address, so a public name that resolves to loopback/private space
+/// (127.0.0.1.nip.io, DNS rebinding) cannot reach it. All blocked = an error.
+/// GHOST_HTTP_ALLOW_PRIVATE=1 disables the filter, as for literals.
+struct FilteringResolver {
+    inner: std::sync::Arc<dyn reqwest::dns::Resolve>,
+}
+impl FilteringResolver {
+    fn new(inner: std::sync::Arc<dyn reqwest::dns::Resolve>) -> Self {
+        Self { inner }
+    }
+}
+impl reqwest::dns::Resolve for FilteringResolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let host = name.as_str().to_string();
+        let lookup = self.inner.resolve(name);
+        Box::pin(async move {
+            let addrs: Vec<std::net::SocketAddr> = lookup.await?.collect();
+            if allow_private() {
+                return Ok(Box::new(addrs.into_iter()) as reqwest::dns::Addrs);
+            }
+            let open: Vec<_> = addrs.into_iter().filter(|a| !is_blocked(a.ip())).collect();
+            if open.is_empty() {
+                return Err(format!(
+                    "{host} resolves only to private/loopback/reserved addresses - blocked (SSRF prevention). \
+                     Set GHOST_HTTP_ALLOW_PRIVATE=1 to allow"
+                )
+                .into());
+            }
+            Ok(Box::new(open.into_iter()) as reqwest::dns::Addrs)
+        })
+    }
+}
+
+/// The system resolver (getaddrinfo via tokio), wrapped by FilteringResolver.
+struct SystemResolver;
+impl reqwest::dns::Resolve for SystemResolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let host = name.as_str().to_string();
+        Box::pin(async move {
+            let addrs: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host.as_str(), 0)).await?.collect();
+            Ok(Box::new(addrs.into_iter()) as reqwest::dns::Addrs)
+        })
+    }
 }
 
 /// HIGH-5 (SSRF): validate that a URL is safe to fetch.
@@ -262,7 +359,7 @@ fn validate_url(url: &str) -> std::result::Result<(), String> {
     }
 
     // Allow private ranges only when explicitly opted in.
-    if std::env::var("GHOST_HTTP_ALLOW_PRIVATE").as_deref() == Ok("1") {
+    if allow_private() {
         return Ok(());
     }
 
@@ -272,8 +369,6 @@ fn validate_url(url: &str) -> std::result::Result<(), String> {
     let host = parsed.host_str().unwrap_or("");
     let bare = host.strip_prefix('[').and_then(|h| h.strip_suffix(']')).unwrap_or(host);
     let ip = match bare.parse::<std::net::IpAddr>() {
-        // An IPv4-mapped IPv6 address (::ffff:127.0.0.1) reaches the IPv4 host.
-        Ok(std::net::IpAddr::V6(v6)) => Some(v6.to_ipv4_mapped().map_or(std::net::IpAddr::V6(v6), std::net::IpAddr::V4)),
         Ok(ip) => Some(ip),
         Err(_) => {
             // "localhost." (trailing dot) and "*.localhost" resolve to this
@@ -286,35 +381,13 @@ fn validate_url(url: &str) -> std::result::Result<(), String> {
         }
     };
 
-    // Block private, loopback and link-local ranges.
-    if let Some(ip) = ip {
-        let blocked = match ip {
-            std::net::IpAddr::V4(v4) => {
-                v4.is_loopback()           // 127.0.0.0/8
-                || v4.is_private()         // 10/8, 172.16/12, 192.168/16
-                || v4.is_link_local()      // 169.254/16 (metadata endpoints)
-                || v4.is_broadcast()
-                || v4.is_unspecified()
-            }
-            std::net::IpAddr::V6(v6) => {
-                v6.is_loopback()           // ::1
-                || v6.is_unspecified()     // ::
-                // fc00::/7 (unique local) - check first two bits
-                || (v6.octets()[0] & 0xfe) == 0xfc
-                // fe80::/10 (link-local)
-                || (v6.octets()[0] == 0xfe && (v6.octets()[1] & 0xc0) == 0x80)
-            }
-        };
-        if blocked {
-            return Err(format!(
-                "URL targets a private/reserved IP ({ip}) - blocked (SSRF prevention). Set GHOST_HTTP_ALLOW_PRIVATE=1 to allow"
-            ));
-        }
+    if let Some(ip) = ip.filter(|ip| is_blocked(*ip)) {
+        return Err(format!(
+            "URL targets a private/reserved IP ({ip}) - blocked (SSRF prevention). Set GHOST_HTTP_ALLOW_PRIVATE=1 to allow"
+        ));
     }
-    // Note: hostname-based DNS resolution is NOT done here (would require async).
-    // The primary protection is the IP literal check above. Hostname-based bypasses
-    // (e.g. attacker-controlled DNS resolving to 127.0.0.1) are a known limitation
-    // of this synchronous validation approach.
+    // DNS names are checked at connect time by FilteringResolver (the client's
+    // resolver), which sees the addresses actually dialled.
     Ok(())
 }
 
@@ -2252,6 +2325,7 @@ async fn handle_tool(
             let url = p["url"].as_str().ok_or("missing param: url")?;
             validate_url(url)?;
             let headers_val = p["headers"].as_object();
+            check_headers(headers_val)?;
             let mut req = http_client().get(url);
             if let Some(hdrs) = headers_val {
                 for (k, v) in hdrs {
@@ -2271,6 +2345,7 @@ async fn handle_tool(
             let body = p["body"].as_str().unwrap_or("");
             let content_type = p["content_type"].as_str().unwrap_or("application/json");
             let headers_val = p["headers"].as_object();
+            check_headers(headers_val)?;
             let mut req = http_client()
                 .post(url)
                 .header("Content-Type", content_type)
@@ -4383,6 +4458,62 @@ mod validate_url_tests {
         for url in ["https://example.com/", "http://93.184.216.34/", "http://[2606:4700:4700::1111]/"] {
             assert!(validate_url(url).is_ok(), "{url} was refused: {:?}", validate_url(url));
         }
+    }
+
+    /// CGNAT (Tailscale), "this network", benchmarking and multicast ranges.
+    #[test]
+    fn reserved_ranges_beyond_rfc1918_are_refused() {
+        for url in [
+            "http://100.100.1.1/",
+            "http://100.64.0.1/",
+            "http://0.1.2.3/",
+            "http://198.18.0.1/",
+            "http://224.0.0.1/",
+            "http://[ff02::1]/",
+        ] {
+            assert!(validate_url(url).is_err(), "{url} was allowed");
+        }
+    }
+
+    #[test]
+    fn a_caller_host_header_is_refused() {
+        let hdrs = serde_json::json!({ "HoSt": "127.0.0.1:9222", "x-ok": "1" });
+        let e = super::check_headers(hdrs.as_object()).expect_err("Host refused");
+        assert!(e.contains("Host"), "{e}");
+        assert!(super::check_headers(serde_json::json!({ "x-ok": "1" }).as_object()).is_ok());
+        assert!(super::check_headers(None).is_ok());
+    }
+
+    /// A resolver that answers from a fixed table - no real DNS.
+    struct Stub(Vec<std::net::SocketAddr>);
+    impl reqwest::dns::Resolve for Stub {
+        fn resolve(&self, _name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+            let addrs = self.0.clone();
+            Box::pin(async move { Ok(Box::new(addrs.into_iter()) as reqwest::dns::Addrs) })
+        }
+    }
+
+    fn resolve_via(stub: Vec<&str>, host: &str) -> Result<Vec<std::net::SocketAddr>, String> {
+        use reqwest::dns::Resolve;
+        let inner = Stub(stub.iter().map(|s| s.parse().unwrap()).collect());
+        let r = super::FilteringResolver::new(std::sync::Arc::new(inner));
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        rt.block_on(r.resolve(host.parse().unwrap()))
+            .map(|a| a.collect())
+            .map_err(|e| e.to_string())
+    }
+
+    #[test]
+    fn a_dns_name_resolving_to_loopback_is_refused() {
+        let e = resolve_via(vec!["127.0.0.1:0"], "evil.test").expect_err("loopback name refused");
+        assert!(e.contains("evil.test"), "{e}");
+        assert!(resolve_via(vec!["100.100.1.1:0", "[::1]:0"], "127.0.0.1.nip.io").is_err());
+    }
+
+    #[test]
+    fn a_dns_name_keeps_only_its_public_addresses() {
+        let got = resolve_via(vec!["127.0.0.1:0", "93.184.216.34:0"], "mixed.test").unwrap();
+        assert_eq!(got, vec!["93.184.216.34:0".parse().unwrap()]);
     }
 }
 
