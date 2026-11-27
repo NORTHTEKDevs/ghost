@@ -2307,15 +2307,23 @@ impl GhostSession {
     /// the same event-bus backoff as wait_for_element. The "wait until this field
     /// fills / the total updates / autofill lands" primitive.
     /// Scoped to window `hwnd`, like wait_for_element.
-    pub async fn wait_for_value(&self, hwnd: isize, by: By, pred: &str, expected: &str, timeout_ms: u64) -> Result<String> {
+    /// A name lookup reads the field, not its label: see `value_target`.
+    pub async fn wait_for_value(
+        &self,
+        hwnd: isize,
+        by: By,
+        role_filter: Option<&str>,
+        pred: &str,
+        expected: &str,
+        timeout_ms: u64,
+    ) -> Result<String> {
         let start = std::time::Instant::now();
         let deadline = Duration::from_millis(timeout_ms);
         let bus = EventBus::global();
         let mut last_seq = bus.seq();
         let read = |by: &By| -> Result<String> {
-            Ok(self
-                .find_in_hwnd(hwnd, by, "wait_for_value")?
-                .map(|el| crate::GhostElement::new(el).typed_value())
+            Ok(crate::value_target::find_value_element(&self.tree, hwnd, by, role_filter)?
+                .map(|el| crate::element::read_value(&el))
                 .unwrap_or_default())
         };
         // Baseline for "changes".
@@ -3155,28 +3163,7 @@ impl GhostSession {
             _ => None,
         };
         let lookup = || -> Result<Option<crate::engine::uia::element::UiaElement>> {
-            match &by {
-                By::Description(d) => Err(GhostError::Vision(format!(
-                    "value assertions need an element name or role, not a description; desc={d}"
-                ))),
-                By::Role(r) => self
-                    .tree
-                    .find_by_role_in_hwnd(hwnd, r)
-                    .map_err(GhostError::Core),
-                By::Name(n) => {
-                    let all = self
-                        .tree
-                        .find_all_in_hwnd(hwnd, Some(n), role_filter, 16)
-                        .map_err(GhostError::Core)?;
-                    let pos = all
-                        .iter()
-                        .position(|el| {
-                            crate::engine::uia::patterns::is_editable_role(el.control_type())
-                        })
-                        .unwrap_or(0);
-                    Ok(all.into_iter().nth(pos))
-                }
-            }
+            crate::value_target::find_value_element(&self.tree, hwnd, &by, role_filter)
         };
         // Chromium builds its accessibility subtree lazily, like every other
         // window-scoped lookup here.
@@ -3908,7 +3895,11 @@ mod wiring_tests {
         ] {
             let b = method(src, sig);
             assert!(b.contains("hwnd: isize"), "{sig} takes no window");
-            assert!(b.contains("_in_hwnd("), "{sig}: no window-scoped lookup:\n{b}");
+            // value_target::find_value_element walks only `hwnd` too.
+            assert!(
+                b.contains("_in_hwnd(") || b.contains("find_value_element(&self.tree, hwnd, "),
+                "{sig}: no window-scoped lookup:\n{b}"
+            );
             for global in ["find_by_name_fast(", "find_by_role_fast(", "find_by_name(", "find_by_role("] {
                 assert!(!b.contains(global), "{sig} searches the whole desktop via {global}:\n{b}");
             }

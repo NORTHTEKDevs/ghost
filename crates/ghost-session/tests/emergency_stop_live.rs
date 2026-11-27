@@ -101,7 +101,7 @@ async fn count_of(s: &GhostSession, t: &WindowTarget) -> Option<u32> {
 }
 
 async fn edit_value(s: &GhostSession, t: &WindowTarget) -> String {
-    s.hidden_value(t, By::Role("edit".into())).await.unwrap_or_default()
+    s.hidden_value(t, By::Role("edit".into()), None).await.unwrap_or_default()
 }
 
 #[tokio::test(flavor = "multi_thread")]

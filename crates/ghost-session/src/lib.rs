@@ -16,6 +16,7 @@ pub mod registries;
 pub mod shell;
 pub mod tiers;
 pub mod vision;
+mod value_target;
 pub use session::{GhostSession, Region};
 pub use target::{Candidate, Surface, TargetSource, WindowTarget};
 pub use locator::By;

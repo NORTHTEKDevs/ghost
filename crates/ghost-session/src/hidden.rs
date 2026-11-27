@@ -839,11 +839,18 @@ impl GhostSession {
     }
 
     /// The current value (ValuePattern / text) of an element on a hidden window.
-    pub async fn hidden_value(&self, t: &WindowTarget, by: By) -> Result<String> {
+    /// A name lookup reads the field, not its label (on this desktop the
+    /// EDIT's own name becomes its text after typing): see `value_target`.
+    pub async fn hidden_value(&self, t: &WindowTarget, by: By, role: Option<String>) -> Result<String> {
         let d = self.desktop_for(t).await?;
         let hwnd = t.hwnd;
         let v: Result<String> = core(d.with_uia(move |tree| {
-            find_in(tree, hwnd, &by, None, None).map(|(el, _)| element_value(&el))
+            crate::value_target::find_value_element(tree, hwnd, &by, role.as_deref())?
+                .map(|el| element_value(&el))
+                .ok_or_else(|| GhostError::ElementNotFound {
+                    query: format!("{by:?} in the hidden-desktop window"),
+                    screenshot: None,
+                })
         }))?;
         v
     }

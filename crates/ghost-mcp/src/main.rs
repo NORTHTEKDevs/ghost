@@ -1567,7 +1567,7 @@ async fn dispatch_hidden(
                         .ok_or("ghost_assert: value-equals/value-contains requires 'text'")?;
                     let by = parse_by(p)?;
                     let actual = session
-                        .hidden_value(t, by)
+                        .hidden_value(t, by, p["role"].as_str().map(str::to_string))
                         .await
                         .map_err(|e| format!("assert failed: element not found - {e}"))?;
                     let passed = if predicate == "value-equals" {
@@ -1631,10 +1631,11 @@ async fn dispatch_hidden(
                 let expected = p["text"].as_str().unwrap_or("");
                 let timeout_ms = p["timeout_ms"].as_u64().unwrap_or(5000);
                 let by = parse_by(p)?;
+                let role = p["role"].as_str().map(str::to_string);
                 let start = std::time::Instant::now();
-                let initial = session.hidden_value(t, by.clone()).await.ok();
+                let initial = session.hidden_value(t, by.clone(), role.clone()).await.ok();
                 loop {
-                    let value = session.hidden_value(t, by.clone()).await.unwrap_or_default();
+                    let value = session.hidden_value(t, by.clone(), role.clone()).await.unwrap_or_default();
                     let done = match pred {
                         "contains" => value.contains(expected),
                         "changes" => initial.as_deref() != Some(value.as_str()),
@@ -2879,7 +2880,8 @@ async fn handle_tool(
             let timeout_ms = p["timeout_ms"].as_u64().unwrap_or(5000);
             let by = parse_by(p)?;
             let hwnd = wait_scope_hwnd(session, p).await?;
-            let value = session.wait_for_value(hwnd, by, pred, expected, timeout_ms).await.map_err(|e| e.to_string())?;
+            let role = p["role"].as_str();
+            let value = session.wait_for_value(hwnd, by, role, pred, expected, timeout_ms).await.map_err(|e| e.to_string())?;
             Ok(json!({ "ok": true, "value": value }))
         }
         "ghost_wait_for_event" => {
