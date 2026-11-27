@@ -587,7 +587,8 @@ pub fn capture_screen_region(
     encode_region(full_rgba, full_w, full_h, max_dim, format)
 }
 
-/// Downscale (to `max_dim` longest edge, if given) then encode raw RGBA.
+/// Downscale (to `max_dim` longest edge, if given and non-zero) then encode
+/// raw RGBA. `Some(0)` means no resize, as ghost_screenshot documents.
 /// Shared by the DXGI and GDI-virtual-rect paths of `capture_screen_region`.
 fn encode_region(
     rgba: Vec<u8>,
@@ -596,7 +597,7 @@ fn encode_region(
     max_dim: Option<u32>,
     format: CaptureFormat,
 ) -> Result<Vec<u8>, CoreError> {
-    let (final_rgba, fw, fh) = if let Some(target) = max_dim {
+    let (final_rgba, fw, fh) = if let Some(target) = max_dim.filter(|&d| d > 0) {
         let long_edge = w.max(h) as u32;
         if long_edge > target {
             let scale = target as f32 / long_edge as f32;
@@ -1207,6 +1208,20 @@ mod tests {
         assert!(!rect_within((-1, 0, 100, 100), bounds)); // left of bounds
         assert!(!rect_within((0, 0, 1921, 100), bounds)); // past right edge
         assert!(!rect_within((1900, 1000, 2100, 1200), bounds)); // second-monitor rect
+    }
+
+    /// ghost_screenshot documents max_dim=0 as "no resize", but encode_region
+    /// took Some(0) as a target and shrank every window capture to 1x1.
+    #[test]
+    fn encode_region_max_dim_zero_keeps_full_size() {
+        let (w, h) = (40usize, 20usize);
+        let rgba = vec![200u8; w * h * 4];
+        let png = encode_region(rgba.clone(), w, h, Some(0), CaptureFormat::Png).unwrap();
+        let img = image::load_from_memory(&png).unwrap();
+        assert_eq!((img.width(), img.height()), (40, 20));
+        let small = encode_region(rgba, w, h, Some(10), CaptureFormat::Png).unwrap();
+        let img = image::load_from_memory(&small).unwrap();
+        assert_eq!((img.width(), img.height()), (10, 5), "a real max_dim still downscales");
     }
 
     #[test]
