@@ -440,32 +440,38 @@ pub struct LaunchedBrowser {
 /// future during the port wait, or the wait itself failing. Without it Chrome
 /// kept running and held the profile, so the next launch with the same id
 /// handed off to the orphan and hung.
+/// Both kinds of process are held by handle (a `Child`, or the handle
+/// `CreateProcessW` returned), never by id: an id can be reused by an unrelated
+/// process once the browser exits (Chrome exits at once when it hands off to an
+/// instance already running on the profile).
 struct LaunchGuard {
     child: Option<std::process::Child>,
-    pid: Option<u32>,
+    /// A process handle (as an integer so the launch future stays `Send`).
+    #[cfg(windows)]
+    process: Option<isize>,
 }
 
 impl LaunchGuard {
     fn child(child: std::process::Child) -> Self {
-        LaunchGuard { child: Some(child), pid: None }
+        LaunchGuard {
+            child: Some(child),
+            #[cfg(windows)]
+            process: None,
+        }
     }
 
-    #[cfg_attr(not(windows), allow(dead_code))]
-    fn pid(pid: u32) -> Self {
-        LaunchGuard { child: None, pid: Some(pid) }
+    /// Takes ownership of `handle` (closed on drop, ended first if still armed).
+    #[cfg(windows)]
+    fn process(handle: isize) -> Self {
+        LaunchGuard { child: None, process: Some(handle) }
     }
 
     fn disarm(&mut self) {
         self.child = None;
-        self.pid = None;
-    }
-
-    #[cfg(test)]
-    fn is_running(&mut self) -> bool {
-        if let Some(c) = self.child.as_mut() {
-            return c.try_wait().ok().flatten().is_none();
+        #[cfg(windows)]
+        if let Some(h) = self.process.take() {
+            close_process_handle(h, false);
         }
-        self.pid.is_some_and(pid_running)
     }
 }
 
@@ -475,27 +481,24 @@ impl Drop for LaunchGuard {
             let _ = c.kill();
             let _ = c.wait();
         }
-        if let Some(pid) = self.pid.take() {
-            end_pid(pid);
+        #[cfg(windows)]
+        if let Some(h) = self.process.take() {
+            close_process_handle(h, true);
         }
     }
 }
 
 #[cfg(windows)]
-fn end_pid(pid: u32) {
-    use windows::Win32::Foundation::CloseHandle;
-    use windows::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+fn close_process_handle(h: isize, end_first: bool) {
+    use windows::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows::Win32::System::Threading::TerminateProcess;
+    let h = HANDLE(h as _);
     unsafe {
-        if let Ok(h) = OpenProcess(PROCESS_TERMINATE, false, pid) {
+        if end_first {
             let _ = TerminateProcess(h, 1);
-            let _ = CloseHandle(h);
         }
+        let _ = CloseHandle(h);
     }
-}
-
-#[cfg(not(windows))]
-fn end_pid(pid: u32) {
-    let _ = std::process::Command::new("kill").args(["-9", &pid.to_string()]).status();
 }
 
 #[cfg(all(test, windows))]
@@ -534,9 +537,15 @@ pub async fn launch(opts: &LaunchOptions) -> Result<LaunchedBrowser> {
     let port_file = opts.user_data_dir.join("DevToolsActivePort");
     let _ = std::fs::remove_file(&port_file);
 
+    #[allow(unused_mut)]
+    let mut desktop_pid: Option<u32> = None;
     let mut guard = match opts.desktop.as_deref() {
         #[cfg(windows)]
-        Some(desktop) => LaunchGuard::pid(spawn_on_desktop(&exe, &base_args(opts), desktop)?),
+        Some(desktop) => {
+            let (pid, handle) = spawn_on_desktop(&exe, &base_args(opts), desktop)?;
+            desktop_pid = Some(pid);
+            LaunchGuard::process(handle)
+        }
         #[cfg(not(windows))]
         Some(desktop) => {
             return Err(BrowserError::Launch(format!(
@@ -560,7 +569,7 @@ pub async fn launch(opts: &LaunchOptions) -> Result<LaunchedBrowser> {
             LaunchGuard::child(child)
         }
     };
-    let pid = guard.child.as_ref().map(|c| c.id()).or(guard.pid).expect("a launch guard holds its process");
+    let pid = guard.child.as_ref().map(|c| c.id()).or(desktop_pid).expect("a launch guard holds its process");
 
     #[cfg(windows)]
     let job_bound = match job::bind_to_this_process(pid) {
@@ -638,7 +647,8 @@ pub fn windows_command_line(exe: &Path, args: &[String]) -> String {
 /// Chrome in every launch style), and moving it off-screen afterwards does not
 /// give the keyboard back.
 #[cfg(windows)]
-fn spawn_on_desktop(exe: &Path, args: &[String], desktop: &str) -> Result<u32> {
+/// Returns the pid and the process handle (owned by the caller, who closes it).
+fn spawn_on_desktop(exe: &Path, args: &[String], desktop: &str) -> Result<(u32, isize)> {
     use std::ffi::OsStr;
     use std::os::windows::ffi::OsStrExt;
     use windows::core::PWSTR;
@@ -684,9 +694,8 @@ fn spawn_on_desktop(exe: &Path, args: &[String], desktop: &str) -> Result<u32> {
             ))
         })?;
         let pid = pi.dwProcessId;
-        let _ = CloseHandle(pi.hProcess);
         let _ = CloseHandle(pi.hThread);
-        Ok(pid)
+        Ok((pid, pi.hProcess.0 as isize))
     }
 }
 
@@ -827,10 +836,41 @@ mod tests {
     }
 
     fn alive(pid: u32) -> bool {
-        let mut g = LaunchGuard::pid(pid);
-        let out = g.is_running();
+        pid_running(pid)
+    }
+
+    /// The hidden-desktop path guards the process by its HANDLE: a guard that
+    /// fires after the process exited and its id was reused must not end the
+    /// new owner, so nothing in the guard looks a process up by id.
+    #[test]
+    fn the_guard_never_ends_a_process_by_id() {
+        let src = include_str!("launch.rs");
+        let start = src.find("impl Drop for LaunchGuard").expect("Drop impl");
+        let b = &src[start..start + src[start..].find("\n}\n").expect("end")];
+        assert!(!b.contains("end_pid(") && !b.contains("OpenProcess("), "{b}");
+        assert!(!src.contains(concat!("fn end", "_pid(")), "a pid-based kill helper is back");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_handle_guard_ends_its_process_and_a_disarmed_one_does_not() {
+        use windows::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE};
+        let open = |pid: u32| unsafe { OpenProcess(PROCESS_TERMINATE | PROCESS_SYNCHRONIZE, false, pid) }.expect("open") .0 as isize;
+
+        let mut ended = sleeper();
+        drop(LaunchGuard::process(open(ended.id())));
+        let code = ended.wait().expect("wait").code();
+        assert_eq!(code, Some(1), "the guard did not end its process");
+
+        let mut kept = sleeper();
+        let mut g = LaunchGuard::process(open(kept.id()));
         g.disarm();
-        out
+        drop(g);
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let survived = kept.try_wait().expect("try_wait").is_none();
+        let _ = kept.kill();
+        let _ = kept.wait();
+        assert!(survived, "a disarmed guard ended a launched browser");
     }
 
     /// A launch abandoned before its browser was handed over (a deadline or a
@@ -848,15 +888,17 @@ mod tests {
         assert!(!alive(pid), "the abandoned launch's process {pid} kept running");
 
         let mut kept = sleeper();
-        let pid = kept.id();
-        let mut g = LaunchGuard::pid(pid);
+        let mut g = LaunchGuard::child(std::process::Command::new(if cfg!(windows) { "cmd" } else { "true" })
+            .args(if cfg!(windows) { &["/c", "exit", "0"][..] } else { &[][..] })
+            .spawn()
+            .expect("spawn"));
         g.disarm();
         drop(g);
         std::thread::sleep(std::time::Duration::from_millis(200));
         let survived = kept.try_wait().expect("try_wait").is_none();
         let _ = kept.kill();
         let _ = kept.wait();
-        assert!(survived, "a disarmed guard ended a launched browser");
+        assert!(survived, "a disarmed guard ended an unrelated process");
     }
 
     /// `launch` arms the guard before the port wait and disarms it only once
