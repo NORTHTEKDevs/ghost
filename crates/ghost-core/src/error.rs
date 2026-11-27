@@ -59,6 +59,9 @@ pub enum CoreError {
     #[error("desktop error: {0}")]
     Desktop(String),
 
+    #[error("the point ({x}, {y}) is on no monitor (monitors: {monitors}); nothing was clicked - re-read the element's position")]
+    PointOffScreen { x: i32, y: i32, monitors: String },
+
     /// The emergency stop is active (Ctrl+Alt+G or `ghost_stop`, in this or
     /// any other Ghost process). Nothing that changes state runs until reset.
     #[error("{}", crate::stop::refusal_text())]

@@ -6,6 +6,69 @@ use crate::error::CoreError;
 use super::hotkey::is_stopped;
 use crate::focus;
 
+/// A monitor rectangle in virtual-screen pixels: `(left, top, right, bottom)`,
+/// right and bottom exclusive (the Win32 `RECT` convention).
+pub type MonitorRect = (i32, i32, i32, i32);
+
+/// Is `pt` on some monitor? The virtual screen is the bounding box of all
+/// monitors, so on a multi-monitor layout it contains gaps no monitor covers.
+pub fn point_on_any_monitor(pt: (i32, i32), monitors: &[MonitorRect]) -> bool {
+    let (x, y) = pt;
+    monitors.iter().any(|&(l, t, r, b)| x >= l && x < r && y >= t && y < b)
+}
+
+/// The refusal for a point on no monitor, naming the point and every monitor.
+pub(crate) fn off_monitor_error(pt: (i32, i32), monitors: &[MonitorRect]) -> CoreError {
+    let monitors = monitors
+        .iter()
+        .map(|(l, t, r, b)| format!("({l},{t})-({r},{b})"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    CoreError::PointOffScreen { x: pt.0, y: pt.1, monitors }
+}
+
+/// The rectangles of every attached monitor. Falls back to the virtual screen
+/// if the enumeration yields nothing, so a failed query never blocks input.
+pub fn monitor_rects() -> Vec<MonitorRect> {
+    use windows::Win32::Foundation::{BOOL, LPARAM, RECT};
+    use windows::Win32::Graphics::Gdi::{EnumDisplayMonitors, HDC, HMONITOR};
+    unsafe extern "system" fn collect(_: HMONITOR, _: HDC, rc: *mut RECT, data: LPARAM) -> BOOL {
+        let out = &mut *(data.0 as *mut Vec<MonitorRect>);
+        if let Some(r) = rc.as_ref() {
+            out.push((r.left, r.top, r.right, r.bottom));
+        }
+        true.into()
+    }
+    let mut out: Vec<MonitorRect> = Vec::new();
+    unsafe {
+        let _ = EnumDisplayMonitors(None, None, Some(collect), LPARAM(&mut out as *mut _ as isize));
+    }
+    if out.is_empty() {
+        let (x, y, w, h) = unsafe {
+            (
+                GetSystemMetrics(SM_XVIRTUALSCREEN),
+                GetSystemMetrics(SM_YVIRTUALSCREEN),
+                GetSystemMetrics(SM_CXVIRTUALSCREEN),
+                GetSystemMetrics(SM_CYVIRTUALSCREEN),
+            )
+        };
+        out.push((x, y, x + w, y + h));
+    }
+    out
+}
+
+/// Refuse real input at a point no monitor shows. `to_absolute` clamps such a
+/// point onto the virtual screen's edge, so x=5000 on a 1920-wide screen would
+/// otherwise click the right edge (a maximised window's Close button).
+fn ensure_on_a_monitor(x: i32, y: i32) -> Result<(), CoreError> {
+    let monitors = monitor_rects();
+    if point_on_any_monitor((x, y), &monitors) {
+        Ok(())
+    } else {
+        Err(off_monitor_error((x, y), &monitors))
+    }
+}
+
 /// Pixel -> absolute-mouse conversion, with the virtual-desktop bounds passed in
 /// as `(origin_x, origin_y, width, height)`. Split out from [`to_absolute`] so the
 /// arithmetic is unit-testable on a single-monitor build machine.
@@ -84,6 +147,7 @@ pub fn click(x: i32, y: i32) -> Result<(), CoreError> {
         return Err(CoreError::Stopped);
     }
     focus::require_foreground_allowed("click")?;
+    ensure_on_a_monitor(x, y)?;
     let inputs = [move_event(x, y), click_event(false), click_event(true)];
     unsafe {
         let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
@@ -100,6 +164,7 @@ pub fn move_to(x: i32, y: i32) -> Result<(), CoreError> {
         return Err(CoreError::Stopped);
     }
     focus::require_foreground_allowed("move_to")?;
+    ensure_on_a_monitor(x, y)?;
     let inputs = [move_event(x, y)];
     unsafe {
         let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
@@ -141,6 +206,7 @@ pub fn hover(x: i32, y: i32) -> Result<(), CoreError> {
         return Err(CoreError::Stopped);
     }
     focus::require_foreground_allowed("hover")?;
+    ensure_on_a_monitor(x, y)?;
     let inputs = [move_event(x, y)];
     unsafe {
         let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
@@ -157,6 +223,7 @@ pub fn right_click(x: i32, y: i32) -> Result<(), CoreError> {
         return Err(CoreError::Stopped);
     }
     focus::require_foreground_allowed("right_click")?;
+    ensure_on_a_monitor(x, y)?;
     let inputs = [move_event(x, y), right_click_event(false), right_click_event(true)];
     unsafe {
         let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
@@ -173,6 +240,7 @@ pub fn double_click(x: i32, y: i32) -> Result<(), CoreError> {
         return Err(CoreError::Stopped);
     }
     focus::require_foreground_allowed("double_click")?;
+    ensure_on_a_monitor(x, y)?;
     let inputs = [
         move_event(x, y),
         click_event(false), click_event(true),
@@ -193,6 +261,8 @@ pub fn drag(from_x: i32, from_y: i32, to_x: i32, to_y: i32) -> Result<(), CoreEr
         return Err(CoreError::Stopped);
     }
     focus::require_foreground_allowed("drag")?;
+    ensure_on_a_monitor(from_x, from_y)?;
+    ensure_on_a_monitor(to_x, to_y)?;
     let inputs = [
         move_event(from_x, from_y),
         click_event(false),
@@ -214,6 +284,7 @@ pub fn scroll(x: i32, y: i32, direction: &str, amount: i32) -> Result<(), CoreEr
         return Err(CoreError::Stopped);
     }
     focus::require_foreground_allowed("scroll")?;
+    ensure_on_a_monitor(x, y)?;
     let delta = match direction {
         "up" => 120 * amount,
         "down" => -(120 * amount),
@@ -235,6 +306,40 @@ pub fn scroll(x: i32, y: i32, direction: &str, amount: i32) -> Result<(), CoreEr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_point_on_a_monitor_is_on_screen_and_edges_are_exclusive() {
+        let one = [(0, 0, 1920, 1080)];
+        assert!(point_on_any_monitor((0, 0), &one));
+        assert!(point_on_any_monitor((1919, 1079), &one));
+        assert!(!point_on_any_monitor((1920, 500), &one), "right edge is exclusive");
+        assert!(!point_on_any_monitor((500, 1080), &one), "bottom edge is exclusive");
+        assert!(!point_on_any_monitor((5000, 500), &one));
+        assert!(!point_on_any_monitor((-1, 500), &one));
+        assert!(!point_on_any_monitor((10, 10), &[]));
+    }
+
+    #[test]
+    fn a_point_in_the_gap_between_monitors_is_off_screen() {
+        // Primary 1920x1080 at the origin; a 1280x1024 monitor to the left whose
+        // top sits 200 px lower, and a 2560x1440 monitor to the right, top-aligned.
+        // The virtual screen's bounding box covers the gaps; no monitor does.
+        let layout = [(0, 0, 1920, 1080), (-1280, 200, 0, 1224), (1920, 0, 4480, 1440)];
+        assert!(point_on_any_monitor((-640, 700), &layout));
+        assert!(point_on_any_monitor((3000, 1300), &layout));
+        assert!(!point_on_any_monitor((-640, 100), &layout), "above the left monitor");
+        assert!(!point_on_any_monitor((1000, 1300), &layout), "below the primary");
+        assert!(!point_on_any_monitor((-640, 1300), &layout), "below the left monitor");
+    }
+
+    #[test]
+    fn the_refusal_names_the_point_and_the_monitors() {
+        let e = off_monitor_error((5000, 300), &[(0, 0, 1920, 1080), (1920, 0, 3200, 1024)]);
+        let s = e.to_string();
+        assert!(s.contains("(5000, 300)"), "{s}");
+        assert!(s.contains("(0,0)-(1920,1080)"), "{s}");
+        assert!(s.contains("(1920,0)-(3200,1024)"), "{s}");
+    }
 
     #[test]
     fn move_event_uses_absolute_flag() {
