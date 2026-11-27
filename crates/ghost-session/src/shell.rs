@@ -77,6 +77,10 @@ const LAUNCHERS: &[&str] = &[
     "env", "nohup", "setsid", "nice", "timeout", "stdbuf", "xargs", "flock", "chroot", "unshare", // exec their arguments
     "sudo", "pkexec", "doas", "su", "systemd-run", // run a command (as another user)
     "script", "expect", "watch",                    // run a shell / a command
+    // Run shell commands from their own options: an editor's `-c "!cmd"`,
+    // git's `-c alias.x=!cmd` / core.pager / core.sshCommand, a pager's `!cmd`,
+    // a debugger's `shell`.
+    "vi", "vim", "nvim", "gvim", "view", "git", "less", "more", "man", "gdb",
 ];
 
 /// Extensions that are not a program but run as one through an interpreter
@@ -2217,10 +2221,21 @@ mod launch_gate_tests {
         };
         assert_eq!(launch_allowed_with_shell_off("ffmpeg -c:v x", Some(&["ffmpeg".into()]), &|_| Some(r"C:\t\ffmpeg.exe".into())), Ok(()));
         assert_eq!(launch_allowed_with_shell_off("notepad -command x", Some(&["notepad".into()]), &resolve), Ok(()));
-        for c in ["ffmpeg -i a.mp4 -c:v libx264 b.mp4", "gcc -c x.c", "git -C dir status", "tar -c -f x.tar d", "vim -c q",
+        for c in ["ffmpeg -i a.mp4 -c:v libx264 b.mp4", "gcc -c x.c", "tar -c -f x.tar d",
                   "robocopy a b /r:1", "app /k", "app /c x", "app -encodedcommand x", "app -File x"] {
             assert_eq!(launch_allowed_with_shell_off(c, None, &resolve), Ok(()), "{c}");
         }
+        // Programs that run shell commands from their own options (an editor's
+        // `:!cmd`, git aliases, pagers and ssh commands) are refused by name,
+        // whatever the switch scan says; GHOST_LAUNCH_ALLOW can still allow them.
+        for c in ["vim -c \"!calc\"", "vi x", "nvim -c q", "gvim", "view x", "git -c alias.x=!calc x",
+                  "git -c core.pager=calc log", "git -C dir status", "less x", "man ls", "gdb -ex shell"] {
+            assert!(launch_allowed_with_shell_off(c, None, &resolve).is_err(), "{c} was allowed");
+        }
+        // Allowlisted, git launches, but it is still a launcher: its `-c`/`-C`
+        // stay refused, as an allowlisted interpreter's inline script does.
+        assert_eq!(launch_allowed_with_shell_off("git status", Some(&["git".into()]), &resolve), Ok(()));
+        assert!(launch_allowed_with_shell_off("git -c alias.x=!calc x", Some(&["git".into()]), &resolve).is_err());
         // Still refused: an interpreter named as an argument to a program
         // that resolved (a proxy launcher Ghost does not know about).
         for c in ["app cmd /c calc", "app powershell -c x", "app pwsh.exe"] {
