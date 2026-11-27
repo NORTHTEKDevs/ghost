@@ -435,6 +435,93 @@ pub struct LaunchedBrowser {
     pub desktop: Option<String>,
 }
 
+/// Ends the browser process a launch started if the launch is abandoned
+/// before the browser is handed back: a tool deadline or a cancel dropping the
+/// future during the port wait, or the wait itself failing. Without it Chrome
+/// kept running and held the profile, so the next launch with the same id
+/// handed off to the orphan and hung.
+struct LaunchGuard {
+    child: Option<std::process::Child>,
+    pid: Option<u32>,
+}
+
+impl LaunchGuard {
+    fn child(child: std::process::Child) -> Self {
+        LaunchGuard { child: Some(child), pid: None }
+    }
+
+    #[cfg_attr(not(windows), allow(dead_code))]
+    fn pid(pid: u32) -> Self {
+        LaunchGuard { child: None, pid: Some(pid) }
+    }
+
+    fn disarm(&mut self) {
+        self.child = None;
+        self.pid = None;
+    }
+
+    #[cfg(test)]
+    fn is_running(&mut self) -> bool {
+        if let Some(c) = self.child.as_mut() {
+            return c.try_wait().ok().flatten().is_none();
+        }
+        self.pid.is_some_and(pid_running)
+    }
+}
+
+impl Drop for LaunchGuard {
+    fn drop(&mut self) {
+        if let Some(mut c) = self.child.take() {
+            let _ = c.kill();
+            let _ = c.wait();
+        }
+        if let Some(pid) = self.pid.take() {
+            end_pid(pid);
+        }
+    }
+}
+
+#[cfg(windows)]
+fn end_pid(pid: u32) {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+    unsafe {
+        if let Ok(h) = OpenProcess(PROCESS_TERMINATE, false, pid) {
+            let _ = TerminateProcess(h, 1);
+            let _ = CloseHandle(h);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn end_pid(pid: u32) {
+    let _ = std::process::Command::new("kill").args(["-9", &pid.to_string()]).status();
+}
+
+#[cfg(all(test, windows))]
+fn pid_running(pid: u32) -> bool {
+    use windows::Win32::Foundation::{CloseHandle, WAIT_TIMEOUT};
+    use windows::Win32::System::Threading::{OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE};
+    unsafe {
+        match OpenProcess(PROCESS_SYNCHRONIZE, false, pid) {
+            Ok(h) => {
+                let running = WaitForSingleObject(h, 0) == WAIT_TIMEOUT;
+                let _ = CloseHandle(h);
+                running
+            }
+            Err(_) => false,
+        }
+    }
+}
+
+#[cfg(all(test, not(windows)))]
+fn pid_running(pid: u32) -> bool {
+    std::process::Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
 /// Launch an isolated browser and wait for its DevTools endpoint to come up.
 pub async fn launch(opts: &LaunchOptions) -> Result<LaunchedBrowser> {
     let exe = match &opts.executable {
@@ -447,9 +534,9 @@ pub async fn launch(opts: &LaunchOptions) -> Result<LaunchedBrowser> {
     let port_file = opts.user_data_dir.join("DevToolsActivePort");
     let _ = std::fs::remove_file(&port_file);
 
-    let pid = match opts.desktop.as_deref() {
+    let mut guard = match opts.desktop.as_deref() {
         #[cfg(windows)]
-        Some(desktop) => spawn_on_desktop(&exe, &base_args(opts), desktop)?,
+        Some(desktop) => LaunchGuard::pid(spawn_on_desktop(&exe, &base_args(opts), desktop)?),
         #[cfg(not(windows))]
         Some(desktop) => {
             return Err(BrowserError::Launch(format!(
@@ -470,9 +557,10 @@ pub async fn launch(opts: &LaunchOptions) -> Result<LaunchedBrowser> {
                 .stderr(std::process::Stdio::null())
                 .spawn()
                 .map_err(|e| BrowserError::Launch(format!("{}: {e}", exe.display())))?;
-            child.id()
+            LaunchGuard::child(child)
         }
     };
+    let pid = guard.child.as_ref().map(|c| c.id()).or(guard.pid).expect("a launch guard holds its process");
 
     #[cfg(windows)]
     let job_bound = match job::bind_to_this_process(pid) {
@@ -495,6 +583,8 @@ pub async fn launch(opts: &LaunchOptions) -> Result<LaunchedBrowser> {
         move_browser_offscreen(pid);
     }
 
+    // Handed back: the registry owns the browser's lifetime from here.
+    guard.disarm();
     Ok(LaunchedBrowser {
         pid,
         job_bound,
@@ -720,6 +810,67 @@ fn move_browser_offscreen(_pid: u32) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sleeper() -> std::process::Child {
+        let mut c = if cfg!(windows) {
+            let mut c = std::process::Command::new("ping");
+            c.args(["-n", "30", "127.0.0.1"]);
+            c
+        } else {
+            let mut c = std::process::Command::new("sleep");
+            c.arg("30");
+            c
+        };
+        #[cfg(windows)]
+        std::os::windows::process::CommandExt::creation_flags(&mut c, 0x0800_0000); // CREATE_NO_WINDOW
+        c.stdout(std::process::Stdio::null()).spawn().expect("spawn sleeper")
+    }
+
+    fn alive(pid: u32) -> bool {
+        let mut g = LaunchGuard::pid(pid);
+        let out = g.is_running();
+        g.disarm();
+        out
+    }
+
+    /// A launch abandoned before its browser was handed over (a deadline or a
+    /// cancel during the port wait, or the wait timing out) ends the process
+    /// it started instead of leaving it holding the profile.
+    #[test]
+    fn an_abandoned_launch_ends_the_process_it_started() {
+        let child = sleeper();
+        let pid = child.id();
+        drop(LaunchGuard::child(child));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while alive(pid) && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(!alive(pid), "the abandoned launch's process {pid} kept running");
+
+        let mut kept = sleeper();
+        let pid = kept.id();
+        let mut g = LaunchGuard::pid(pid);
+        g.disarm();
+        drop(g);
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let survived = kept.try_wait().expect("try_wait").is_none();
+        let _ = kept.kill();
+        let _ = kept.wait();
+        assert!(survived, "a disarmed guard ended a launched browser");
+    }
+
+    /// `launch` arms the guard before the port wait and disarms it only once
+    /// the browser is handed back.
+    #[test]
+    fn launch_guards_the_process_until_it_is_handed_back() {
+        let src = include_str!("launch.rs");
+        let start = src.find("pub async fn launch(").expect("launch");
+        let b = &src[start..start + src[start..].find("\n}").expect("end")];
+        let armed = b.find("LaunchGuard::").expect("launch does not guard its process");
+        let wait = b.find("wait_for_port(").expect("port wait");
+        let disarm = b.find(".disarm()").expect("never disarmed");
+        assert!(armed < wait && wait < disarm, "{b}");
+    }
 
     #[test]
     fn windowed_on_a_hidden_desktop_keeps_ordinary_window_coordinates() {
