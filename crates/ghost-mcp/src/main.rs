@@ -194,7 +194,9 @@ fn foreground_info() -> Value {
 /// (GhostError Display + the handlers above); unmatched errors stay generic.
 fn classify_error(msg: &str) -> (i64, Option<&'static str>) {
     let m = msg.to_lowercase();
-    if m.contains("no open window matches") {
+    if msg.starts_with(INVALID_PARAMS) {
+        (-32602, None)
+    } else if m.contains("no open window matches") {
         (-32007, Some("no open window has that title - pick a title from ghost_window op=list (hidden-desktop windows are listed too), or start the app with ghost_window op=launch exe=<path>"))
     } else if m.contains("not found") || m.contains("elementnotfound") || m.contains("no element") {
         (-32001, Some("element not found - call ghost_see to confirm the window is focused and the name/role are right, or retry ghost_find with mode=deliberate to escalate to the VLM"))
@@ -723,10 +725,22 @@ enum StopScope {
 }
 
 impl StopScope {
-    fn of(args: &Value) -> Self {
-        if args["scope"].as_str() == Some("process") { StopScope::Process } else { StopScope::Everywhere }
+    /// Only an omitted (or null) scope and "everywhere" mean everywhere; any
+    /// other value is invalid params - a typo must never widen to every Ghost.
+    fn of(args: &Value) -> std::result::Result<Self, String> {
+        match args.get("scope") {
+            None | Some(Value::Null) => Ok(StopScope::Everywhere),
+            Some(Value::String(s)) if s == "everywhere" => Ok(StopScope::Everywhere),
+            Some(Value::String(s)) if s == "process" => Ok(StopScope::Process),
+            Some(other) => Err(format!(
+                "{INVALID_PARAMS}scope must be omitted, \"everywhere\" or \"process\" (got {other})"
+            )),
+        }
     }
 }
+
+/// Prefix of an invalid-params error; mapped to -32602.
+const INVALID_PARAMS: &str = "invalid params: ";
 
 /// Detect a stop request on the raw wire line, before dispatch. Matches both
 /// the spec form (tools/call name=ghost_stop) and the legacy raw-method form.
@@ -735,9 +749,10 @@ fn stop_request(line: &str) -> Option<StopScope> {
     let v = serde_json::from_str::<Value>(line).ok()?;
     let params = v.get("params").cloned().unwrap_or(Value::Null);
     match v.get("method").and_then(|m| m.as_str()) {
-        Some("ghost_stop") => Some(StopScope::of(&params)),
+        // An invalid scope is not a stop request here: dispatch answers -32602.
+        Some("ghost_stop") => StopScope::of(&params).ok(),
         Some("tools/call") if params.get("name").and_then(|n| n.as_str()) == Some("ghost_stop") => {
-            Some(StopScope::of(&params["arguments"]))
+            StopScope::of(&params["arguments"]).ok()
         }
         _ => None,
     }
@@ -1674,6 +1689,8 @@ fn protocol_method(method: &str) -> Option<std::result::Result<Value, String>> {
 fn rpc_error_code(e: &str) -> i64 {
     if e.starts_with(METHOD_NOT_FOUND) {
         -32601
+    } else if e.starts_with(INVALID_PARAMS) {
+        -32602
     } else {
         -32603
     }
@@ -1939,7 +1956,7 @@ async fn handle_tool(
             Ok(json!({ "pid": pid, "surface": "user" }))
         }
         "ghost_stop" => {
-            match StopScope::of(p) {
+            match StopScope::of(p)? {
                 StopScope::Everywhere => session.stop(),
                 StopScope::Process => {
                     crate::engine::input::hotkey::STOP_FLAG.store(true, std::sync::atomic::Ordering::Release);
@@ -1949,7 +1966,7 @@ async fn handle_tool(
             Ok(json!({ "ok": true }))
         }
         "ghost_reset" => {
-            match StopScope::of(p) {
+            match StopScope::of(p)? {
                 // Refused when the human raised the stop: the error names
                 // their ways out (Ctrl+Alt+Shift+G, `ghost reset`).
                 StopScope::Everywhere => session.reset().map_err(|e| e.to_string())?,
@@ -4679,8 +4696,30 @@ mod tests {
         assert_eq!(stop_request(call), Some(StopScope::Process));
         let raw = r#"{"jsonrpc":"2.0","id":9,"method":"ghost_stop","params":{"scope":"process"}}"#;
         assert_eq!(stop_request(raw), Some(StopScope::Process));
-        assert_eq!(StopScope::of(&json!({"scope": "everywhere"})), StopScope::Everywhere);
-        assert_eq!(StopScope::of(&json!({})), StopScope::Everywhere);
+        assert_eq!(StopScope::of(&json!({"scope": "everywhere"})), Ok(StopScope::Everywhere));
+        assert_eq!(StopScope::of(&json!({})), Ok(StopScope::Everywhere));
+    }
+
+    #[test]
+    fn an_unrecognized_stop_scope_is_invalid_params() {
+        for bad in [json!({"scope": "nope"}), json!({"scope": 5}), json!({"scope": "PROCESS"})] {
+            let e = StopScope::of(&bad).expect_err("invalid scope");
+            assert!(e.contains("everywhere") && e.contains("process"), "names allowed values: {e}");
+            assert_eq!(classify_error(&e).0, -32602, "{e}");
+            assert_eq!(rpc_error_code(&e), -32602, "{e}");
+        }
+    }
+
+    /// A malformed scope is not "everywhere": the early stdin path must not
+    /// broadcast it to every Ghost on the machine. Parsing only - never dispatched.
+    #[test]
+    fn an_unrecognized_stop_scope_is_never_broadcast() {
+        for args in [r#"{"scope":"nope"}"#, r#"{"scope":5}"#, r#"{"scope":"Process "}"#] {
+            let call = format!(r#"{{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{{"name":"ghost_stop","arguments":{args}}}}}"#);
+            assert_eq!(stop_request(&call), None, "{args}");
+            let raw = format!(r#"{{"jsonrpc":"2.0","id":9,"method":"ghost_stop","params":{args}}}"#);
+            assert_eq!(stop_request(&raw), None, "{args}");
+        }
     }
 
     #[test]
