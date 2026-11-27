@@ -68,6 +68,82 @@ mod see_mode {
     }
 }
 
+mod key_spec {
+    //! L7: keys='down:Shift' / 'up:Shift' and unknown key names answer with a
+    //! message naming the value, never "Win32 error 0x00000000".
+    use crate::{bad_key_part, hold_refusal, key_hold, key_name_error, validate_args};
+    use serde_json::json;
+
+    fn known(k: &str) -> bool {
+        matches!(k.to_lowercase().as_str(), "shift" | "ctrl" | "enter" | "s" | "+")
+    }
+
+    #[test]
+    fn hold_prefixes_parse() {
+        assert_eq!(key_hold("down:Shift"), Some((true, "Shift")));
+        assert_eq!(key_hold("up:Shift"), Some((false, "Shift")));
+        assert_eq!(key_hold("Shift"), None);
+        assert_eq!(key_hold("Ctrl+S"), None);
+    }
+
+    #[test]
+    fn a_hold_with_no_key_is_invalid_params() {
+        for keys in ["down:", "up:", "down:  "] {
+            let e = validate_args("ghost_key", &json!({ "keys": keys })).unwrap_err();
+            assert!(e.starts_with("invalid params: "), "{e}");
+        }
+        assert!(validate_args("ghost_key", &json!({ "keys": "down:Shift" })).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_hold_off_the_foreground_path_says_why_and_names_the_keys() {
+        let e = hold_refusal("down:Shift", "the background policy");
+        assert!(e.contains("down:Shift") && e.contains("foreground"), "{e}");
+        assert!(!e.contains("0x00000000"), "{e}");
+    }
+
+    #[test]
+    fn the_unknown_part_of_a_spec_is_named() {
+        assert_eq!(bad_key_part("Ctrl+Bogus", known), Some("Bogus".into()));
+        assert_eq!(bad_key_part("Hyper+S", known), Some("Hyper".into()));
+        assert_eq!(bad_key_part("down:Bogus", known), Some("Bogus".into()));
+        assert_eq!(bad_key_part("Ctrl+S", known), None);
+        // A single character with no VK name is typed as that character.
+        assert_eq!(bad_key_part("*", known), None);
+        assert_eq!(bad_key_part("FooBar", known), Some("FooBar".into()));
+    }
+
+    #[test]
+    fn an_unknown_key_error_becomes_invalid_params_naming_it() {
+        let e = key_name_error(
+            "Ctrl+Bogus",
+            "Core error: Win32 error 0x00000000 in unknown key name".into(),
+            known,
+        );
+        assert!(e.starts_with("invalid params: ") && e.contains("'Bogus'"), "{e}");
+        assert!(!e.contains("0x00000000"), "{e}");
+        // Any other error passes through untouched.
+        assert_eq!(key_name_error("Enter", "boom".into(), known), "boom");
+    }
+
+    #[test]
+    fn an_unknown_window_state_is_invalid_params_naming_it() {
+        let e = validate_args("ghost_window", &json!({ "op": "state", "name": "X", "state": "bogus" })).unwrap_err();
+        assert!(e.starts_with("invalid params: ") && e.contains("bogus"), "{e}");
+        assert!(e.contains("maximize|minimize|restore|close"), "{e}");
+        let e = validate_args("ghost_window_state", &json!({ "name": "X", "state": "huge" })).unwrap_err();
+        assert!(e.contains("huge"), "{e}");
+        assert!(validate_args("ghost_window", &json!({ "op": "state", "name": "X", "state": "Minimize" })).is_ok());
+        assert!(validate_args("ghost_window", &json!({ "op": "list" })).unwrap().is_none());
+    }
+
+    #[test]
+    fn an_unknown_window_op_is_invalid_params() {
+        let e = validate_args("ghost_window", &json!({ "op": "explode" })).unwrap_err();
+        assert!(e.starts_with("invalid params: ") && e.contains("explode"), "{e}");
+    }
+}
+
 mod event_wait {
     //! L4: for=event answers a timeout like every other wait: ok:false and
     //! timed_out:true, not ok:true with timed_out:true.

@@ -1078,7 +1078,9 @@ fn dispatch_tool_inner<'a>(
         let result = match name {
             "ghost_see" => handle_ghost_see(session, args).await,
             "ghost_snapshot" => handle_ghost_snapshot(session, args).await,
-            "ghost_key" => handle_ghost_key(session, args).await,
+            "ghost_key" => handle_ghost_key(session, args).await.map_err(|e| {
+                key_name_error(args["keys"].as_str().unwrap_or_default(), e, key_name_known)
+            }),
             "ghost_wait" => handle_ghost_wait(session, args).await,
             "ghost_window" => handle_ghost_window(session, args).await,
             "ghost_shell" => handle_ghost_shell(session, args).await,
@@ -1302,6 +1304,9 @@ async fn dispatch_cdp(
         }
         "ghost_key" => {
             let keys = p["keys"].as_str().ok_or("ghost_key: missing 'keys' param")?;
+            if key_hold(keys).is_some() {
+                return Err(hold_refusal(keys, "the DevTools (CDP) route"));
+            }
             let (mods, key) = parse_key_combo(keys)?;
             r.tab.press(&key, &mods).await.map_err(|e| e.to_string())?;
             Ok(json!({
@@ -1510,7 +1515,13 @@ async fn dispatch_hidden(
         }
         "ghost_key" => {
             let keys = p["keys"].as_str().ok_or("ghost_key: missing 'keys' param")?;
-            session.hidden_key(t, keys).await.map_err(err)
+            if key_hold(keys).is_some() {
+                return Err(hold_refusal(keys, "a hidden desktop"));
+            }
+            session
+                .hidden_key(t, keys)
+                .await
+                .map_err(|e| key_name_error(keys, e.to_string(), key_name_known))
         }
         "ghost_click_at" => {
             let x = p["x"].as_i64().ok_or("missing param: x")? as i32;
@@ -1708,6 +1719,38 @@ fn validate_args(name: &str, args: &Value) -> std::result::Result<Option<Value>,
             }
         }
     }
+    if name == "ghost_key" {
+        if let Some((_, k)) = args["keys"].as_str().and_then(key_hold) {
+            if k.trim().is_empty() {
+                return Err(format!(
+                    "{INVALID_PARAMS}ghost_key: {:?} names no key to hold or release (e.g. down:Shift)",
+                    args["keys"].as_str().unwrap_or_default()
+                ));
+            }
+        }
+    }
+    let window_op = if name == "ghost_window" {
+        let op = args["op"].as_str().unwrap_or("list");
+        if !WINDOW_OPS.contains(&op) {
+            return Err(format!(
+                "{INVALID_PARAMS}ghost_window op must be one of {} (got {op:?})",
+                WINDOW_OPS.join("|")
+            ));
+        }
+        Some(op)
+    } else {
+        None
+    };
+    if name == "ghost_window_state" || window_op == Some("state") {
+        if let Some(s) = args["state"].as_str() {
+            if !WINDOW_STATES.contains(&s.to_ascii_lowercase().as_str()) {
+                return Err(format!(
+                    "{INVALID_PARAMS}ghost_window state must be one of {} (got {s:?})",
+                    WINDOW_STATES.join("|")
+                ));
+            }
+        }
+    }
     if matches!(
         name,
         "ghost_wait" | "ghost_wait_for_element" | "ghost_wait_for_value" | "ghost_wait_for_idle"
@@ -1750,6 +1793,69 @@ fn see_scope_hwnd(p: &Value) -> std::result::Result<Option<isize>, String> {
         _ => Ok(None),
     }
 }
+
+/// `keys="down:KEY"` / `"up:KEY"`: (true for down, the key). These hold the
+/// real keyboard key, so only the foreground path can honour them.
+fn key_hold(keys: &str) -> Option<(bool, &str)> {
+    if let Some(k) = keys.strip_prefix("down:") {
+        return Some((true, k));
+    }
+    keys.strip_prefix("up:").map(|k| (false, k))
+}
+
+/// The refusal for a hold on a path that posts keys instead of pressing them.
+/// It was passed on as the key name "down:Shift" and failed with
+/// "Win32 error 0x00000000 in unknown key name".
+fn hold_refusal(keys: &str, route: &str) -> String {
+    format!(
+        "ghost_key: '{keys}' holds a real keyboard key, which needs the foreground focus policy; \
+         under {route} keys are posted to the window and cannot be held. Nothing was sent. Send \
+         the combo in one call instead (e.g. keys='Ctrl+C')"
+    )
+}
+
+/// The first part of a key spec that is not a key name (`known`), if any. The
+/// key itself may also be any single character, which is typed as-is.
+fn bad_key_part(keys: &str, known: impl Fn(&str) -> bool) -> Option<String> {
+    if let Some((_, k)) = key_hold(keys) {
+        return (!known(k.trim())).then(|| k.trim().to_string());
+    }
+    let (mods, key) = parse_key_combo(keys).ok()?;
+    if let Some(m) = mods.iter().find(|m| !known(m)) {
+        return Some(m.clone());
+    }
+    (!known(&key) && key.chars().count() != 1).then_some(key)
+}
+
+/// Whether the engine has a key named `name`.
+fn key_name_known(name: &str) -> bool {
+    #[cfg(windows)]
+    return engine::input::keyboard::name_to_vk(name).is_some();
+    #[cfg(not(windows))]
+    {
+        let _ = name;
+        true
+    }
+}
+
+/// Turn the engine's opaque "unknown key name" error into invalid params
+/// naming the part of `keys` it did not know; any other error passes through.
+fn key_name_error(keys: &str, e: String, known: impl Fn(&str) -> bool) -> String {
+    if !(e.contains("unknown key") || e.contains("unknown modifier name")) {
+        return e;
+    }
+    let part = bad_key_part(keys, known).unwrap_or_else(|| keys.to_string());
+    format!(
+        "{INVALID_PARAMS}ghost_key: unknown key name '{part}' in keys {keys:?}. Use names like \
+         Enter, Tab, Escape, Backspace, Delete, Home, End, PageUp, PageDown, arrows (Up/ArrowUp), \
+         Space, F1-F12, Ctrl/Shift/Alt/Win, a letter or digit, or any single character"
+    )
+}
+
+/// The window states `ghost_window op=state` accepts.
+const WINDOW_STATES: [&str; 4] = ["maximize", "minimize", "restore", "close"];
+/// The ops `ghost_window` accepts.
+const WINDOW_OPS: [&str; 5] = ["list", "focus", "anchor", "state", "launch"];
 
 /// Which calls are window-scoped, i.e. act inside one window and therefore
 /// need the anchor when the caller names none.
@@ -3116,6 +3222,9 @@ async fn handle_ghost_key(
     // Background mode: post the key to a named window's focused control without
     // taking the foreground (see key_in_background for what a combo does).
     if p["background"].as_bool() == Some(true) {
+        if key_hold(keys).is_some() {
+            return Err(hold_refusal(keys, "background=true"));
+        }
         let window = p["window"].as_str()
             .ok_or("ghost_key background=true requires 'window' (the target app)")?;
         return key_in_background(session, window, keys, hint).await;
@@ -3131,6 +3240,9 @@ async fn handle_ghost_key(
             // used to drop a combo's modifiers and post the bare key, so
             // "Ctrl+S" typed an "S" into the document (40/40,
             // docs/benches/2026-11-26-stage-6b/c10-before).
+            if key_hold(keys).is_some() {
+                return Err(hold_refusal(keys, "the background policy"));
+            }
             return key_in_background(session, window, keys, hint).await;
         }
         session.ensure_window_foreground(window).await.map_err(|e| {
