@@ -162,16 +162,20 @@ pub async fn dispatch(
         "ghost_tab_text" => {
             let (browser, tab_id) = browser_tab(p)?;
             let selector = p["selector"].as_str().unwrap_or("");
+            let max = ghost_browser::policy::resolve_max_chars(p.get("max_chars"))?;
             let tab = session.tab(&browser, &tab_id).await.map_err(|e| e.to_string())?;
-            Ok(json!({ "text": tab.text(selector).await.map_err(|e| e.to_string())? }))
+            let text = tab.text(selector).await.map_err(|e| e.to_string())?;
+            Ok(cap_text_result("text", &text, max))
         }
         "ghost_tab_eval" => {
             let (browser, tab_id) = browser_tab(p)?;
             let expression = req_str(p, "expression")?;
+            let max = ghost_browser::policy::resolve_max_chars(p.get("max_chars"))?;
             let tab = session.tab(&browser, &tab_id).await.map_err(|e| e.to_string())?;
             // run_script, not eval: the agent's script is refused if a stop
             // arrived while the tab was being attached.
-            Ok(json!({ "value": tab.run_script(&expression).await.map_err(|e| e.to_string())? }))
+            let value = tab.run_script(&expression).await.map_err(|e| e.to_string())?;
+            Ok(cap_value_result(value, max))
         }
         "ghost_tab_screenshot" => {
             let (browser, tab_id) = browser_tab(p)?;
@@ -372,12 +376,14 @@ pub fn schemas() -> Vec<Value> {
         json!({ "name": "ghost_tab_text",
           "description": "Visible text of an element, or the whole page when selector is omitted. Prefer over screenshots for reading content.",
           "inputSchema": { "type": "object", "required": ["tab"], "properties": {
-              "browser": { "type": "string" }, "tab": { "type": "string" }, "selector": { "type": "string" }
+              "browser": { "type": "string" }, "tab": { "type": "string" }, "selector": { "type": "string" },
+              "max_chars": { "type": "integer", "description": "Cap on returned characters (default 100000, max 2000000). When cut, the result carries truncated:true and original_length." }
           }}}),
         json!({ "name": "ghost_tab_eval",
-          "description": "Evaluate a JavaScript expression in the tab and return its value (awaits promises).",
+          "description": "Evaluate a JavaScript expression in the tab and return its value (awaits promises). The serialized result is capped at max_chars; when cut, value is the cut JSON string with truncated:true and original_length.",
           "inputSchema": { "type": "object", "required": ["tab", "expression"], "properties": {
-              "browser": { "type": "string" }, "tab": { "type": "string" }, "expression": { "type": "string" }
+              "browser": { "type": "string" }, "tab": { "type": "string" }, "expression": { "type": "string" },
+              "max_chars": { "type": "integer", "description": "Cap on the serialized result in characters (default 100000, max 2000000)." }
           }}}),
         json!({ "name": "ghost_tab_screenshot",
           "description": "PNG of a tab, rendered by that tab regardless of whether it is in front or focused.",
@@ -567,6 +573,25 @@ fn base64_encode(data: &[u8]) -> String {
     out
 }
 
+/// `{key: text}`, cut to `max` chars with `truncated:true` and the original
+/// length when it was cut.
+fn cap_text_result(key: &str, text: &str, max: usize) -> Value {
+    match ghost_browser::policy::truncate_chars(text, max) {
+        (t, None) => json!({ key: t }),
+        (t, Some(orig)) => json!({ key: t, "truncated": true, "original_length": orig }),
+    }
+}
+
+/// An eval result as-is when its serialized form fits `max` chars; otherwise
+/// the serialized string, cut, with `truncated:true` and the original length.
+fn cap_value_result(value: Value, max: usize) -> Value {
+    let serialized = value.to_string();
+    match ghost_browser::policy::truncate_chars(&serialized, max) {
+        (_, None) => json!({ "value": value }),
+        (t, Some(orig)) => json!({ "value": t, "truncated": true, "original_length": orig }),
+    }
+}
+
 fn bg_ok() -> Value {
     json!({ "ok": true, "background": true })
 }
@@ -600,6 +625,35 @@ mod tests {
         for t in schemas() {
             assert!(t["name"].as_str().is_some());
             assert!(t["inputSchema"]["type"] == "object");
+        }
+    }
+
+    #[test]
+    fn oversize_text_and_eval_results_are_capped_and_flagged() {
+        let big = "x".repeat(300_000);
+        let r = cap_text_result("text", &big, 100_000);
+        assert_eq!(r["text"].as_str().unwrap().len(), 100_000);
+        assert_eq!(r["truncated"], true);
+        assert_eq!(r["original_length"], 300_000);
+        let small = cap_text_result("text", "hi", 100_000);
+        assert_eq!(small, json!({ "text": "hi" }));
+
+        let v = cap_value_result(json!(big), 1000);
+        assert_eq!(v["truncated"], true);
+        assert_eq!(v["value"].as_str().unwrap().chars().count(), 1000);
+        assert_eq!(v["original_length"], 300_002, "serialized length includes the quotes");
+        // An object that fits keeps its structure.
+        assert_eq!(cap_value_result(json!({ "a": 1 }), 1000), json!({ "value": { "a": 1 } }));
+    }
+
+    #[test]
+    fn text_and_eval_schemas_document_max_chars() {
+        for t in schemas() {
+            let name = t["name"].as_str().unwrap();
+            if name == "ghost_tab_text" || name == "ghost_tab_eval" {
+                let d = t["inputSchema"]["properties"]["max_chars"]["description"].as_str().unwrap_or("");
+                assert!(d.contains("100000") && d.contains("2000000"), "{name}: {d}");
+            }
         }
     }
 

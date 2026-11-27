@@ -24,9 +24,72 @@ pub fn check_nav_url(url: &str) -> Result<(), String> {
     }
 }
 
+/// Default and ceiling for `max_chars` on ghost_tab_text / ghost_tab_eval.
+pub const DEFAULT_MAX_CHARS: usize = 100_000;
+pub const MAX_MAX_CHARS: usize = 2_000_000;
+
+/// Resolve the optional `max_chars` parameter.
+pub fn resolve_max_chars(requested: Option<&serde_json::Value>) -> Result<usize, String> {
+    match requested {
+        None | Some(serde_json::Value::Null) => Ok(DEFAULT_MAX_CHARS),
+        Some(v) => match v.as_u64() {
+            Some(n) if (1..=MAX_MAX_CHARS as u64).contains(&n) => Ok(n as usize),
+            _ => Err(format!(
+                "invalid params: max_chars must be an integer from 1 to {MAX_MAX_CHARS} (default {DEFAULT_MAX_CHARS})"
+            )),
+        },
+    }
+}
+
+/// Cut `s` to at most `max` chars on a char boundary. Returns the text and,
+/// when something was cut, the original length in chars.
+pub fn truncate_chars(s: &str, max: usize) -> (String, Option<usize>) {
+    // Byte length >= char count, so a short byte length proves no cut is needed.
+    if s.len() <= max {
+        return (s.to_string(), None);
+    }
+    match s.char_indices().nth(max) {
+        None => (s.to_string(), None),
+        Some((cut, _)) => (s[..cut].to_string(), Some(s.chars().count())),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn truncation_is_char_boundary_safe_and_reports_original_length() {
+        let (t, o) = truncate_chars("hello", 10);
+        assert_eq!((t.as_str(), o), ("hello", None));
+        let (t, o) = truncate_chars("hello", 5);
+        assert_eq!((t.as_str(), o), ("hello", None), "exactly at the cap is not cut");
+        let (t, o) = truncate_chars("hello world", 5);
+        assert_eq!((t.as_str(), o), ("hello", Some(11)));
+        // 4-byte emoji and 2-byte accents: a byte cut would split them.
+        let s = "a\u{1F600}\u{e9}\u{1F600}b";
+        let (t, o) = truncate_chars(s, 3);
+        assert_eq!(t, "a\u{1F600}\u{e9}");
+        assert_eq!(o, Some(5));
+        let big = "x".repeat(50 * 1024 * 1024);
+        let (t, o) = truncate_chars(&big, DEFAULT_MAX_CHARS);
+        assert_eq!(t.len(), DEFAULT_MAX_CHARS);
+        assert_eq!(o, Some(50 * 1024 * 1024));
+        assert_eq!(truncate_chars("abc", 0), (String::new(), Some(3)));
+    }
+
+    #[test]
+    fn max_chars_defaults_and_is_bounded() {
+        use serde_json::json;
+        assert_eq!(resolve_max_chars(None), Ok(100_000));
+        assert_eq!(resolve_max_chars(Some(&json!(null))), Ok(100_000));
+        assert_eq!(resolve_max_chars(Some(&json!(500))), Ok(500));
+        assert_eq!(resolve_max_chars(Some(&json!(2_000_000))), Ok(2_000_000));
+        for bad in [json!(0), json!(2_000_001), json!(-5), json!("10"), json!(1.5)] {
+            let e = resolve_max_chars(Some(&bad)).expect_err("bad max_chars");
+            assert!(e.starts_with("invalid params: ") && e.contains("max_chars"), "{e}");
+        }
+    }
 
     #[test]
     fn only_http_https_and_about_blank_navigate() {
