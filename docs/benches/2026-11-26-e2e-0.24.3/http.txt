@@ -1,0 +1,30 @@
+# ghost-http 0.24.3 on 127.0.0.1:47391 (pid 238776)
+$ curl http://127.0.0.1:47391/health
+status=200
+$ curl http://127.0.0.1:47391/tools
+status=200
+$ curl -H Host: evil.example:47391 http://127.0.0.1:47391/health
+status=403
+$ curl -H Host: localhost:47391 http://127.0.0.1:47391/health
+status=200
+$ curl -H Host: 127.0.0.1:1 http://127.0.0.1:47391/health
+status=403
+$ curl -H Origin: https://evil.example http://127.0.0.1:47391/health
+status=403
+$ curl -H Origin: null http://127.0.0.1:47391/health
+status=403
+$ curl -X POST -H Content-Type: text/plain --data {"steps":[]} http://127.0.0.1:47391/run
+status=415
+$ curl -X POST -H Content-Type: application/json -H Origin: https://evil.example --data {"steps":[]} http://127.0.0.1:47391/run
+status=403
+
+$ ghost-http --addr 0.0.0.0:47392
+ghost-http: --addr '0.0.0.0:47392' is not a loopback address. ghost-http has no authentication and only serves local clients; bind 127.0.0.1, [::1] or localhost
+exit=0
+$ ghost-http --addr 192.168.1.10:47392
+ghost-http: --addr '192.168.1.10:47392' is not a loopback address. ghost-http has no authentication and only serves local clients; bind 127.0.0.1, [::1] or localhost
+exit=0
+$ ghost-http --addr [::]:47392
+ghost-http: --addr '[::]:47392' is not a loopback address. ghost-http has no authentication and only serves local clients; bind 127.0.0.1, [::1] or localhost
+exit=0
+real exit=2

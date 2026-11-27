@@ -1,0 +1,3 @@
+started=2026-11-26T22:20:54.2080492-09:00 ended=2026-11-26T22:29:44.7313016-09:00
+samples=8476 signalled=0 event_absent=0
+clipboard_seq_first=5 clipboard_seq_last=5 clipboard_seq_changes=0

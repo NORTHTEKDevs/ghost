@@ -1,0 +1,21 @@
+$ ghost.exe verify
+ghost verify - proving the product claims on this machine
+
+  [PASS] server starts and answers initialize           27ms
+  [PASS] default focus policy is 'background'           Some("background")
+  [PASS] isolated browser launches (budget 10s)         273ms
+  [FAIL] 3 tabs typed+clicked, no cross-talk (5s)       1ms for all three
+  [PASS] fast call completes while slow call in flight (500ms) 0.7ms with a 2s call running
+  [FAIL] second ghost server ran its own browser (20s)  0.4s alongside the first
+  [FAIL] emergency stop blocks; reset resumes           refused while stopped: true; acted after reset: false
+  [PASS] foreground never taken by Ghost                hwnd 0 -> 0
+
+3 of 8 claims FAILED:
+  - 3 tabs typed+clicked, no cross-talk (5s)
+  - second ghost server ran its own browser (20s)
+  - emergency stop blocks; reset resumes
+exit=1
+
+$ echo yes | ghost.exe reset
+ghost reset: refused - run it yourself in an interactive terminal; it shows a word for you to type back (a pipe or a script cannot)
+exit=2

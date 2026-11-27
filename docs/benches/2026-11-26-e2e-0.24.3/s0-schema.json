@@ -1,0 +1,1 @@
+{"env": {"GHOST_SHELL": "off"}, "steps": [{"rpc": "tools/list", "max": 200000}]}

@@ -1,0 +1,33 @@
+# server pid 11412, env {"GHOST_SHELL":"off"}
+
+## H3 does ghost_tab_open url= wait for the load?
+>>> ghost_browser_launch {"id":"e2e3","mode":"headless"}  (269ms)
+<<< ok {"browser":"default","dies_with_server":true,"id":"e2e3","mode":"headless","pid":31252,"port":4049}
+[PASS]
+
+>>> ghost_tab_open {"browser":"e2e3","url":"https://example.com/"}  (66ms)
+<<< ok {"background":true,"tab":"C1F5EC47F6A2E89D9FAA61F44F8C5BA2"}
+[PASS]
+
+>>> ghost_tab_eval {"browser":"e2e3","tab":"C1F5EC47F6A2E89D9FAA61F44F8C5BA2","expression":"location.href + ' ' + document.readyState + ' ' + document.body.innerText.length"}  (5ms)
+<<< ok {"value":"about:blank complete 0"}
+[INFO]
+
+>>> ghost_tab_eval {"browser":"e2e3","tab":"C1F5EC47F6A2E89D9FAA61F44F8C5BA2","expression":"location.href + ' ' + document.readyState + ' ' + document.body.innerText.length"}  (2ms)
+<<< ok {"value":"https://example.com/ complete 917"}
+[PASS]
+
+>>> ghost_tab_text {"browser":"e2e3","tab":"C1F5EC47F6A2E89D9FAA61F44F8C5BA2"}  (1ms)
+<<< ok {"text":"This domain is for use in documentation examples without needing permission. This is not a service; avoid re
+[PASS]
+
+>>> ghost_browser_close {"id":"e2e3"}  (0ms)
+<<< ok {"ok":true}
+[PASS]
+
+$$ tasklist /FI "PID eq 31252" /NH
+INFO: No tasks are running which match the specified criteria.
+[PASS]
+
+
+# summary: 6 pass, 0 fail

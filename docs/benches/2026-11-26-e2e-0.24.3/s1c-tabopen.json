@@ -1,0 +1,12 @@
+{"env": {"GHOST_SHELL": "off"}, "steps": [
+{"note": "H3 does ghost_tab_open url= wait for the load?"},
+{"tool": "ghost_browser_launch", "args": {"id": "e2e3", "mode": "headless"}, "expect": "ok", "capture": {"bpid": "\"pid\":(\\d+)"}},
+{"tool": "ghost_tab_open", "args": {"browser": "e2e3", "url": "https://example.com/"}, "expect": "ok", "capture": {"tab": "\"tab\":\"([0-9A-F]+)\""}},
+{"tool": "ghost_tab_eval", "args": {"browser": "e2e3", "tab": "{{tab}}", "expression": "location.href + ' ' + document.readyState + ' ' + document.body.innerText.length"}, "max": 200},
+{"sleep": 2000},
+{"tool": "ghost_tab_eval", "args": {"browser": "e2e3", "tab": "{{tab}}", "expression": "location.href + ' ' + document.readyState + ' ' + document.body.innerText.length"}, "expect": "ok", "contains": "example.com", "max": 200},
+{"tool": "ghost_tab_text", "args": {"browser": "e2e3", "tab": "{{tab}}"}, "expect": "ok", "contains": "This domain is for use", "max": 120},
+{"tool": "ghost_browser_close", "args": {"id": "e2e3"}, "expect": "ok"},
+{"sleep": 1500},
+{"exec": "tasklist /FI \"PID eq {{bpid}}\" /NH", "contains": "No tasks"}
+]}
