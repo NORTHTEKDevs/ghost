@@ -41,7 +41,9 @@ pub struct TabInfo {
 
 pub struct Tab {
     cdp: Cdp,
-    session_id: String,
+    /// The CDP session id and the socket generation that issued it. A session id
+    /// is only valid on its socket: after the Cdp reconnects, the tab re-attaches.
+    session: std::sync::Mutex<(u64, String)>,
     target_id: String,
     /// True when ghost launched this browser. Gates actions that are invisible in a
     /// ghost-owned browser but disruptive in one the user is looking at.
@@ -50,12 +52,46 @@ pub struct Tab {
 
 impl Tab {
     pub(crate) fn new(cdp: Cdp, session_id: String, target_id: String, owned_browser: bool) -> Self {
+        let generation = cdp.generation();
         Self {
             cdp,
-            session_id,
+            session: std::sync::Mutex::new((generation, session_id)),
             target_id,
             owned_browser,
         }
+    }
+
+    fn current_session(&self) -> (u64, String) {
+        self.session.lock().unwrap().clone()
+    }
+
+    /// The session id valid on the live socket: when the socket was replaced
+    /// since this tab attached, attach again to the same target and re-enable
+    /// the domains every method depends on.
+    async fn live_session(&self) -> Result<String> {
+        let (conn, generation) = self.cdp.live().await?;
+        let (have, sid) = self.current_session();
+        if have == generation {
+            return Ok(sid);
+        }
+        let r = self
+            .cdp
+            .call_on(
+                &conn,
+                "Target.attachToTarget",
+                json!({ "targetId": self.target_id, "flatten": true }),
+                None,
+                crate::cdp::DEFAULT_CALL_TIMEOUT_MS,
+            )
+            .await?;
+        let sid = crate::cdp::field_str(&r, "sessionId", "Target.attachToTarget")?;
+        for domain in ["Page.enable", "Runtime.enable", "DOM.enable"] {
+            self.cdp
+                .call_on(&conn, domain, json!({}), Some(&sid), crate::cdp::DEFAULT_CALL_TIMEOUT_MS)
+                .await?;
+        }
+        *self.session.lock().unwrap() = (generation, sid.clone());
+        Ok(sid)
     }
 
     /// Whether ghost launched the browser this tab belongs to.
@@ -67,12 +103,13 @@ impl Tab {
         &self.target_id
     }
 
-    pub fn session_id(&self) -> &str {
-        &self.session_id
+    pub fn session_id(&self) -> String {
+        self.current_session().1
     }
 
     async fn call(&self, method: &str, params: Value) -> Result<Value> {
-        self.cdp.call(method, params, Some(&self.session_id)).await
+        let sid = self.live_session().await?;
+        self.cdp.call(method, params, Some(&sid)).await
     }
 
     /// Escape hatch for a raw CDP command against this tab. Used by diagnostics.
@@ -82,7 +119,7 @@ impl Tab {
 
     /// Raw fire-and-forget command against this tab.
     pub fn raw_notify(&self, method: &str, params: Value) -> Result<()> {
-        self.cdp.notify(method, params, Some(&self.session_id))
+        self.cdp.notify(method, params, Some(&self.current_session().1))
     }
 
     /// Turn on the domains every other method depends on. Safe to call repeatedly.
@@ -280,7 +317,7 @@ impl Tab {
         self.cdp.notify(
             "Input.dispatchMouseEvent",
             json!({ "type": "mouseMoved", "x": x, "y": y, "button": "none", "buttons": 0 }),
-            Some(&self.session_id),
+            Some(&self.current_session().1),
         )
     }
 
@@ -710,12 +747,13 @@ impl Tab {
     }
 
     async fn raw_screenshot(&self, full_page: bool) -> Result<Vec<u8>> {
+        let sid = self.live_session().await?;
         let r = self
             .cdp
             .call_with_timeout(
                 "Page.captureScreenshot",
                 json!({ "format": "png", "captureBeyondViewport": full_page }),
-                Some(&self.session_id),
+                Some(&sid),
                 SCREENSHOT_TIMEOUT_MS,
             )
             .await?;

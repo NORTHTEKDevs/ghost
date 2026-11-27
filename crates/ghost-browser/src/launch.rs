@@ -623,16 +623,45 @@ async fn wait_for_port(port_file: &Path, timeout_ms: u64) -> Result<u16> {
     }
 }
 
+/// The browser ws URL comes from whatever answers on the port; it must point
+/// back at this machine (ws:// on 127.0.0.1, localhost or ::1), or a process
+/// squatting the port could hand Ghost a socket on another host.
+pub fn check_ws_url(ws_url: &str) -> Result<()> {
+    let refuse = |why: &str| BrowserError::Transport(format!("refusing webSocketDebuggerUrl {ws_url:?}: {why}"));
+    let parsed = reqwest::Url::parse(ws_url).map_err(|e| refuse(&e.to_string()))?;
+    if parsed.scheme() != "ws" {
+        return Err(refuse("scheme must be ws"));
+    }
+    let host = parsed.host_str().unwrap_or("");
+    let bare = host.trim_start_matches('[').trim_end_matches(']');
+    let loopback = bare.eq_ignore_ascii_case("localhost")
+        || bare.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback());
+    if loopback {
+        Ok(())
+    } else {
+        Err(refuse("host must be 127.0.0.1, localhost or [::1]"))
+    }
+}
+
 /// Resolve the browser-level WebSocket URL from the HTTP DevTools endpoint.
 pub async fn browser_ws_url(port: u16) -> Result<String> {
     let url = format!("http://127.0.0.1:{port}/json/version");
-    let body: serde_json::Value = reqwest::get(&url)
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .no_proxy()
+        .build()
+        .map_err(|e| BrowserError::Transport(format!("http client: {e}")))?;
+    let body: serde_json::Value = client
+        .get(&url)
+        .send()
         .await
         .map_err(|e| BrowserError::Transport(format!("GET {url}: {e}")))?
         .json()
         .await
         .map_err(|e| BrowserError::Transport(format!("parse {url}: {e}")))?;
-    crate::cdp::field_str(&body, "webSocketDebuggerUrl", "/json/version")
+    let ws_url = crate::cdp::field_str(&body, "webSocketDebuggerUrl", "/json/version")?;
+    check_ws_url(&ws_url)?;
+    Ok(ws_url)
 }
 
 /// Attach to a browser already listening on `port`.

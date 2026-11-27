@@ -19,14 +19,14 @@ impl Browser {
     /// Launch a private browser instance and connect to it.
     pub async fn launch(opts: &LaunchOptions) -> Result<Self> {
         let info = launch::launch(opts).await?;
-        let cdp = Cdp::connect(&info.ws_url).await?;
+        let cdp = Cdp::connect_reconnecting(&info.ws_url, info.port).await?;
         Ok(Self { cdp, info, owned: true })
     }
 
     /// Connect to a browser already running with `--remote-debugging-port=<port>`.
     pub async fn attach(port: u16) -> Result<Self> {
         let info = launch::attach(port).await?;
-        let cdp = Cdp::connect(&info.ws_url).await?;
+        let cdp = Cdp::connect_reconnecting(&info.ws_url, info.port).await?;
         Ok(Self { cdp, info, owned: false })
     }
 

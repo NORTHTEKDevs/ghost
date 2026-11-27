@@ -30,6 +30,15 @@ fn focus_lock_note(locked: bool) -> &'static str {
     }
 }
 
+/// The DevTools port for ghost_browser_attach. `as u16` wrapped 70000 to 4464.
+fn parse_port(p: &Value) -> Result<u16, String> {
+    let n = p["port"].as_u64().ok_or("missing param: port")?;
+    u16::try_from(n)
+        .ok()
+        .filter(|port| *port != 0)
+        .ok_or_else(|| format!("port out of range: {n} (1-65535)"))
+}
+
 pub async fn dispatch(
     session: &GhostSession,
     method: &str,
@@ -76,7 +85,7 @@ pub async fn dispatch(
         }
         "ghost_browser_attach" => {
             let id = p["id"].as_str().unwrap_or("default").to_string();
-            let port = p["port"].as_u64().ok_or("missing param: port")? as u16;
+            let port = parse_port(p)?;
             session.browser_attach(&id, port).await.map_err(|e| e.to_string())
         }
         "ghost_browser_close" => {
@@ -572,6 +581,16 @@ mod tests {
             let name = t["name"].as_str().unwrap();
             assert!(owns(name), "'{name}' is advertised but not owned by ext");
         }
+    }
+
+    /// `port as u16` wrapped 70000 to 4464 and attached to whatever listened there.
+    #[test]
+    fn an_out_of_range_attach_port_is_refused() {
+        let e = parse_port(&json!({ "port": 70000 })).expect_err("wraps otherwise");
+        assert!(e.contains("port out of range"), "{e}");
+        assert!(parse_port(&json!({ "port": 0 })).is_err());
+        assert!(parse_port(&json!({})).is_err());
+        assert_eq!(parse_port(&json!({ "port": 9222 })), Ok(9222));
     }
 
     #[test]
