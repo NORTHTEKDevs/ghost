@@ -79,7 +79,9 @@ pub fn judge_typed(before: &str, after: &str, want: &str, replace: bool) -> Opti
     }
     let norm = |s: &str| s.chars().filter(|c| !c.is_whitespace()).flat_map(char::to_lowercase).collect::<String>();
     let (b, a, w) = (norm(before), norm(after), norm(want));
-    let holds = !w.is_empty() && a.contains(&w) && (replace || a.matches(&w).count() > b.matches(&w).count());
+    // Replace mode: exactly one copy, or a doubled dispatch reads as verified.
+    let n = a.matches(&w).count();
+    let holds = !w.is_empty() && if replace { n == 1 } else { n > b.matches(&w).count() };
     Some(if holds { Typed::Reformatted } else { Typed::Changed })
 }
 
@@ -140,6 +142,14 @@ mod tests {
         assert_eq!(judge_typed("", "abc", "abc ", true), Some(Typed::Reformatted));
         assert_eq!(judge_typed("", "HELLO WORLD", "hello world", false), Some(Typed::Reformatted));
         assert_eq!(judge_typed("old", "Hello", "hello", true), Some(Typed::Reformatted));
+    }
+
+    #[test]
+    fn a_doubled_replace_is_changed_not_reformatted() {
+        // Two methods both landed: the field holds the text twice, which is
+        // not the typed text in another format.
+        assert_eq!(judge_typed("", "hellohello", "hello", true), Some(Typed::Changed));
+        assert_eq!(judge_typed("old", "Hello hello", "hello", true), Some(Typed::Changed));
     }
 
     #[test]
