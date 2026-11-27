@@ -2,6 +2,9 @@ pub mod hotkey;
 pub mod keyboard;
 pub mod mouse;
 pub mod postmessage;
+pub mod readback;
+
+pub use readback::typed_ok;
 
 pub use postmessage::{is_text_control, may_settext, settext_allowed, window_class, BackgroundClicker, EditCommand};
 

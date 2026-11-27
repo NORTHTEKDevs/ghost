@@ -560,6 +560,8 @@ impl GhostSession {
                         GhostError::Vision("ghost_act: action=type requires text_input".into())
                     })?;
                     let t0 = Instant::now();
+                    // Judged against what the field held before (see typed_ok).
+                    let before = crate::element::typed_value(&el);
                     if composited {
                         // Same ~2 s wait for SetValue. The window is active on
                         // its own (undisplayed) desktop, so a posted click gives
@@ -592,21 +594,24 @@ impl GhostSession {
                     // Providers update their accessible value asynchronously
                     // (Chromium's AX tree in particular), so poll the read-back
                     // briefly instead of judging on the first stale read.
-                    let fold = |s: &str| s.replace("\r\n", "\n");
+                    // Posted characters insert at the caret; WM_SETTEXT and
+                    // SetValue set the whole value.
+                    let replace = !composited;
                     let deadline = Instant::now() + Duration::from_millis(600);
-                    let mut ok = false;
-                    loop {
+                    let ok = loop {
                         let got = crate::element::typed_value(&el);
-                        if got.trim() == value.trim() || fold(&got).contains(&fold(&value)) {
-                            ok = true;
-                            break;
-                        }
-                        if Instant::now() >= deadline {
-                            break;
+                        let verdict = ghost_core::input::typed_ok(&before, &got, &value, replace);
+                        if verdict != Some(false) || Instant::now() >= deadline {
+                            break verdict;
                         }
                         std::thread::sleep(Duration::from_millis(25));
-                    }
-                    (Some(ok), if ok { None } else { Some("the control did not read back the text within 600ms - it may not accept a set value; try ghost_key per character, or confirm by other means") })
+                    };
+                    let note = match ok {
+                        Some(true) => None,
+                        None => Some("the text is empty, so there is nothing to read back - confirm the field by other means"),
+                        Some(false) => Some("the control did not read back the text within 600ms - it may not accept a set value; try ghost_key per character, or confirm by other means"),
+                    };
+                    (ok, note)
                 }
                 "double_click" => {
                     let before = snapshot(true);

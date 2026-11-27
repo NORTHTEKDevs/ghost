@@ -375,18 +375,22 @@ fn settext_ok(ctrl: isize, control_type: u32) -> bool {
 
 /// Read-back is the only honest verification of a type. Providers update their
 /// accessible value asynchronously (Chromium's AX tree in particular), so poll
-/// briefly instead of judging one stale read. Newlines are folded because some
-/// providers store `\r\n` for a typed `\n`.
-async fn read_back_matches(el: crate::GhostElement, want: &str) -> (crate::GhostElement, bool) {
-    let fold = |s: &str| s.replace("\r\n", "\n");
+/// briefly instead of judging one stale read. Judged against the value read
+/// before the dispatch (see `typed_ok`); `None` when there is nothing to judge.
+async fn read_back_matches(
+    el: crate::GhostElement,
+    before: &str,
+    want: &str,
+    replace: bool,
+) -> (crate::GhostElement, Option<bool>) {
     let deadline = std::time::Instant::now() + Duration::from_millis(600);
     loop {
-        let got = el.typed_value();
-        if got.trim() == want.trim() || fold(&got).contains(&fold(want)) {
-            return (el, true);
+        let verdict = crate::engine::input::typed_ok(before, &el.typed_value(), want, replace);
+        if verdict != Some(false) {
+            return (el, verdict);
         }
         if std::time::Instant::now() >= deadline {
-            return (el, false);
+            return (el, verdict);
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
@@ -2721,6 +2725,9 @@ impl GhostSession {
                         ),
                     });
                 }
+                // Judge the read-back against what the field held before, so
+                // text that was already there does not pass as typed.
+                let before = el.typed_value();
                 if via_message {
                     // Real Win32 control: WM_SETTEXT. A failure here PROPAGATES -
                     // we do NOT silently fall back to the focus-stealing UIA path.
@@ -2737,8 +2744,9 @@ impl GhostSession {
                     }
                     focus_guard = self.foreground_guard_end(hwnd_raw, win.pid, fg_before).await;
                 }
-                let (el, mut ok) = if rung.is_empty() { (el, false) } else { read_back_matches(el, t).await };
-                if !ok && !via_message {
+                let (el, mut ok) =
+                    if rung.is_empty() { (el, Some(false)) } else { read_back_matches(el, &before, t, true).await };
+                if ok == Some(false) && !via_message {
                     // Second rung: give the field focus with a posted click at its
                     // centre, then post the characters to whatever the window's
                     // thread now reports as focused. Verified by the same read-back;
@@ -2747,6 +2755,7 @@ impl GhostSession {
                     crate::engine::input::BackgroundClicker::click_screen(hwnd_raw, sx, sy).map_err(GhostError::Core)?;
                     tokio::time::sleep(Duration::from_millis(40)).await;
                     let target = crate::engine::input::BackgroundClicker::focused_control(hwnd_raw);
+                    let before = el.typed_value();
                     for ch in t.chars() {
                         crate::engine::input::BackgroundClicker::send_char(target, ch).map_err(GhostError::Core)?;
                     }
@@ -2754,19 +2763,21 @@ impl GhostSession {
                     if focus_guard.is_none() {
                         focus_guard = self.foreground_guard_end_within(hwnd_raw, win.pid, fg_before, 0, 60).await;
                     }
-                    let (_el, ok2) = read_back_matches(el, t).await;
+                    let (_el, ok2) = read_back_matches(el, &before, t, false).await;
                     ok = ok2;
-                    if !ok {
+                    if ok != Some(true) {
                         note = Some("neither the UIA ValuePattern nor posted keystrokes read back the text; the control may be framework-controlled - confirm by other means or use the foreground policy");
                     }
                 }
-                if note.is_none() && rung == "value_pattern" {
+                if ok.is_none() {
+                    note = Some("the text is empty, so there is nothing to read back - confirm the field by other means");
+                } else if note.is_none() && rung == "value_pattern" {
                     note = Some("typed via UIA ValuePattern (windowless control) - the window may have activated; check focus_preserved");
                 } else if note.is_none() && rung == "posted_keys" {
                     note = Some("ValuePattern did not take; typed via a posted click + posted keystrokes and the field read the text back");
                 }
                 typed_via = rung;
-                (Some(ok), note)
+                (ok, note)
             }
             "click" => {
                 let before = crate::engine::capture::capture_window_printwindow(hwnd_raw).ok();

@@ -18,6 +18,11 @@ pub mod portal;
 pub mod uinput;
 pub mod x11;
 
+/// The typing read-back judge, one source shared with `ghost_core::input`.
+#[path = "../../../ghost-core/src/input/readback.rs"]
+pub mod readback;
+pub use readback::typed_ok;
+
 use std::sync::OnceLock;
 use std::thread::sleep;
 use std::time::Duration;

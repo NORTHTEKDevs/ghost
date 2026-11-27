@@ -317,12 +317,15 @@ impl DesktopSession {
             {
                 let deadline = std::time::Instant::now() + std::time::Duration::from_millis(400);
                 while std::time::Instant::now() < deadline {
-                    if read().contains(&t) {
+                    if crate::input::typed_ok(&before, &read(), &t, true) == Some(true) {
                         return Ok(());
                     }
                     std::thread::sleep(std::time::Duration::from_millis(20));
                 }
             }
+            // Re-read: a WM_SETTEXT that did not verify may still have changed it.
+            let before = read();
+            let landed = |now: &str| crate::input::typed_ok(&before, now, &t, false) == Some(true);
             for ch in t.chars() {
                 crate::input::BackgroundClicker::send_char(target, ch)?;
             }
@@ -332,7 +335,7 @@ impl DesktopSession {
             let mut last = read();
             let mut stable = 0;
             while std::time::Instant::now() < deadline {
-                if last.contains(&t) {
+                if landed(&last) {
                     return Ok(());
                 }
                 std::thread::sleep(std::time::Duration::from_millis(25));
@@ -357,7 +360,7 @@ impl DesktopSession {
                 }
                 return Err(CoreError::TypeNotVerified { text: t });
             }
-            if !last.contains(&t) {
+            if !landed(&last) {
                 // Partial landing: same rescue, so a target that dropped the
                 // tail gets a second chance rather than a false-negative.
                 if type_text_via_uia(hwnd, &t).is_ok() {
@@ -492,11 +495,13 @@ fn type_text_via_uia(hwnd: isize, text: &str) -> Result<(), CoreError> {
             if !el.is_enabled() || el.is_offscreen() {
                 continue;
             }
-            // Providers may normalise newlines on SetValue (WinUI stores \r\n);
-            // compare folded so a successful set is never misread as a failure.
-            let fold = |s: &str| s.replace("\r\n", "\n");
+            // SetValue replaces the value; judge it against the value before
+            // (typed_ok folds the \r\n WinUI stores for \n). The element name
+            // is never a read-back.
+            let before = el.value_text().unwrap_or_default();
             if crate::uia::patterns::set_value_ex(&el, text, false).is_ok()
-                && fold(&el.get_text()).contains(&fold(text))
+                && crate::input::typed_ok(&before, &el.value_text().unwrap_or_default(), text, true)
+                    == Some(true)
             {
                 return Ok(());
             }

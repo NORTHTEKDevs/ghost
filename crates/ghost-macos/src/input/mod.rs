@@ -3,6 +3,11 @@ pub mod keyboard;
 pub mod mouse;
 pub mod postmessage;
 
+/// The typing read-back judge, one source shared with `ghost_core::input`.
+#[path = "../../../ghost-core/src/input/readback.rs"]
+pub mod readback;
+pub use readback::typed_ok;
+
 pub use postmessage::{BackgroundClicker, EditCommand};
 
 pub use hotkey::{
