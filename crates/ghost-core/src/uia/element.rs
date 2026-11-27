@@ -75,11 +75,13 @@ impl UiaElement {
     /// Best-effort scroll-into-view via ScrollItemPattern. Elements inside a
     /// scrolled container (long lists, virtualized grids) report a rect that's
     /// off-screen until scrolled to; without this a click lands on empty space.
-    /// No-op (Ok) when the pattern is unavailable — caller proceeds regardless.
+    /// No-op (Ok) when the pattern is unavailable - caller proceeds regardless.
     pub fn scroll_into_view(&self) -> Result<(), crate::error::CoreError> {
         use windows::Win32::UI::Accessibility::{
             IUIAutomationScrollItemPattern, UIA_ScrollItemPatternId,
         };
+        // Scrolling changes what the human sees: refused while stopped.
+        crate::stop::ensure_not_stopped()?;
         unsafe {
             if let Ok(pattern) = self.0.GetCurrentPattern(UIA_ScrollItemPatternId) {
                 if let Ok(sip) = pattern.cast::<IUIAutomationScrollItemPattern>() {
@@ -92,6 +94,8 @@ impl UiaElement {
 
     /// Set UIA focus to this element via IUIAutomationElement::SetFocus().
     pub fn set_focus(&self) -> Result<(), crate::error::CoreError> {
+        // Moving focus can raise a window: refused while stopped.
+        crate::stop::ensure_not_stopped()?;
         unsafe {
             self.0.SetFocus()
                 .map_err(|e| crate::error::CoreError::Win32 {
@@ -104,7 +108,7 @@ impl UiaElement {
     /// The element's native Win32 window handle (HWND) as isize, or 0 if the
     /// element is windowless (UWP/WinUI XAML controls, most Chromium content).
     /// Standard Win32 controls (buttons, edits, list items in classic apps)
-    /// return their own control HWND — the handle needed to drive them with
+    /// return their own control HWND - the handle needed to drive them with
     /// window messages (background dispatch) instead of UIA patterns.
     pub fn native_window_handle(&self) -> isize {
         unsafe {
@@ -200,7 +204,7 @@ pub struct ElementDescriptor {
     pub top: i32,
     pub right: i32,
     pub bottom: i32,
-    /// UIA IsEnabled — false for greyed-out controls. Lets an agent avoid trying
+    /// UIA IsEnabled - false for greyed-out controls. Lets an agent avoid trying
     /// to click a disabled button/field. Defaults to true when unknown.
     pub enabled: bool,
 }

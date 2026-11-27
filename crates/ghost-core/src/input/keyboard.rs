@@ -134,11 +134,9 @@ pub fn key_down(vk: VIRTUAL_KEY) -> Result<(), CoreError> {
     Ok(())
 }
 
-/// Release a key held by key_down.
+/// Release a key held by key_down. Not refused while stopped: releasing is
+/// part of stopping safely (the stop itself releases only the modifiers).
 pub fn key_up(vk: VIRTUAL_KEY) -> Result<(), CoreError> {
-    if is_stopped() {
-        return Err(CoreError::Stopped);
-    }
     focus::require_foreground_allowed("key_up")?;
     let inputs = [key_event(vk, true)];
     unsafe {

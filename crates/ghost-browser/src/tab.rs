@@ -127,6 +127,15 @@ impl Tab {
         Ok(r.get("result").and_then(|x| x.get("value")).cloned().unwrap_or(Value::Null))
     }
 
+    /// Run an agent's script in the page (`ghost_tab_eval`). Unlike `eval`,
+    /// which Ghost's own reads are built on, an agent's script can click, type
+    /// or navigate, so it is refused while the emergency stop is active - at the
+    /// moment it would run, not only when the request arrived.
+    pub async fn run_script(&self, expression: &str) -> Result<Value> {
+        crate::error::ensure_not_stopped()?;
+        self.eval(expression).await
+    }
+
     // -----------------------------------------------------------------------
     // Navigation
     // -----------------------------------------------------------------------
@@ -464,6 +473,9 @@ impl Tab {
         crate::error::ensure_not_stopped()?;
         self.wait_for_selector(selector, timeout_ms).await?;
         let (x, y) = self.element_center(selector).await?;
+        // Again after the wait: a stop raised while the selector was pending
+        // must hold the move back.
+        crate::error::ensure_not_stopped()?;
         self.dispatch_move(x, y)?;
         self.eval("0").await?;
         Ok(())
@@ -496,12 +508,16 @@ impl Tab {
                 ""
             }
         );
+        // The wait above can last 10 s: check again before the field is
+        // focused and cleared, and again before the text goes in.
+        crate::error::ensure_not_stopped()?;
         if self.eval(&focus).await? != json!(true) {
             return Err(BrowserError::SelectorNotFound {
                 selector: selector.to_string(),
                 ms: 0,
             });
         }
+        crate::error::ensure_not_stopped()?;
         self.call("Input.insertText", json!({ "text": text })).await?;
         Ok(())
     }

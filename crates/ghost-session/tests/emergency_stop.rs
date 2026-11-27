@@ -59,7 +59,9 @@ async fn session_actions_refuse_while_stopped_and_run_after_reset() {
 }
 
 #[test]
-fn the_stop_error_names_the_way_out() {
+fn the_stop_error_says_who_lifts_it_without_coaching_a_reset() {
     let msg = GhostError::Stopped.to_string();
-    assert!(msg.contains("stopped") && msg.contains("ghost_reset"), "{msg}");
+    assert!(msg.contains("stopped") && msg.contains("Ctrl+Alt+G"), "{msg}");
+    // An agent reads this text: it must not be told to call ghost_reset.
+    assert!(!msg.contains("ghost_reset"), "{msg}");
 }

@@ -180,7 +180,7 @@ enum Command {
     },
 
     // -----------------------------------------------------------------------
-    // Serve: run the MCP stdio server (stdio only — no addr/port)
+    // Serve: run the MCP stdio server (stdio only - no addr/port)
     // -----------------------------------------------------------------------
 
     /// Start the ghost MCP stdio server. Executes the ghost-mcp binary found in PATH
@@ -270,7 +270,7 @@ fn cli_acts(cmd: &Command) -> bool {
 }
 
 async fn run(cli: Cli) -> Result<(), String> {
-    // Serve is special — it exec/spawns ghost-mcp, no GhostSession needed.
+    // Serve is special - it exec/spawns ghost-mcp, no GhostSession needed.
     if let Command::Serve = &cli.command {
         return run_serve();
     }
@@ -278,7 +278,7 @@ async fn run(cli: Cli) -> Result<(), String> {
     // The emergency stop, read from the shared event: this process may have
     // started after a stop was raised elsewhere.
     if cli_acts(&cli.command) {
-        ghost_session::error::ensure_not_stopped().map_err(|e| e.to_string())?;
+        ghost_session::error::ensure_not_stopped().map_err(|_| ghost_session::error::stop_refusal())?;
     }
 
     let session = GhostSession::new()
@@ -621,7 +621,7 @@ fn base64_encode(data: &[u8]) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Tests — arg parsing, pure logic (no live session)
+// Tests - arg parsing, pure logic (no live session)
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]

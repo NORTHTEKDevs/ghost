@@ -680,6 +680,12 @@ can still inspect what happened while everything is stopped.
   (`Local\ghost-emergency-stop-event`), so one press halts every Ghost process in
   your logon session, not just the one that happened to register the hotkey.
   `ghost_reset` resumes service, again for all of them.
+- Programs started by `ghost_shell` end with the stop, including whatever a
+  command launched, not just the shell itself (Windows). Start an app that
+  should outlive a stop with `ghost_window op=launch`.
+- A Ghost process that cannot read the shared stop event fails closed: it
+  refuses every action and its error says why, rather than missing a stop
+  raised elsewhere.
 
 ## Element Locators
 

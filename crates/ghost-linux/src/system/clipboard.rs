@@ -28,3 +28,9 @@ pub fn set_clipboard(text: &str) -> Result<()> {
     cb.set_text(text.to_string())
         .map_err(|e| CoreError::platform(format!("clipboard write failed: {e}")))
 }
+
+/// Put back the clipboard content saved before a paste (hand-back: the
+/// Windows engine lets this through while stopped; nothing here is gated).
+pub fn restore_clipboard(saved: &str) -> Result<()> {
+    set_clipboard(saved)
+}

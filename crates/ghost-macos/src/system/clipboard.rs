@@ -14,3 +14,7 @@ pub fn get_clipboard() -> Result<String, CoreError> {
 pub fn set_clipboard(_text: &str) -> Result<(), CoreError> {
     Err(CoreError::Unsupported { op: "set_clipboard", needs: "NSPasteboard" })
 }
+
+pub fn restore_clipboard(_saved: &str) -> Result<(), CoreError> {
+    Err(CoreError::Unsupported { op: "restore_clipboard", needs: "NSPasteboard" })
+}

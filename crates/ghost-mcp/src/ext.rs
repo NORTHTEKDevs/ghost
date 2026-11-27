@@ -158,7 +158,9 @@ pub async fn dispatch(
             let (browser, tab_id) = browser_tab(p)?;
             let expression = req_str(p, "expression")?;
             let tab = session.tab(&browser, &tab_id).await.map_err(|e| e.to_string())?;
-            Ok(json!({ "value": tab.eval(&expression).await.map_err(|e| e.to_string())? }))
+            // run_script, not eval: the agent's script is refused if a stop
+            // arrived while the tab was being attached.
+            Ok(json!({ "value": tab.run_script(&expression).await.map_err(|e| e.to_string())? }))
         }
         "ghost_tab_screenshot" => {
             let (browser, tab_id) = browser_tab(p)?;

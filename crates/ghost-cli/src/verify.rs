@@ -489,21 +489,31 @@ pub fn run(strict_cursor: bool) -> i32 {
     }
 
     // ---- Claim: emergency stop halts and releases ------------------------------
-    {
-        let _ = s.call("ghost_stop", json!({}), &mut pending);
-        // give the stop a moment to propagate through the shared event
-        std::thread::sleep(Duration::from_millis(300));
-        let refused = s
-            .call("ghost_tab_open", json!({"browser": "v", "url": url}), &mut pending)
-            .map(|v| v.get("error").is_some() || v["result"].get("tab").is_none())
-            .unwrap_or(true);
-        let _ = s.call("ghost_reset", json!({}), &mut pending);
-        std::thread::sleep(Duration::from_millis(1600));
-        let resumed = state(&mut s, &mut pending).is_some();
+    // scope=process: only this verify server stops. The machine-wide stop
+    // would halt every other Ghost on the machine (and end their shells'
+    // programs), and its reset would lift a stop the human raised.
+    if ghost_session::error::is_stopped() {
         a.claim(
             "emergency stop blocks; reset resumes",
-            resumed,
-            if refused { "stop observed, reset restored service".into() } else { "reset restored service".to_string() },
+            false,
+            "not checked: an emergency stop is in force on this machine, and verify will not lift it".into(),
+        );
+    } else {
+        let _ = s.call("ghost_stop", json!({"scope": "process"}), &mut pending);
+        let opened = |v: &Value| v.get("error").is_none() && v["result"].get("tab").is_some();
+        let refused = s
+            .call("ghost_tab_open", json!({"browser": "v", "url": url}), &mut pending)
+            .map(|v| !opened(&v))
+            .unwrap_or(true);
+        let _ = s.call("ghost_reset", json!({"scope": "process"}), &mut pending);
+        let resumed = s
+            .call("ghost_tab_open", json!({"browser": "v", "url": url}), &mut pending)
+            .map(|v| opened(&v))
+            .unwrap_or(false);
+        a.claim(
+            "emergency stop blocks; reset resumes",
+            refused && resumed,
+            format!("refused while stopped: {refused}; acted after reset: {resumed}"),
         );
     }
 

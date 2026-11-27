@@ -6,7 +6,7 @@ pub enum GhostError {
     #[error("Element not interactable: {element} - {reason}")]
     ElementNotInteractable { element: String, reason: String },
 
-    #[error("emergency stop active (Ctrl+Alt+G or ghost_stop): Ghost is stopped and refuses actions until ghost_reset")]
+    #[error("emergency stop active (Ctrl+Alt+G or ghost_stop): Ghost is stopped and refuses actions until the stop is lifted; a stop the human raised is theirs to lift")]
     Stopped,
 
     #[error("Timeout after {ms}ms waiting for: {action}")]
@@ -51,6 +51,22 @@ pub type Result<T> = std::result::Result<T, GhostError>;
 /// Whether the emergency stop is active, here or in any other Ghost process.
 pub fn is_stopped() -> bool {
     crate::engine::input::hotkey::is_stopped()
+}
+
+/// Why this process cannot read the shared stop event, when it cannot (it
+/// then refuses every action: fail closed). `None` off Windows, where there is
+/// no shared event.
+pub fn stop_event_error() -> Option<String> {
+    #[cfg(windows)]
+    return crate::engine::input::hotkey::stop_event_error();
+    #[cfg(not(windows))]
+    None
+}
+
+/// The text an entry point (MCP, CLI, HTTP) refuses with while stopped: the
+/// stop, or - when the shared event cannot be read - that, with the fix.
+pub fn stop_refusal() -> String {
+    stop_event_error().unwrap_or_else(|| GhostError::Stopped.to_string())
 }
 
 /// `Err(GhostError::Stopped)` while the emergency stop is active, raised here

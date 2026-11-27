@@ -200,8 +200,10 @@ fn classify_error(msg: &str) -> (i64, Option<&'static str>) {
         (-32001, Some("element not found - call ghost_see to confirm the window is focused and the name/role are right, or retry ghost_find with mode=deliberate to escalate to the VLM"))
     } else if m.contains("disabled") || m.contains("occluded") || m.contains("not interactable") {
         (-32002, Some("element exists but isn't actionable (disabled or covered) - call ghost_see and check is_enabled/rect, or dismiss the covering element first"))
+    } else if m.contains("fail closed") {
+        (-32004, Some("this Ghost cannot read the shared emergency-stop event, so it refuses every action; no stop was raised and ghost_reset will not help - end the Ghost process named in the error (often one running elevated) and restart this server"))
     } else if m.contains("interrupted by emergency stop") || m.contains("stopped") {
-        (-32004, Some("automation was stopped - call ghost_reset before issuing more actions"))
+        (-32004, Some("automation is stopped (Ctrl+Alt+G or ghost_stop) - issue no more actions; a stop the human raised is theirs to lift, so wait for them to resume"))
     } else if m.contains("timeout") || m.contains("timed out") {
         (-32003, Some("operation timed out - increase timeout_ms, or check for a blocking modal/dialog with ghost_see"))
     } else if m.contains("minimized") {
@@ -262,15 +264,28 @@ fn validate_url(url: &str) -> std::result::Result<(), String> {
         return Ok(());
     }
 
-    // Resolve host to check for private/loopback/link-local IP ranges.
+    // `host_str()` returns an IPv6 literal in brackets ("[::1]"), which never
+    // parses as an address, so every IPv6 literal (::1 included) used to pass.
+    // IPv4 forms (2130706433, 0x7f.1) are already normalised by the URL parser.
     let host = parsed.host_str().unwrap_or("");
-    // Block obvious hostname aliases immediately (no DNS needed).
-    if host == "localhost" {
-        return Err("URL targets localhost - blocked (SSRF prevention). Set GHOST_HTTP_ALLOW_PRIVATE=1 to allow".into());
-    }
+    let bare = host.strip_prefix('[').and_then(|h| h.strip_suffix(']')).unwrap_or(host);
+    let ip = match bare.parse::<std::net::IpAddr>() {
+        // An IPv4-mapped IPv6 address (::ffff:127.0.0.1) reaches the IPv4 host.
+        Ok(std::net::IpAddr::V6(v6)) => Some(v6.to_ipv4_mapped().map_or(std::net::IpAddr::V6(v6), std::net::IpAddr::V4)),
+        Ok(ip) => Some(ip),
+        Err(_) => {
+            // "localhost." (trailing dot) and "*.localhost" resolve to this
+            // machine too (RFC 6761).
+            let d = bare.trim_end_matches('.').to_ascii_lowercase();
+            if d == "localhost" || d.ends_with(".localhost") {
+                return Err("URL targets localhost - blocked (SSRF prevention). Set GHOST_HTTP_ALLOW_PRIVATE=1 to allow".into());
+            }
+            None
+        }
+    };
 
-    // Parse the host as an IP address and block private ranges.
-    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+    // Block private, loopback and link-local ranges.
+    if let Some(ip) = ip {
         let blocked = match ip {
             std::net::IpAddr::V4(v4) => {
                 v4.is_loopback()           // 127.0.0.0/8
@@ -436,8 +451,12 @@ async fn async_main() {
                 }
                 // Cheap substring prefilter: avoid a second full JSON parse of
                 // every (possibly huge) line just to detect stop requests.
-                if line.contains("ghost_stop") && is_stop_request(line) {
-                    crate::engine::input::hotkey::trigger_stop();
+                if let Some(scope) = line.contains("ghost_stop").then(|| stop_request(line)).flatten() {
+                    match scope {
+                        StopScope::Everywhere => crate::engine::input::hotkey::trigger_stop(),
+                        StopScope::Process => crate::engine::input::hotkey::STOP_FLAG
+                            .store(true, std::sync::atomic::Ordering::Release),
+                    }
                     // Release any held modifiers IMMEDIATELY (not when the queued
                     // stop later dispatches) so a stuck Ctrl/Shift/Alt from an
                     // in-flight or held key_down can't corrupt further input.
@@ -645,20 +664,36 @@ fn install_crash_log() {
     }));
 }
 
+/// How far a `ghost_stop` / `ghost_reset` reaches. `Everywhere` (the default)
+/// is the emergency stop: every Ghost process in the logon session, through the
+/// shared event. `Process` touches only this server's own flag - for `ghost
+/// verify`, which proves the stop works without stopping (and killing the
+/// shells of) every other Ghost on the machine, or lifting a stop the human
+/// raised.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StopScope {
+    Everywhere,
+    Process,
+}
+
+impl StopScope {
+    fn of(args: &Value) -> Self {
+        if args["scope"].as_str() == Some("process") { StopScope::Process } else { StopScope::Everywhere }
+    }
+}
+
 /// Detect a stop request on the raw wire line, before dispatch. Matches both
 /// the spec form (tools/call name=ghost_stop) and the legacy raw-method form.
 /// Runs on the stdin reader thread; must not touch the session.
-fn is_stop_request(line: &str) -> bool {
-    let Ok(v) = serde_json::from_str::<Value>(line) else { return false };
+fn stop_request(line: &str) -> Option<StopScope> {
+    let v = serde_json::from_str::<Value>(line).ok()?;
+    let params = v.get("params").cloned().unwrap_or(Value::Null);
     match v.get("method").and_then(|m| m.as_str()) {
-        Some("ghost_stop") => true,
-        Some("tools/call") => {
-            v.get("params")
-                .and_then(|p| p.get("name"))
-                .and_then(|n| n.as_str())
-                == Some("ghost_stop")
+        Some("ghost_stop") => Some(StopScope::of(&params)),
+        Some("tools/call") if params.get("name").and_then(|n| n.as_str()) == Some("ghost_stop") => {
+            Some(StopScope::of(&params["arguments"]))
         }
-        _ => false,
+        _ => None,
     }
 }
 
@@ -721,7 +756,9 @@ fn tool_class(name: &str, args: &Value) -> Option<ToolClass> {
     use ToolClass::*;
     let op = |default: &'static str| args["op"].as_str().unwrap_or(default).to_string();
     Some(match name {
-        "ghost_stop" | "ghost_reset" => Control,
+        // Releasing a held key is part of stopping safely: a stop releases only
+        // the modifiers, so a key held with ghost_key_down would stay down.
+        "ghost_stop" | "ghost_reset" | "ghost_key_up" => Control,
         "ghost_see" | "ghost_find" | "ghost_snapshot" | "ghost_screenshot" | "ghost_screenshot_region"
         | "ghost_query" | "ghost_assert" | "ghost_stats" | "ghost_cache_stats" | "ghost_cache_invalidate"
         | "ghost_event_seq" | "ghost_list_windows" | "ghost_get_clipboard" | "ghost_get_selection"
@@ -752,7 +789,7 @@ fn tool_class(name: &str, args: &Value) -> Option<ToolClass> {
             if args["policy"].as_str().is_some_and(|p| p.eq_ignore_ascii_case("background")) { Control } else { Act }
         }
         "ghost_act" | "ghost_key" | "ghost_scroll" | "ghost_drag" | "ghost_run" | "ghost_click" | "ghost_type"
-        | "ghost_click_at" | "ghost_launch" | "ghost_press" | "ghost_hotkey" | "ghost_key_down" | "ghost_key_up"
+        | "ghost_click_at" | "ghost_launch" | "ghost_press" | "ghost_hotkey" | "ghost_key_down"
         | "ghost_hover" | "ghost_right_click" | "ghost_double_click" | "ghost_set_clipboard"
         | "ghost_focus_window" | "ghost_window_state" | "ghost_batch_actions" | "ghost_http_post"
         | "ghost_navigate_and_wait" | "ghost_click_and_wait_for_text" | "ghost_fill_form"
@@ -774,10 +811,20 @@ fn stop_gate(name: &str, args: &Value, stopped: bool) -> std::result::Result<(),
     let class = tool_class(name, args).unwrap_or(ToolClass::Act);
     if stopped && class == ToolClass::Act {
         return Err(format!(
-            "{name} refused: emergency stop active - Ghost is stopped and refuses actions until ghost_reset"
+            "{name} refused: emergency stop active - Ghost is stopped and refuses actions until the stop is lifted"
         ));
     }
     Ok(())
+}
+
+/// When the shared stop event cannot be read, say so instead of "emergency
+/// stop active": nothing was stopped, the process fails closed, and the fix is
+/// on the machine, not a reset.
+fn with_stop_reason(name: &str, refusal: String) -> String {
+    match ghost_session::error::stop_event_error() {
+        Some(why) => format!("{name} refused: Ghost is stopped (fail closed) - {why}"),
+        None => refusal,
+    }
 }
 
 fn dispatch_tool<'a>(
@@ -799,7 +846,7 @@ fn dispatch_tool_inner<'a>(
         // extended surface, CDP, hidden desktops, the user's desktop) and every
         // ghost_run step passes here. The paths themselves check again at the
         // moment of dispatch (docs/plans/2026-11-26-emergency-stop-gate.md).
-        stop_gate(name, args, ghost_session::error::is_stopped())?;
+        stop_gate(name, args, ghost_session::error::is_stopped()).map_err(|e| with_stop_reason(name, e))?;
         // Extended surface (browsers/tabs, isolated desktops, focus policy) is
         // self-contained in `ext`; everything else routes as before.
         if ext::owns(name) {
@@ -1813,11 +1860,24 @@ async fn handle_tool(
             Ok(json!({ "pid": pid, "surface": "user" }))
         }
         "ghost_stop" => {
-            session.stop();
+            match StopScope::of(p) {
+                StopScope::Everywhere => session.stop(),
+                StopScope::Process => {
+                    crate::engine::input::hotkey::STOP_FLAG.store(true, std::sync::atomic::Ordering::Release);
+                    crate::engine::input::hotkey::release_all_modifiers();
+                }
+            }
             Ok(json!({ "ok": true }))
         }
         "ghost_reset" => {
-            session.reset();
+            match StopScope::of(p) {
+                StopScope::Everywhere => session.reset(),
+                // Only this server's flag: a stop raised elsewhere (the shared
+                // event) stays in force.
+                StopScope::Process => {
+                    crate::engine::input::hotkey::STOP_FLAG.store(false, std::sync::atomic::Ordering::Release)
+                }
+            }
             Ok(json!({ "ok": true }))
         }
         "ghost_press" => {
@@ -3582,11 +3642,13 @@ fn lean_tools_schema() -> Value {
           "description": "Grounding + cache telemetry for debugging flow speed/reliability: which tier is winning (cache/UIA/OCR/VLM), VLM escalation rate, cache hit/miss counts, UIA-mirror stats. Call when a flow is slow or a find is unreliable.",
           "inputSchema": { "type": "object", "properties": {} }},
         { "name": "ghost_reset",
-          "description": "Resume automation after ghost_stop. Clears the stop flag.",
-          "inputSchema": { "type": "object", "properties": {} }},
+          "description": "Resume automation after a stop you raised yourself with ghost_stop. Clears the stop for every Ghost process. Do not call it to undo a stop the human raised with Ctrl+Alt+G: that stop is theirs to lift.",
+          "inputSchema": { "type": "object", "properties": {
+            "scope": { "type": "string", "enum": ["everywhere", "process"], "description": "everywhere (default): clears the stop for every Ghost process. process: only this server's own flag; a stop raised elsewhere stays." } } }},
         { "name": "ghost_stop",
           "description": "Emergency stop: halt all automation and release held modifier keys.",
-          "inputSchema": { "type": "object", "properties": {} }},
+          "inputSchema": { "type": "object", "properties": {
+            "scope": { "type": "string", "enum": ["everywhere", "process"], "description": "everywhere (default): every Ghost process in this logon session. process: only this server (used by ghost verify)." } } }},
         { "name": "ghost_http_get",
           "description": "HTTP GET. Returns {status, body}.",
           "inputSchema": { "type": "object", "required": ["url"], "properties": {
@@ -3664,10 +3726,12 @@ fn legacy_tools_schema_full() -> Value {
           }}},
         { "name": "ghost_stop",
           "description": "Emergency stop: halts all automation and releases held modifier keys.",
-          "inputSchema": { "type": "object", "properties": {} }},
+          "inputSchema": { "type": "object", "properties": {
+            "scope": { "type": "string", "enum": ["everywhere", "process"], "description": "everywhere (default): every Ghost process in this logon session. process: only this server (used by ghost verify)." } } }},
         { "name": "ghost_reset",
-          "description": "Resume automation after ghost_stop. Clears the stop flag.",
-          "inputSchema": { "type": "object", "properties": {} }},
+          "description": "Resume automation after a stop you raised yourself with ghost_stop. Clears the stop for every Ghost process. Do not call it to undo a stop the human raised with Ctrl+Alt+G: that stop is theirs to lift.",
+          "inputSchema": { "type": "object", "properties": {
+            "scope": { "type": "string", "enum": ["everywhere", "process"], "description": "everywhere (default): clears the stop for every Ghost process. process: only this server's own flag; a stop raised elsewhere stays." } } }},
         { "name": "ghost_press",
           "description": "Press and release a named key: Enter, Tab, Escape, Backspace, Delete, Home, End, PageUp, PageDown, ArrowUp/Down/Left/Right, F1-F12, Space, Ctrl, Shift, Alt, Win, a-z, 0-9.",
           "inputSchema": { "type": "object", "required": ["key"], "properties": {
@@ -3949,7 +4013,7 @@ async fn run_batch_op(
     };
     // Batch ops go straight to handle_tool, past dispatch_tool_inner's gate:
     // check each one, so a stop raised mid-batch holds the rest back.
-    stop_gate(method, params, ghost_session::error::is_stopped())?;
+    stop_gate(method, params, ghost_session::error::is_stopped()).map_err(|e| with_stop_reason(method, e))?;
     Box::pin(handle_tool(session, method, params)).await
 }
 
@@ -4046,12 +4110,15 @@ mod stop_gate_tests {
             if tool_class(&n, &json!({})) == Some(ToolClass::Act) {
                 acts += 1;
                 let e = stop_gate(&n, &json!({}), true).expect_err(&n);
-                assert!(e.contains("stopped") && e.contains("ghost_reset"), "{n}: {e}");
+                assert!(e.contains("stopped"), "{n}: {e}");
+                // The refusal must not coach an agent into lifting a stop the
+                // human raised.
+                assert!(!e.contains("ghost_reset"), "{n}: {e}");
                 assert_eq!(super::classify_error(&e).0, -32004, "{n} must carry the stopped error code");
                 assert!(stop_gate(&n, &json!({}), false).is_ok(), "{n} must run when not stopped");
             }
         }
-        assert!(acts > 50, "only {acts} state-changing tools found");
+        assert!(acts >= 50, "only {acts} state-changing tools found");
     }
 
     #[test]
@@ -4099,6 +4166,65 @@ mod stop_gate_tests {
     fn an_unknown_tool_is_refused_while_stopped() {
         assert_eq!(tool_class("ghost_brand_new_tool", &json!({})), None);
         assert!(stop_gate("ghost_brand_new_tool", &json!({}), true).is_err());
+    }
+
+    /// Releasing a held key is part of stopping safely (a stop releases only
+    /// the modifiers), so it stays available while stopped.
+    #[test]
+    fn releasing_a_held_key_stays_available_while_stopped() {
+        assert_eq!(tool_class("ghost_key_up", &json!({})), Some(ToolClass::Control));
+        assert!(stop_gate("ghost_key_up", &json!({}), true).is_ok());
+        assert!(stop_gate("ghost_key_down", &json!({}), true).is_err());
+    }
+
+    /// The stopped-error hint must not tell the agent to call ghost_reset.
+    #[test]
+    fn the_stopped_hint_does_not_coach_a_reset() {
+        let refusal = stop_gate("ghost_act", &json!({}), true).unwrap_err();
+        let (code, hint) = super::classify_error(&refusal);
+        assert_eq!(code, -32004);
+        let hint = hint.unwrap();
+        assert!(!hint.contains("ghost_reset"), "{hint}");
+    }
+}
+
+#[cfg(test)]
+mod validate_url_tests {
+    use super::validate_url;
+
+    /// ghost_http_get answers while stopped and is meant to reach the public
+    /// web only: every spelling of this machine or a private network must be
+    /// refused, or a GET can drive a local service such as a browser's
+    /// DevTools endpoint (/json/close, /json/activate).
+    #[test]
+    fn loopback_and_private_hosts_are_refused_in_every_spelling() {
+        for url in [
+            "http://localhost/",
+            "http://LOCALHOST:9222/json",
+            "http://localhost./json",
+            "http://devtools.localhost/json",
+            "http://127.0.0.1:9222/json",
+            "http://[::1]:9222/json",
+            "http://[::ffff:127.0.0.1]:9222/json/close/x",
+            "http://[::ffff:7f00:1]:9222/json",
+            "http://[::ffff:192.168.1.10]/",
+            "http://[fe80::1]/",
+            "http://[fd00::1]/",
+            "http://[::]/",
+            "http://0.0.0.0:9222/",
+            "http://2130706433:9222/json",
+            "http://10.0.0.1/",
+            "http://169.254.169.254/latest/meta-data",
+        ] {
+            assert!(validate_url(url).is_err(), "{url} was allowed");
+        }
+    }
+
+    #[test]
+    fn public_hosts_are_allowed() {
+        for url in ["https://example.com/", "http://93.184.216.34/", "http://[2606:4700:4700::1111]/"] {
+            assert!(validate_url(url).is_ok(), "{url} was refused: {:?}", validate_url(url));
+        }
     }
 }
 
@@ -4333,20 +4459,42 @@ mod tests {
     #[test]
     fn stop_request_detected_in_tools_call_form() {
         let line = r#"{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"ghost_stop","arguments":{}}}"#;
-        assert!(is_stop_request(line));
+        assert_eq!(stop_request(line), Some(StopScope::Everywhere));
     }
 
     #[test]
     fn stop_request_detected_in_legacy_raw_form() {
         let line = r#"{"jsonrpc":"2.0","id":9,"method":"ghost_stop"}"#;
-        assert!(is_stop_request(line));
+        assert_eq!(stop_request(line), Some(StopScope::Everywhere));
+    }
+
+    /// `scope: "process"` (ghost verify) stops only this server: the early
+    /// stdin path must not broadcast it to every Ghost on the machine.
+    #[test]
+    fn a_process_scoped_stop_is_not_broadcast() {
+        let call = r#"{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"ghost_stop","arguments":{"scope":"process"}}}"#;
+        assert_eq!(stop_request(call), Some(StopScope::Process));
+        let raw = r#"{"jsonrpc":"2.0","id":9,"method":"ghost_stop","params":{"scope":"process"}}"#;
+        assert_eq!(stop_request(raw), Some(StopScope::Process));
+        assert_eq!(StopScope::of(&json!({"scope": "everywhere"})), StopScope::Everywhere);
+        assert_eq!(StopScope::of(&json!({})), StopScope::Everywhere);
     }
 
     #[test]
     fn non_stop_requests_not_detected() {
-        assert!(!is_stop_request(r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ghost_see","arguments":{}}}"#));
-        assert!(!is_stop_request(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#));
-        assert!(!is_stop_request("not json"));
+        assert_eq!(stop_request(r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ghost_see","arguments":{}}}"#), None);
+        assert_eq!(stop_request(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#), None);
+        assert_eq!(stop_request("not json"), None);
+    }
+
+    /// When the shared stop event cannot be read, the hint must say so -
+    /// "wait for the human" would never resolve it.
+    #[test]
+    fn the_fail_closed_refusal_has_its_own_hint() {
+        let (code, hint) = classify_error("ghost_act refused: Ghost is stopped (fail closed) - cannot open the shared emergency-stop event");
+        assert_eq!(code, -32004);
+        let hint = hint.unwrap();
+        assert!(hint.contains("cannot read") && !hint.contains("wait for them"), "{hint}");
     }
 
     // RFC 4648 base64 test vectors

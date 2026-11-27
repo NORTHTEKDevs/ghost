@@ -190,7 +190,7 @@ fn json_err(e: (StatusCode, String)) -> (StatusCode, Json<Value>) {
 /// the command runs, in case the stop arrived while it waited in the queue.
 fn refuse_if_stopped() -> Result<(), (StatusCode, Json<Value>)> {
     ghost_session::error::ensure_not_stopped()
-        .map_err(|e| json_err((StatusCode::CONFLICT, e.to_string())))
+        .map_err(|_| json_err((StatusCode::CONFLICT, ghost_session::error::stop_refusal())))
 }
 
 #[derive(Deserialize)]
@@ -332,7 +332,7 @@ async fn main() {
         .route("/describe", post(h_describe))
         .route("/clipboard", get(h_get_clip).post(h_set_clip))
         .route("/run", post(h_run))
-        // MEDIUM-5: removed CorsLayer::permissive() — it allowed any web page on the same
+        // MEDIUM-5: removed CorsLayer::permissive() - it allowed any web page on the same
         // machine to POST to ghost-http via fetch() (localhost CSRF). Callers are curl/local
         // scripts, not browsers. No CORS headers = browsers block cross-origin requests.
         .with_state(state);
@@ -360,7 +360,8 @@ mod tests {
         STOP_FLAG.store(false, Ordering::Release);
         let (code, body) = r.expect_err("must refuse while stopped");
         assert_eq!(code, StatusCode::CONFLICT);
-        assert!(body.0["error"].as_str().unwrap().contains("ghost_reset"));
+        let error = body.0["error"].as_str().unwrap();
+        assert!(error.contains("stopped") && !error.contains("ghost_reset"), "{error}");
         assert!(refuse_if_stopped().is_ok());
     }
 }

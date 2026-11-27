@@ -33,7 +33,7 @@ pub enum BrowserError {
     #[error("browser connection is closed")]
     Closed,
 
-    #[error("emergency stop active: Ghost is stopped and refuses actions until ghost_reset")]
+    #[error("emergency stop active: Ghost is stopped and refuses actions until the stop is lifted")]
     Stopped,
 
     #[error(transparent)]

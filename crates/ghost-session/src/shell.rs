@@ -136,6 +136,84 @@ fn no_console_window(command: &mut Command) {
     }
 }
 
+/// Everything a shell starts lives in one job per Ghost process, and the
+/// emergency stop ends that whole job - not just the shell process: a
+/// command's own children (a script driving the desktop, a build) used to keep
+/// running after the stop killed the shell above them. Covers one-shot
+/// commands, persistent sessions (including a command left running by
+/// `op=send`) and the warm spare, whichever Ghost process raised the stop.
+///
+/// Not kill-on-close: a program a command opened (an editor, a terminal) is
+/// the human's from then on and must survive this server exiting or
+/// restarting. Only the stop ends it; apps meant to outlive a stop are
+/// started with `ghost_window op=launch`, which is not in this job.
+#[cfg(windows)]
+mod stop_job {
+    use ghost_browser::launch::job::Job;
+    use std::sync::OnceLock;
+    use std::time::Duration;
+
+    static JOB: OnceLock<Option<Job>> = OnceLock::new();
+
+    fn job() -> Option<&'static Job> {
+        JOB.get_or_init(|| match Job::new_terminable() {
+            Ok(j) => {
+                watch_for_stop();
+                Some(j)
+            }
+            Err(e) => {
+                tracing::warn!("shell job unavailable ({e}); a stop ends shells but not their children");
+                None
+            }
+        })
+        .as_ref()
+    }
+
+    /// Put a just-started shell in the job; its children join it as they start.
+    pub(super) fn confine(pid: Option<u32>) {
+        if let (Some(job), Some(pid)) = (job(), pid) {
+            if let Err(e) = job.adopt(pid) {
+                tracing::warn!(pid, "could not put the shell in the stop job: {e}");
+            }
+        }
+    }
+
+    /// On each rise of the stop (local, the hotkey, or another process through
+    /// the shared event), end everything in the job.
+    fn watch_for_stop() {
+        let _ = std::thread::Builder::new().name("ghost-shell-stop".into()).spawn(|| {
+            let mut was = false;
+            loop {
+                let now = crate::error::is_stopped();
+                if now && !was {
+                    if let Some(job) = JOB.get().and_then(|j| j.as_ref()) {
+                        let _ = job.terminate(crate::engine::process::manager::KILLED_EXIT_CODE);
+                    }
+                }
+                was = now;
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        });
+    }
+}
+
+#[cfg(windows)]
+use stop_job::confine;
+#[cfg(not(windows))]
+fn confine(_pid: Option<u32>) {}
+
+/// The shell ended because the emergency stop ended its job, not because the
+/// command finished: report the stop, never a normal exit. (The job kill can
+/// land before the read loop's own stop poll, closing the pipes as if the
+/// command had simply ended - `ok: true`, exit code 57005.)
+fn killed_by_stop(status: Option<std::process::ExitStatus>) -> bool {
+    #[cfg(windows)]
+    let killed = status.and_then(|s| s.code()) == Some(crate::engine::process::manager::KILLED_EXIT_CODE as i32);
+    #[cfg(not(windows))]
+    let killed = { let _ = status; false };
+    killed || crate::error::is_stopped()
+}
+
 /// Start one persistent driver process (PowerShell here, bash on Linux).
 /// Shared by `op=open` sessions and the warm spare.
 fn spawn_driver(cwd: Option<&str>) -> Result<ShellSession> {
@@ -165,6 +243,7 @@ fn spawn_driver(cwd: Option<&str>) -> Result<ShellSession> {
     let mut child = command
         .spawn()
         .map_err(|e| GhostError::Config(format!("failed to start persistent shell: {e}")))?;
+    confine(child.id());
     let stdin = child.stdin.take().unwrap();
     let stdout = child.stdout.take().unwrap();
     let pid = child.id();
@@ -287,6 +366,11 @@ impl GhostSession {
             ));
         }
         let op = args.get("op").and_then(|v| v.as_str()).unwrap_or("run");
+        // Backstop for callers that do not come through the MCP gate: starting
+        // or feeding a command is an action; list, read and kill are not.
+        if matches!(op, "run" | "open" | "send") {
+            crate::error::ensure_not_stopped()?;
+        }
         match op {
             "run" => self.shell_run(args).await,
             "open" => self.shell_open(args).await,
@@ -338,6 +422,7 @@ impl GhostSession {
         let mut child = command
             .spawn()
             .map_err(|e| GhostError::Config(format!("failed to spawn {shell}: {e}")))?;
+        confine(child.id());
         let mut stdout = child.stdout.take().unwrap();
         let mut stderr = child.stderr.take().unwrap();
 
@@ -360,7 +445,7 @@ impl GhostSession {
         }
         let status = child.wait().await.ok();
 
-        if stopped {
+        if stopped || killed_by_stop(status) {
             return Err(GhostError::Stopped);
         }
 
@@ -448,6 +533,9 @@ impl GhostSession {
                 // The command ended the shell itself (`exit N`): the process exit
                 // status is the command's exit code, exactly as in the one-shot path.
                 let status = sess.child.wait().await.ok();
+                if killed_by_stop(status) {
+                    return Err(GhostError::Stopped);
+                }
                 let (output, truncated) = cap_output(output);
                 Ok(json!({
                     "ok": true, "output": output,
@@ -592,6 +680,9 @@ impl GhostSession {
             ReadOutcome::Eof { output } => {
                 // Driver process exited unexpectedly. Drop the dead session.
                 let _ = sess.child.start_kill();
+                if killed_by_stop(sess.child.try_wait().ok().flatten()) {
+                    return Err(GhostError::Stopped);
+                }
                 let (output, _) = cap_output(output);
                 Err(GhostError::Config(format!(
                     "ghost_shell: session '{id}' ended unexpectedly. Partial output: {output}"

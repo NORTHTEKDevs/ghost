@@ -266,6 +266,18 @@ pub mod job {
             }
         }
 
+        /// A job with no kill-on-close: its members outlive this process and
+        /// end only on `terminate`. For programs that are the human's once
+        /// started (whatever a shell command opened), which a server restart
+        /// must not take down but the emergency stop must.
+        pub fn new_terminable() -> Result<Self, String> {
+            unsafe {
+                CreateJobObjectW(None, windows::core::PCWSTR::null())
+                    .map(Job)
+                    .map_err(|e| e.to_string())
+            }
+        }
+
         /// Put the process (and everything it starts from now on) in this job.
         pub fn adopt(&self, pid: u32) -> Result<(), String> {
             unsafe {
@@ -274,6 +286,15 @@ pub mod job {
                 let r = AssignProcessToJobObject(self.0, p).map_err(|e| e.to_string());
                 let _ = CloseHandle(p);
                 r
+            }
+        }
+
+        /// End every process in the job now. The job stays usable: processes
+        /// adopted afterwards run normally.
+        pub fn terminate(&self, exit_code: u32) -> Result<(), String> {
+            unsafe {
+                windows::Win32::System::JobObjects::TerminateJobObject(self.0, exit_code)
+                    .map_err(|e| e.to_string())
             }
         }
     }
@@ -309,6 +330,44 @@ pub mod job {
         match SERVER_JOB.get_or_init(|| Job::new().ok()) {
             Some(job) => job.adopt(pid),
             None => Err("the server job object could not be created".into()),
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::Job;
+        use std::os::windows::process::CommandExt;
+
+        fn spawn_ping() -> std::process::Child {
+            std::process::Command::new("ping")
+                .args(["-n", "30", "127.0.0.1"])
+                .stdout(std::process::Stdio::null())
+                .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+                .spawn()
+                .expect("spawn ping")
+        }
+
+        /// A terminable job ends its members only when asked: closing it (the
+        /// server exiting) leaves them running, so a program a shell started -
+        /// an editor, a terminal - survives a server restart.
+        #[test]
+        fn a_terminable_job_ends_members_on_terminate_not_on_close() {
+            let mut kept = spawn_ping();
+            let job = Job::new_terminable().expect("job");
+            job.adopt(kept.id()).expect("adopt");
+            drop(job);
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            let survived = kept.try_wait().expect("try_wait").is_none();
+            let _ = kept.kill();
+            let _ = kept.wait();
+            assert!(survived, "closing the job ended its member");
+
+            let mut ended = spawn_ping();
+            let job = Job::new_terminable().expect("job");
+            job.adopt(ended.id()).expect("adopt");
+            job.terminate(7).expect("terminate");
+            let code = ended.wait().expect("wait").code();
+            assert_eq!(code, Some(7), "terminate must end the member");
         }
     }
 }

@@ -1,5 +1,56 @@
 # Changelog
 
+## [Unreleased] - the stop holds after it is raised
+
+### Security
+
+A review and audit of the 0.24.1 emergency-stop fix found ways an action
+could still land, or a stop could go unseen, after the stop was raised:
+- **A program started by `ghost_shell` kept running.** The stop killed the
+  shell but not what the command had started (a script driving the desktop
+  would carry on). Every shell now runs in a job that the stop ends whole, in
+  every Ghost process, and a shell ended that way reports `Stopped` instead of
+  `ok: true` with exit code 57005. The job does not end its programs when the
+  server exits, so an editor or terminal a command opened survives a restart;
+  start apps that must outlive a stop with `ghost_window op=launch`. The
+  other side of that: after a server restarts, a stop no longer reaches the
+  programs its predecessor's shells started. Windows only; on Linux a stop
+  still ends the shell but not its children.
+- **`ghost verify` no longer raises and lifts the machine-wide stop.** Its
+  stop check used the real emergency stop, which halted every other Ghost
+  (and now would end their shells' programs) and then lifted any stop the
+  human had raised. It uses `ghost_stop`/`ghost_reset` with the new
+  `scope: "process"` (this server only), and does not run the check at all
+  while a stop is in force.
+- **A Ghost that cannot open the shared stop event no longer runs blind.**
+  The event is now created with a DACL that grants the current user,
+  INTERACTIVE and Administrators, so an elevated and a non-elevated Ghost in
+  the same session can always open each other's event (a Ghost of an older
+  version still running elevated can hold one they cannot). A
+  process that still cannot open it fails closed: it refuses every action
+  and says why and how to fix it, instead of silently missing every stop
+  raised elsewhere.
+- **`ghost_http_get` accepted every IPv6 literal** (`[::1]`, `[::ffff:127.0.0.1]`)
+  and `localhost.`/`*.localhost`, so a read could reach a local service such
+  as a browser's DevTools endpoint. All are refused now.
+- **`ghost_tab_eval` and browser typing/hovering are checked again at the
+  moment they act**, not only when the request arrived (a selector wait can
+  last 10 s).
+- **The UIA focus and scroll-into-view inside `ghost_act`** are refused while
+  stopped.
+- **Refusals no longer tell an agent to call `ghost_reset`.** A stop the
+  human raised is theirs to lift; `ghost_reset`'s description says the same.
+
+### Fixed
+
+- A stop that lands mid-paste no longer leaves the automation's text on the
+  human's clipboard: putting their clipboard back is hand-back, like returning
+  the foreground, and is not refused.
+- Releasing a held key (`ghost_key_up`) stays allowed while stopped; the stop
+  itself releases only the modifiers.
+- The stop watcher in other Ghost processes releases held modifiers again (a
+  0.24.1 change had made that branch unreachable).
+
 ## [0.24.1] - emergency stop gates every action path
 
 ### Security

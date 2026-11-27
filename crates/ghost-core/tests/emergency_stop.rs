@@ -102,6 +102,27 @@ fn window_process_and_clipboard_primitives_refuse_while_stopped() {
     assert!(!is_stopped_err(ghost_core::process::launch("ghost-emergency-stop-test-no-such-program.exe")));
 }
 
+/// Giving an element focus or scrolling it into view changes the desktop, so
+/// both refuse while stopped (they run mid-action, after the entry check). On
+/// a hidden desktop: nothing here can touch the human's screen.
+#[test]
+fn element_focus_and_scroll_into_view_refuse_while_stopped() {
+    let d = DesktopSession::create("ghost-stop-test-focus").expect("hidden desktop");
+    let _s = stopped();
+    let r = d
+        .with_uia(|tree| {
+            tree.element_from_point(1, 1).map(|el| el.map(|el| (el.set_focus(), el.scroll_into_view())))
+        })
+        .expect("worker ran");
+    match r {
+        Ok(Some((focus, scroll))) => {
+            assert!(is_stopped_err(focus), "set_focus ran while stopped");
+            assert!(is_stopped_err(scroll), "scroll_into_view ran while stopped");
+        }
+        other => eprintln!("SKIP: no element on the hidden desktop ({other:?})"),
+    }
+}
+
 #[test]
 fn the_hidden_desktop_worker_refuses_actions_but_still_reads() {
     let d = DesktopSession::create("ghost-stop-test-worker").expect("hidden desktop");

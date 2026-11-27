@@ -46,7 +46,30 @@ pub fn get_clipboard() -> Result<String, CoreError> {
 
 /// Write text to the clipboard, replacing any existing content.
 pub fn set_clipboard(text: &str) -> Result<(), CoreError> {
-    crate::stop::ensure_not_stopped()?;
+    set_with(text, crate::stop::is_active(), write_clipboard)
+}
+
+/// Put back the human's clipboard content saved before a paste. Not refused
+/// while stopped: this is hand-back, like returning the foreground, and a stop
+/// that lands mid-paste must not leave the automation's text on their clipboard.
+pub fn restore_clipboard(saved: &str) -> Result<(), CoreError> {
+    restore_with(saved, write_clipboard)
+}
+
+/// The stop decision for a write, apart from the OS call so it is testable
+/// without touching the human's clipboard or the process stop flag.
+fn set_with(text: &str, stopped: bool, write: impl FnOnce(&str) -> Result<(), CoreError>) -> Result<(), CoreError> {
+    if stopped {
+        return Err(CoreError::Stopped);
+    }
+    write(text)
+}
+
+fn restore_with(saved: &str, write: impl FnOnce(&str) -> Result<(), CoreError>) -> Result<(), CoreError> {
+    write(saved)
+}
+
+fn write_clipboard(text: &str) -> Result<(), CoreError> {
     let wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0u16)).collect();
     let byte_len = wide.len() * 2;
     unsafe {
@@ -80,6 +103,42 @@ pub fn set_clipboard(text: &str) -> Result<(), CoreError> {
 
 #[cfg(test)]
 mod tests {
+    use super::{restore_with, set_with};
+    use crate::error::CoreError;
+    use std::cell::RefCell;
+
+    /// A stop that lands mid-paste must still let the human's clipboard be put
+    /// back (hand-back), while a new automation write is refused. Fake writer:
+    /// the real clipboard is never touched.
+    #[test]
+    fn a_stop_refuses_a_write_but_not_the_restore() {
+        let written = RefCell::new(Vec::<String>::new());
+        let fake = |t: &str| {
+            written.borrow_mut().push(t.to_string());
+            Ok(())
+        };
+        assert!(matches!(set_with("automation text", true, fake), Err(CoreError::Stopped)));
+        assert!(restore_with("the human's text", fake).is_ok());
+        assert!(set_with("after reset", false, fake).is_ok());
+        assert_eq!(*written.borrow(), ["the human's text", "after reset"]);
+    }
+
+    /// The public functions route through the tested helpers.
+    #[test]
+    fn the_public_functions_use_the_tested_helpers() {
+        let src = include_str!("clipboard.rs");
+        // Only the function bodies, not this test's own text.
+        let body = |sig: &str| {
+            let start = src.find(sig).unwrap_or_else(|| panic!("{sig} not found"));
+            let rest = &src[start..];
+            rest[..rest.find("\n}").unwrap()].to_string()
+        };
+        let set = body("pub fn set_clipboard(");
+        let restore = body("pub fn restore_clipboard(");
+        assert!(set.contains("set_with(") && set.contains("is_active()"), "{set}");
+        assert!(restore.contains("restore_with(") && !restore.contains("set_with(") && !restore.contains("stop"), "{restore}");
+    }
+
     #[test]
     fn utf16_encoding_includes_null_terminator() {
         let text = "hello";

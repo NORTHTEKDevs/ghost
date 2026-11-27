@@ -19,7 +19,10 @@ use crate::engine::{
         double_click as core_double_click, drag as core_drag, scroll as core_scroll,
     },
     process::launch as proc_launch,
-    system::{get_clipboard as core_get_clipboard, set_clipboard as core_set_clipboard},
+    system::{
+        get_clipboard as core_get_clipboard, restore_clipboard as core_restore_clipboard,
+        set_clipboard as core_set_clipboard,
+    },
     uia::{
         init_com, ComGuard, EventBus,
         tree::{UiaTree, WindowInfo, WindowState, list_windows as core_list_windows,
@@ -1560,9 +1563,9 @@ impl GhostSession {
         core_key_down(vk).map_err(GhostError::Core)
     }
 
-    /// Release a key held by key_down.
+    /// Release a key held by key_down. Allowed while stopped: a stop releases
+    /// only the modifiers, and a key left down is worse than one released.
     pub async fn key_up(&self, key: &str) -> Result<()> {
-        if is_stopped() { return Err(GhostError::Stopped); }
         let vk = name_to_vk(key).ok_or(GhostError::Core(
             crate::engine::error::CoreError::Win32 { code: 0, context: "unknown key name" }
         ))?;
@@ -1625,8 +1628,9 @@ impl GhostSession {
         let paste_result = self.hotkey(&["Ctrl"], "v").await;
         // Let the paste consume the clipboard before we overwrite it back.
         tokio::time::sleep(Duration::from_millis(40)).await;
+        // Hand-back: the restore is not refused by a stop that landed mid-paste.
         if let Some(prev) = saved {
-            let _ = core_set_clipboard(&prev);
+            let _ = core_restore_clipboard(&prev);
         }
         paste_result
     }

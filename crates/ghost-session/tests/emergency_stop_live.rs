@@ -257,6 +257,23 @@ async fn every_action_path_refuses_while_stopped_and_works_after_reset() {
                 state_unchanged: after_stopped == before,
                 works_after_reset: again.is_ok() && after_reset != after_stopped,
             });
+
+            // ghost_tab_eval: an agent's script can click, type or navigate, so
+            // it is refused at the moment it would run, not only at MCP entry.
+            let before = title_now().await;
+            stop();
+            let r = tab.run_script("document.title = 'script ran'").await;
+            resume();
+            let after_stopped = title_now().await;
+            let again = tab.run_script("document.title = 'script ran'").await;
+            let after_reset = title_now().await;
+            rows.push(Row {
+                path: "CDP tab script",
+                refused_while_stopped: r.as_ref().err().is_some_and(|e| is_stop_error(&e.to_string())),
+                error: r.err().map(|e| e.to_string()).unwrap_or_default(),
+                state_unchanged: after_stopped == before,
+                works_after_reset: again.is_ok() && after_reset == "script ran",
+            });
         }
     }
 
