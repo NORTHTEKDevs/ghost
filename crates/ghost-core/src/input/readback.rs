@@ -32,9 +32,205 @@ pub fn typed_ok(before: &str, after: &str, want: &str, replace: bool) -> Option<
     Some(inserted(&b, &a) || over_selection || (tail_ok && inserted(b.trim_end(), a.trim_end())))
 }
 
+/// What one typing dispatch did to the field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Typed {
+    /// The field holds exactly what `typed_ok` expects.
+    Landed,
+    /// The field changed and holds the typed text, compared case- and
+    /// whitespace-insensitively, but not verbatim: autocomplete ("goo" ->
+    /// "google.com"), currency formatting ("12" -> "$12.00"), trimming,
+    /// upper-casing. The text landed and the app reformatted it.
+    Reformatted,
+    /// The field changed but does not hold the typed text (a partial landing,
+    /// an input mask that rejected it). Something was typed; it is not verified.
+    Changed,
+    /// The field reads exactly as before: nothing landed.
+    Unchanged,
+}
+
+impl Typed {
+    /// Whether the dispatch counts as verified. `Reformatted` does: the text
+    /// is there, and the caller says the field reformatted it.
+    pub fn verified(self) -> bool {
+        matches!(self, Typed::Landed | Typed::Reformatted)
+    }
+
+    /// Whether another typing method may run after this one. Only when the
+    /// field is unchanged: dispatching again into a field that visibly changed
+    /// types the text twice ("$1212").
+    pub fn may_try_next(self) -> bool {
+        self == Typed::Unchanged
+    }
+}
+
+/// Classify a typing read-back (see `typed_ok` for `replace` and the folding).
+/// `None` when `want` is empty. `Reformatted` needs the typed text present in
+/// `after` case- and whitespace-insensitively; for an insert (`!replace`) it
+/// must also occur more often than in `before`, so text already there does not
+/// count. A whitespace-only `want` is never `Reformatted`.
+pub fn judge_typed(before: &str, after: &str, want: &str, replace: bool) -> Option<Typed> {
+    if typed_ok(before, after, want, replace)? {
+        return Some(Typed::Landed);
+    }
+    let fold = |s: &str| s.replace("\r\n", "\n");
+    if fold(after) == fold(before) {
+        return Some(Typed::Unchanged);
+    }
+    let norm = |s: &str| s.chars().filter(|c| !c.is_whitespace()).flat_map(char::to_lowercase).collect::<String>();
+    let (b, a, w) = (norm(before), norm(after), norm(want));
+    let holds = !w.is_empty() && a.contains(&w) && (replace || a.matches(&w).count() > b.matches(&w).count());
+    Some(if holds { Typed::Reformatted } else { Typed::Changed })
+}
+
+/// One typing method in a `type_ladder`: given the field's value before it,
+/// dispatch and return the settled read-back and whether it replaces the whole
+/// value, or `None` when it could not dispatch.
+pub type Rung<'a, E> = dyn FnMut(&str) -> Result<Option<(String, bool)>, E> + 'a;
+
+/// Where a typing ladder stopped.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LadderEnd {
+    /// Index of the last rung that dispatched; `None` when none did.
+    pub rung: Option<usize>,
+    /// Its verdict; `None` when `want` is empty (nothing was dispatched).
+    pub outcome: Option<Typed>,
+    /// The field as that rung last read it.
+    pub got: String,
+}
+
+/// Try typing methods in order. Each rung gets the field's value before it and
+/// returns `None` when it could not dispatch, or the settled read-back and
+/// whether it replaces the whole value. The ladder stops at the first rung that
+/// changed the field (`Typed::may_try_next`): a second method after a visible
+/// change would type the text twice. Ends `Unchanged` when no rung changed it.
+pub fn type_ladder<E>(
+    want: &str,
+    mut read: impl FnMut() -> String,
+    rungs: &mut [&mut Rung<'_, E>],
+) -> Result<LadderEnd, E> {
+    let mut end = LadderEnd { rung: None, outcome: None, got: String::new() };
+    if want.is_empty() {
+        return Ok(end);
+    }
+    end.outcome = Some(Typed::Unchanged);
+    for (i, rung) in rungs.iter_mut().enumerate() {
+        let before = read();
+        end.got = before.clone();
+        let Some((after, replace)) = rung(&before)? else { continue };
+        let outcome = judge_typed(&before, &after, want, replace);
+        end = LadderEnd { rung: Some(i), outcome, got: after };
+        if !outcome.is_some_and(Typed::may_try_next) {
+            break;
+        }
+    }
+    Ok(end)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::typed_ok;
+    use super::{judge_typed, type_ladder, typed_ok, Typed};
+    use std::cell::{Cell, RefCell};
+
+    #[test]
+    fn a_reformatting_field_reads_as_reformatted_not_failed() {
+        // Autocomplete, currency formatting, trimming, upper-casing.
+        assert_eq!(judge_typed("", "google.com", "goo", false), Some(Typed::Reformatted));
+        assert_eq!(judge_typed("", "$12.00", "12", true), Some(Typed::Reformatted));
+        assert_eq!(judge_typed("", "abc", "abc ", true), Some(Typed::Reformatted));
+        assert_eq!(judge_typed("", "HELLO WORLD", "hello world", false), Some(Typed::Reformatted));
+        assert_eq!(judge_typed("old", "Hello", "hello", true), Some(Typed::Reformatted));
+    }
+
+    #[test]
+    fn the_verdicts_are_distinct() {
+        assert_eq!(judge_typed("", "", "", false), None);
+        assert_eq!(judge_typed("", "x", "x", false), Some(Typed::Landed));
+        assert_eq!(judge_typed("ab", "ab", "X", false), Some(Typed::Unchanged));
+        // \r\n folding alone is not a change.
+        assert_eq!(judge_typed("a\r\nb", "a\nb", "zz", true), Some(Typed::Unchanged));
+        // Changed, but the text is not in it: a partial landing, or a mask that ate it.
+        assert_eq!(judge_typed("", "he", "hello", false), Some(Typed::Changed));
+        assert_eq!(judge_typed("old", "", "new", true), Some(Typed::Changed));
+        // Append: text that was already there does not count as typed.
+        assert_eq!(judge_typed("abc", "abcd", "b", false), Some(Typed::Changed));
+        // Only an unchanged field lets another method run.
+        assert!(Typed::Unchanged.may_try_next());
+        for t in [Typed::Landed, Typed::Reformatted, Typed::Changed] {
+            assert!(!t.may_try_next(), "{t:?}");
+        }
+        assert!(Typed::Landed.verified() && Typed::Reformatted.verified());
+        assert!(!Typed::Changed.verified() && !Typed::Unchanged.verified());
+    }
+
+    /// A stand-in edit control: `settext` and `keys` both dispatch, and the
+    /// control applies `format` to whatever it is given.
+    struct FakeEdit {
+        value: RefCell<String>,
+        dispatches: Cell<usize>,
+        format: fn(&str, &str) -> String,
+    }
+
+    impl FakeEdit {
+        fn new(format: fn(&str, &str) -> String) -> Self {
+            Self { value: RefCell::new(String::new()), dispatches: Cell::new(0), format }
+        }
+        fn run(&self, want: &str) -> (Option<usize>, Option<Typed>) {
+            let read = || self.value.borrow().clone();
+            let mut settext = |_before: &str| -> Result<Option<(String, bool)>, ()> {
+                self.dispatches.set(self.dispatches.get() + 1);
+                let v = (self.format)("", want);
+                *self.value.borrow_mut() = v;
+                Ok(Some((read(), true)))
+            };
+            let mut keys = |before: &str| -> Result<Option<(String, bool)>, ()> {
+                self.dispatches.set(self.dispatches.get() + 1);
+                let v = (self.format)(before, want);
+                *self.value.borrow_mut() = v;
+                Ok(Some((read(), false)))
+            };
+            let end = type_ladder(want, read, &mut [&mut settext, &mut keys]).unwrap();
+            (end.rung, end.outcome)
+        }
+    }
+
+    #[test]
+    fn a_reformatting_control_gets_exactly_one_dispatch() {
+        let upper = FakeEdit::new(|b, w| format!("{b}{w}").to_uppercase());
+        assert_eq!(upper.run("hello"), (Some(0), Some(Typed::Reformatted)));
+        assert_eq!(upper.dispatches.get(), 1);
+        assert_eq!(*upper.value.borrow(), "HELLO");
+
+        let money = FakeEdit::new(|b, w| format!("${b}{w}.00"));
+        assert_eq!(money.run("12"), (Some(0), Some(Typed::Reformatted)));
+        assert_eq!(money.dispatches.get(), 1, "a second dispatch types $1212");
+        assert_eq!(*money.value.borrow(), "$12.00");
+
+        // A control that mangles the text is not retyped either.
+        let mask = FakeEdit::new(|_, _| "***".into());
+        assert_eq!(mask.run("12"), (Some(0), Some(Typed::Changed)));
+        assert_eq!(mask.dispatches.get(), 1);
+    }
+
+    #[test]
+    fn only_an_unchanged_field_falls_through() {
+        let deaf = FakeEdit::new(|b, _| b.to_string());
+        assert_eq!(deaf.run("hi"), (Some(1), Some(Typed::Unchanged)));
+        assert_eq!(deaf.dispatches.get(), 2);
+
+        let exact = FakeEdit::new(|b, w| format!("{b}{w}"));
+        assert_eq!(exact.run("hi"), (Some(0), Some(Typed::Landed)));
+        assert_eq!(exact.dispatches.get(), 1);
+
+        // A rung that could not dispatch (None) is skipped, not judged.
+        let mut skipped = |_: &str| -> Result<Option<(String, bool)>, ()> { Ok(None) };
+        let mut none = |_: &str| -> Result<Option<(String, bool)>, ()> { Ok(None) };
+        let end = type_ladder("x", String::new, &mut [&mut skipped, &mut none]).unwrap();
+        assert_eq!((end.rung, end.outcome), (None, Some(Typed::Unchanged)));
+        // Nothing to type: no rung runs.
+        let mut boom = |_: &str| -> Result<Option<(String, bool)>, ()> { panic!("dispatched empty text") };
+        assert_eq!(type_ladder("", String::new, &mut [&mut boom]).unwrap().outcome, None);
+    }
 
     #[test]
     fn pre_existing_text_is_not_a_typed_append() {

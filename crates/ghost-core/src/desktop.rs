@@ -302,76 +302,77 @@ impl DesktopSession {
                 None => return type_text_via_uia(hwnd, &t),
             };
             let read = || crate::input::BackgroundClicker::read_text(target).unwrap_or_default();
-            let before = read();
             if t.is_empty() {
                 return Ok(());
             }
+            // Poll a read-back until it shows the text, or has held still for
+            // `still` consecutive reads, or `ms` passes. WM_CHAR is posted
+            // (asynchronous) while WM_GETTEXT is sent, so one read is not enough.
+            let settle = |before: &str, replace: bool, ms: u64, still: u32| {
+                let deadline = std::time::Instant::now() + std::time::Duration::from_millis(ms);
+                let mut last = read();
+                let mut stable = 0;
+                while std::time::Instant::now() < deadline {
+                    if crate::input::typed_ok(before, &last, &t, replace) == Some(true) {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                    let now = read();
+                    if now == last {
+                        stable += 1;
+                        if stable >= still {
+                            break;
+                        }
+                    } else {
+                        stable = 0;
+                        last = now;
+                    }
+                }
+                last
+            };
             // WM_SETTEXT first, but ONLY on a real edit control: it is atomic and
             // cannot land half the string (measured: a classic EDIT on a
             // non-displayed desktop accepted the first WM_CHAR and dropped the
             // rest). On any other window WM_SETTEXT sets the window's CAPTION,
             // and reading that back looks exactly like a successful type - the
             // blind success this crate exists to prevent.
-            if crate::input::is_text_control(target)
-                && crate::input::BackgroundClicker::set_text(target, &t).is_ok()
-            {
-                let deadline = std::time::Instant::now() + std::time::Duration::from_millis(400);
-                while std::time::Instant::now() < deadline {
-                    if crate::input::typed_ok(&before, &read(), &t, true) == Some(true) {
-                        return Ok(());
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(20));
+            let mut settext = |before: &str| -> Result<Option<(String, bool)>, CoreError> {
+                if !crate::input::is_text_control(target)
+                    || crate::input::BackgroundClicker::set_text(target, &t).is_err()
+                {
+                    return Ok(None);
                 }
-            }
-            // Re-read: a WM_SETTEXT that did not verify may still have changed it.
-            let before = read();
-            let landed = |now: &str| crate::input::typed_ok(&before, now, &t, false) == Some(true);
-            for ch in t.chars() {
-                crate::input::BackgroundClicker::send_char(target, ch)?;
-            }
-            // Let the posted characters drain: stop as soon as the expected text is
-            // present, or when the value has held still across two reads.
-            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(2000);
-            let mut last = read();
-            let mut stable = 0;
-            while std::time::Instant::now() < deadline {
-                if landed(&last) {
-                    return Ok(());
+                // A sent WM_SETTEXT has applied by the first read; poll the
+                // ~400ms the old check allowed for a slow reformat.
+                Ok(Some((settle(before, true, 400, 20), true)))
+            };
+            let mut posted = |before: &str| -> Result<Option<(String, bool)>, CoreError> {
+                for ch in t.chars() {
+                    crate::input::BackgroundClicker::send_char(target, ch)?;
                 }
-                std::thread::sleep(std::time::Duration::from_millis(25));
-                let now = read();
-                if now == last {
-                    stable += 1;
-                    if stable >= 3 {
-                        break;
-                    }
-                } else {
-                    stable = 0;
-                    last = now;
+                Ok(Some((settle(before, false, 2000, 3), false)))
+            };
+            // The ladder stops at the first method that changed the field: a
+            // field that reformats input (autocomplete, currency) once read as a
+            // failure here, and the posted characters then typed it twice.
+            let end = crate::input::readback::type_ladder(&t, read, &mut [&mut settext, &mut posted])?;
+            match end.outcome {
+                None | Some(crate::input::readback::Typed::Landed) => Ok(()),
+                Some(crate::input::readback::Typed::Reformatted) => {
+                    tracing::debug!("type_text: the field reformatted {t:?} to {:?}", end.got);
+                    Ok(())
                 }
+                // Something landed but not the text. Retyping would double it.
+                Some(crate::input::readback::Typed::Changed) => Err(CoreError::TypePartial { wanted: t, got: end.got }),
+                // Nothing landed. Some apps expose a message-postable-looking
+                // control whose thread never pumps on a non-displayed desktop:
+                // the UIA ValuePattern bypasses the message queue.
+                Some(crate::input::readback::Typed::Unchanged) => match type_text_via_uia(hwnd, &t) {
+                    Ok(()) => Ok(()),
+                    Err(e @ CoreError::TypePartial { .. }) => Err(e),
+                    Err(_) => Err(CoreError::TypeNotVerified { text: t }),
+                },
             }
-            if last == before {
-                // The control accepted no posted characters at all. Some apps
-                // expose a message-postable-looking control whose thread never
-                // pumps them on a non-displayed desktop - before erroring, try
-                // the UIA ValuePattern, which bypasses the message queue.
-                if type_text_via_uia(hwnd, &t).is_ok() {
-                    return Ok(());
-                }
-                return Err(CoreError::TypeNotVerified { text: t });
-            }
-            if !landed(&last) {
-                // Partial landing: same rescue, so a target that dropped the
-                // tail gets a second chance rather than a false-negative.
-                if type_text_via_uia(hwnd, &t).is_ok() {
-                    return Ok(());
-                }
-                return Err(CoreError::TypePartial {
-                    wanted: t,
-                    got: last,
-                });
-            }
-            Ok::<(), CoreError>(())
         })?
     }
 
@@ -498,12 +499,19 @@ fn type_text_via_uia(hwnd: isize, text: &str) -> Result<(), CoreError> {
             // SetValue replaces the value; judge it against the value before
             // (typed_ok folds the \r\n WinUI stores for \n). The element name
             // is never a read-back.
+            // Only an unchanged field moves on to the next candidate: one that
+            // changed took this SetValue, and a second would type it twice.
             let before = el.value_text().unwrap_or_default();
-            if crate::uia::patterns::set_value_ex(&el, text, false).is_ok()
-                && crate::input::typed_ok(&before, &el.value_text().unwrap_or_default(), text, true)
-                    == Some(true)
-            {
-                return Ok(());
+            if crate::uia::patterns::set_value_ex(&el, text, false).is_err() {
+                continue;
+            }
+            let after = el.value_text().unwrap_or_default();
+            match crate::input::readback::judge_typed(&before, &after, text, true) {
+                Some(t) if t.verified() => return Ok(()),
+                Some(crate::input::readback::Typed::Changed) => {
+                    return Err(CoreError::TypePartial { wanted: text.to_string(), got: after })
+                }
+                _ => {}
             }
         }
     }

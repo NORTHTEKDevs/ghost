@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
+use crate::engine::input::readback::Typed;
 use tokio::time::timeout;
 use async_trait::async_trait;
 use ghost_cache::uia_mirror::{UiaCache, SnapshotDelta, Snapshot, CacheStats};
@@ -376,23 +377,51 @@ fn settext_ok(ctrl: isize, control_type: u32) -> bool {
 /// Read-back is the only honest verification of a type. Providers update their
 /// accessible value asynchronously (Chromium's AX tree in particular), so poll
 /// briefly instead of judging one stale read. Judged against the value read
-/// before the dispatch (see `typed_ok`); `None` when there is nothing to judge.
+/// before the dispatch (see `judge_typed`); `None` when there is nothing to
+/// judge. Returns at once on `Landed`, and on any other changed value once it
+/// has held still for three reads (a reformatting field never reads `Landed`).
 async fn read_back_matches(
     el: crate::GhostElement,
     before: &str,
     want: &str,
     replace: bool,
-) -> (crate::GhostElement, Option<bool>) {
+) -> (crate::GhostElement, Option<Typed>) {
     let deadline = std::time::Instant::now() + Duration::from_millis(600);
+    let mut last: Option<String> = None;
+    let mut still = 0;
     loop {
-        let verdict = crate::engine::input::typed_ok(before, &el.typed_value(), want, replace);
-        if verdict != Some(false) {
+        let now = el.typed_value();
+        let verdict = crate::engine::input::readback::judge_typed(before, &now, want, replace);
+        match verdict {
+            None | Some(Typed::Landed) => return (el, verdict),
+            Some(Typed::Unchanged) => still = 0,
+            Some(_) if last.as_deref() == Some(now.as_str()) => still += 1,
+            Some(_) => still = 0,
+        }
+        if still >= 3 || std::time::Instant::now() >= deadline {
             return (el, verdict);
         }
-        if std::time::Instant::now() >= deadline {
-            return (el, verdict);
-        }
+        last = Some(now);
         tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
+/// The background type ladder's rule: posted keystrokes follow the first rung
+/// only when it dispatched nothing (`None`) or left the field unchanged. After
+/// a visible change a second dispatch would type the text twice.
+fn posted_keys_may_follow(first: Option<Typed>) -> bool {
+    first.is_none_or(Typed::may_try_next)
+}
+
+/// How a typing read-back maps to `(verified, note)`. `Reformatted` is
+/// verified: the text is in the field, in the app's own format.
+fn typed_verdict(outcome: Option<Typed>) -> (Option<bool>, Option<&'static str>) {
+    match outcome {
+        None => (None, Some("the text is empty, so there is nothing to read back - confirm the field by other means")),
+        Some(Typed::Landed) => (Some(true), None),
+        Some(Typed::Reformatted) => (Some(true), Some("the field reformatted the text (autocomplete, formatting or trimming); it holds the typed text but not verbatim - not retyped")),
+        Some(Typed::Changed) => (Some(false), Some("the field changed but does not read back the typed text (partial landing or an input mask) - not retyped, to avoid doubling it; read the field to confirm")),
+        Some(Typed::Unchanged) => (Some(false), Some("the field did not change - the text did not land")),
     }
 }
 
@@ -2762,9 +2791,13 @@ impl GhostSession {
                     }
                     focus_guard = self.foreground_guard_end(hwnd_raw, win.pid, fg_before).await;
                 }
-                let (el, mut ok) =
-                    if rung.is_empty() { (el, Some(false)) } else { read_back_matches(el, &before, t, true).await };
-                if ok == Some(false) && !via_message {
+                // `None` here: the first rung dispatched nothing.
+                let (el, mut outcome) =
+                    if rung.is_empty() { (el, None) } else { read_back_matches(el, &before, t, true).await };
+                // A field that reformats what it is given ("12" -> "$12.00")
+                // never reads back verbatim; posting the keys after it typed
+                // the text twice. Only an unchanged field gets the next rung.
+                if !via_message && posted_keys_may_follow(outcome) {
                     // Second rung: give the field focus with a posted click at its
                     // centre, then post the characters to whatever the window's
                     // thread now reports as focused. Verified by the same read-back;
@@ -2781,15 +2814,17 @@ impl GhostSession {
                     if focus_guard.is_none() {
                         focus_guard = self.foreground_guard_end_within(hwnd_raw, win.pid, fg_before, 0, 60).await;
                     }
-                    let (_el, ok2) = read_back_matches(el, &before, t, false).await;
-                    ok = ok2;
-                    if ok != Some(true) {
+                    let (_el, second) = read_back_matches(el, &before, t, false).await;
+                    outcome = second;
+                    if outcome == Some(Typed::Unchanged) {
                         note = Some("neither the UIA ValuePattern nor posted keystrokes read back the text; the control may be framework-controlled - confirm by other means or use the foreground policy");
                     }
                 }
-                if ok.is_none() {
-                    note = Some("the text is empty, so there is nothing to read back - confirm the field by other means");
-                } else if note.is_none() && rung == "value_pattern" {
+                let (ok, verdict_note) = typed_verdict(outcome);
+                if note.is_none() {
+                    note = verdict_note;
+                }
+                if note.is_none() && rung == "value_pattern" {
                     note = Some("typed via UIA ValuePattern (windowless control) - the window may have activated; check focus_preserved");
                 } else if note.is_none() && rung == "posted_keys" {
                     note = Some("ValuePattern did not take; typed via a posted click + posted keystrokes and the field read the text back");
@@ -3606,5 +3641,30 @@ mod clipboard_gate_tests {
         let gate = body.find("ensure_not_stopped()?").expect("no stop gate in set_clipboard");
         let write = body.find("core_set_clipboard(").expect("no write in set_clipboard");
         assert!(gate < write, "the stop gate must come before the write:\n{body}");
+    }
+}
+
+#[cfg(test)]
+mod type_ladder_tests {
+    use super::posted_keys_may_follow;
+    use crate::engine::input::readback::Typed;
+
+    #[test]
+    fn posted_keys_follow_only_an_unchanged_field() {
+        assert!(posted_keys_may_follow(None));
+        assert!(posted_keys_may_follow(Some(Typed::Unchanged)));
+        // A field that reformatted ("12" -> "$12.00") or took part of the
+        // text must not get the characters again ("$1212").
+        assert!(!posted_keys_may_follow(Some(Typed::Reformatted)));
+        assert!(!posted_keys_may_follow(Some(Typed::Changed)));
+        assert!(!posted_keys_may_follow(Some(Typed::Landed)));
+    }
+
+    #[test]
+    fn the_background_type_rung_is_gated_by_the_ladder_rule() {
+        let src = include_str!("session.rs");
+        let gate = src.find("if !via_message && posted_keys_may_follow(").expect("posted-keys rung is not gated");
+        let send = src[gate..].find("send_char(").expect("no posted keys after the gate");
+        assert!(send < 2000, "the gate must guard the posted-keys dispatch");
     }
 }

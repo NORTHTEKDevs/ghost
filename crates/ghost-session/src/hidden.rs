@@ -598,18 +598,24 @@ impl GhostSession {
                     // SetValue set the whole value.
                     let replace = !composited;
                     let deadline = Instant::now() + Duration::from_millis(600);
-                    let ok = loop {
+                    use ghost_core::input::readback::{judge_typed, Typed};
+                    let outcome = loop {
                         let got = crate::element::typed_value(&el);
-                        let verdict = ghost_core::input::typed_ok(&before, &got, &value, replace);
-                        if verdict != Some(false) || Instant::now() >= deadline {
+                        let verdict = judge_typed(&before, &got, &value, replace);
+                        if matches!(verdict, None | Some(Typed::Landed)) || Instant::now() >= deadline {
                             break verdict;
                         }
                         std::thread::sleep(Duration::from_millis(25));
                     };
-                    let note = match ok {
-                        Some(true) => None,
+                    // A field that reformats input ("12" -> "$12.00") holds the
+                    // text without reading it back verbatim: verified, said so.
+                    let ok = outcome.map(Typed::verified);
+                    let note = match outcome {
+                        Some(Typed::Landed) => None,
+                        Some(Typed::Reformatted) => Some("the field reformatted the text (autocomplete, formatting or trimming); it holds the typed text but not verbatim"),
+                        Some(Typed::Changed) => Some("the field changed but does not read back the typed text (partial landing or an input mask) - read the field to confirm before retyping"),
                         None => Some("the text is empty, so there is nothing to read back - confirm the field by other means"),
-                        Some(false) => Some("the control did not read back the text within 600ms - it may not accept a set value; try ghost_key per character, or confirm by other means"),
+                        Some(Typed::Unchanged) => Some("the control did not read back the text within 600ms - it may not accept a set value; try ghost_key per character, or confirm by other means"),
                     };
                     (ok, note)
                 }
