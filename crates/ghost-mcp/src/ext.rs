@@ -39,6 +39,25 @@ fn parse_port(p: &Value) -> Result<u16, String> {
         .ok_or_else(|| format!("port out of range: {n} (1-65535)"))
 }
 
+/// How long ghost_tab_open waits for `url` to load: None = answer at once
+/// (`wait:false`, or about:blank, which has nothing to load).
+fn tab_open_wait(p: &Value, url: &str) -> Result<Option<u64>, String> {
+    const MAX_MS: u64 = 600_000;
+    let wait = match &p["wait"] {
+        Value::Null => true,
+        Value::Bool(b) => *b,
+        v => return Err(format!("invalid params: ghost_tab_open wait must be true or false (got {v})")),
+    };
+    let timeout_ms = match &p["timeout_ms"] {
+        Value::Null => 30_000,
+        v => v.as_u64().filter(|ms| (1..=MAX_MS).contains(ms)).ok_or_else(|| {
+            format!("invalid params: ghost_tab_open timeout_ms must be an integer from 1 to {MAX_MS} (got {v})")
+        })?,
+    };
+    let blank = url.trim().to_ascii_lowercase().starts_with("about:blank");
+    Ok((wait && !blank).then_some(timeout_ms))
+}
+
 pub async fn dispatch(
     session: &GhostSession,
     method: &str,
@@ -111,8 +130,20 @@ pub async fn dispatch(
             let (browser, _) = browser_ref(p);
             let url = p["url"].as_str().unwrap_or("about:blank");
             ghost_browser::policy::check_nav_url(url)?;
-            let tab = session.tab_open(&browser, url).await.map_err(|e| e.to_string())?;
-            Ok(json!({ "tab": tab, "background": true }))
+            let Some(timeout_ms) = tab_open_wait(p, url)? else {
+                let tab = session.tab_open(&browser, url).await.map_err(|e| e.to_string())?;
+                return Ok(json!({ "tab": tab, "background": true }));
+            };
+            let (tab, note, landed) = session
+                .tab_open_loaded(&browser, url, timeout_ms)
+                .await
+                .map_err(|e| e.to_string())?;
+            // A download or an empty reply is not an error, but no page loaded.
+            let mut out = json!({ "tab": tab, "background": true, "loaded": note.is_none(), "url": landed });
+            if let Some(note) = note {
+                out["note"] = json!(note);
+            }
+            Ok(out)
         }
         "ghost_tab_close" => {
             let (browser, tab) = browser_tab(p)?;
@@ -347,9 +378,11 @@ pub fn schemas() -> Vec<Value> {
           "description": "List Chromium-family browsers installed on this machine (chrome, comet, edge, brave).",
           "inputSchema": { "type": "object", "properties": {}}}),
         json!({ "name": "ghost_tab_open",
-          "description": "Open a new background tab (never brings the tab or window to the front). Returns its id for the other ghost_tab_* tools. url must be http://, https:// or about:blank (default); file:, chrome:, data:, javascript: and the like are refused. http(s) to any host including localhost is allowed.",
+          "description": "Open a new background tab (never brings the tab or window to the front). Returns its id for the other ghost_tab_* tools. With an http(s) url it waits for the page to load, like ghost_tab_navigate, so the next read sees the page (loaded:true and the url it landed on; loaded:false with a note for a download or an empty reply). A page that fails to load or exceeds timeout_ms (the whole navigation) is an error, and the tab it opened is closed. wait=false answers at once, before the page loads. url must be http://, https:// or about:blank (default); file:, chrome:, data:, javascript: and the like are refused. http(s) to any host including localhost is allowed.",
           "inputSchema": { "type": "object", "properties": {
-              "browser": { "type": "string" }, "url": { "type": "string" }
+              "browser": { "type": "string" }, "url": { "type": "string" },
+              "wait": { "type": "boolean", "description": "Wait for the page to load (default true; about:blank never waits)" },
+              "timeout_ms": { "type": "integer", "description": "Load timeout when waiting, default 30000, max 600000" }
           }}}),
         json!({ "name": "ghost_tab_navigate",
           "description": "Navigate a tab and wait for load. Runs in a background tab; the user's view never changes. url must be http://, https:// or about:blank; every other scheme (file:, chrome:, data:, javascript:, ftp: ...) is refused. http(s) to any host including localhost is allowed. Returns an error (naming the net:: errorText) when the page fails to load, e.g. DNS failure or refused connection.",
@@ -612,6 +645,25 @@ mod tests {
             let name = t["name"].as_str().unwrap();
             assert!(owns(name), "'{name}' is advertised but not owned by ext");
         }
+    }
+
+    /// ghost_tab_open waits for the load by default (30 s); `wait:false` keeps
+    /// the old immediate answer; about:blank never waits; bad values are
+    /// invalid params rather than silently defaulted.
+    #[test]
+    fn tab_open_wait_arguments() {
+        let url = "https://example.com/";
+        assert_eq!(tab_open_wait(&json!({}), url), Ok(Some(30_000)));
+        assert_eq!(tab_open_wait(&json!({ "timeout_ms": 5000 }), url), Ok(Some(5000)));
+        assert_eq!(tab_open_wait(&json!({ "wait": false }), url), Ok(None));
+        assert_eq!(tab_open_wait(&json!({}), "about:blank"), Ok(None));
+        assert_eq!(tab_open_wait(&json!({}), "About:Blank#x"), Ok(None));
+        for bad in [json!({ "wait": "no" }), json!({ "timeout_ms": 0 }), json!({ "timeout_ms": -1 }),
+                    json!({ "timeout_ms": 600_001 }), json!({ "timeout_ms": "5000" })] {
+            let e = tab_open_wait(&bad, url).expect_err(&bad.to_string());
+            assert!(e.starts_with("invalid params: ghost_tab_open"), "{e}");
+        }
+        assert_eq!(tab_open_wait(&json!({ "timeout_ms": 600_000 }), url), Ok(Some(600_000)));
     }
 
     /// `port as u16` wrapped 70000 to 4464 and attached to whatever listened there.

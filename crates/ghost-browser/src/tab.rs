@@ -197,6 +197,8 @@ impl Tab {
         let deadline = Instant::now() + Duration::from_millis(timeout_ms);
         let mut poll = POLL_START_MS;
         loop {
+            // A stop ends the wait at once instead of after the full timeout.
+            crate::error::ensure_not_stopped()?;
             if let Ok(v) = self.eval("document.readyState").await {
                 if v.as_str() == Some("complete") {
                     return Ok(());

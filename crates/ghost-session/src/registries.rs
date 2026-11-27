@@ -310,6 +310,45 @@ impl GhostSession {
         Ok(target_id)
     }
 
+    /// Open a background tab at `url` and return once the page has loaded
+    /// (as `ghost_tab_navigate` does): its id, the navigation's note if any
+    /// (a download, an empty 204 reply) and the URL it landed on.
+    ///
+    /// The tab opens at about:blank and is then navigated: a tab created at
+    /// the URL reports `readyState == "complete"` for its initial blank
+    /// document, so polling it would return before the page arrived.
+    /// `timeout_ms` bounds the whole navigation, the wait for the server's
+    /// reply included. When the load fails or times out, the tab is closed
+    /// and the error says whether the close worked.
+    pub async fn tab_open_loaded(
+        &self,
+        browser_id: &str,
+        url: &str,
+        timeout_ms: u64,
+    ) -> Result<(String, Option<&'static str>, String)> {
+        let target_id = self.tab_open(browser_id, "about:blank").await?;
+        let failed = match self.tab(browser_id, &target_id).await {
+            Err(e) => e.to_string(),
+            Ok(tab) => {
+                let limit = std::time::Duration::from_millis(timeout_ms);
+                let load = async {
+                    let note = tab.navigate(url, timeout_ms).await?;
+                    Ok::<_, ghost_browser::BrowserError>((note, tab.url().await.unwrap_or_default()))
+                };
+                match tokio::time::timeout(limit, load).await {
+                    Ok(Ok((note, landed))) => return Ok((target_id, note, landed)),
+                    Ok(Err(e)) => e.to_string(),
+                    Err(_) => format!("the page did not load within {timeout_ms} ms"),
+                }
+            }
+        };
+        let closed = match self.tab_close(browser_id, &target_id).await {
+            Ok(()) => "the tab it opened was closed".to_string(),
+            Err(e) => format!("the tab it opened ({target_id}) could not be closed and may remain: {e}"),
+        };
+        Err(GhostError::Intent(format!("{failed}; {closed}")))
+    }
+
     /// Get a cached tab handle, attaching on first use.
     pub async fn tab(&self, browser_id: &str, target_id: &str) -> Result<Arc<ghost_browser::Tab>> {
         let key = format!("{browser_id}/{target_id}");
