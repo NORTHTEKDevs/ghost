@@ -85,6 +85,15 @@ impl GhostElement {
         self.inner.get_text()
     }
 
+    /// The text a typing read-back may judge: the ValuePattern value, else the
+    /// control's WM_GETTEXT. Never the element name (see `UiaElement::value_text`).
+    pub fn typed_value(&self) -> String {
+        #[cfg(windows)]
+        return typed_value(&self.inner);
+        #[cfg(not(windows))]
+        return self.inner.get_text();
+    }
+
     /// Get the element's current text SELECTION via TextPattern (empty if none /
     /// unsupported). Reads a selection without clobbering the clipboard.
     pub fn get_selection(&self) -> String {
@@ -148,6 +157,21 @@ impl GhostElement {
 /// disabled, so every act path refused an element it could have driven.
 pub(crate) fn refuse_as_disabled(enabled: Option<bool>) -> bool {
     enabled == Some(false)
+}
+
+/// [`GhostElement::typed_value`] for a bare UIA element.
+#[cfg(windows)]
+pub(crate) fn typed_value(el: &crate::engine::uia::element::UiaElement) -> String {
+    if let Some(v) = el.value_text().filter(|v| !v.is_empty()) {
+        return v;
+    }
+    let ctrl = el.native_window_handle();
+    if ctrl != 0 {
+        if let Some(t) = crate::engine::input::BackgroundClicker::read_text(ctrl) {
+            return t;
+        }
+    }
+    el.value_text().unwrap_or_default()
 }
 
 #[cfg(test)]

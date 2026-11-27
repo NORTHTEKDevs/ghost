@@ -120,18 +120,19 @@ impl UiaElement {
 
     /// Get the current text value. Tries ValuePattern first, falls back to element name.
     pub fn get_text(&self) -> String {
+        self.value_text().unwrap_or_else(|| self.name())
+    }
+
+    /// The ValuePattern value only, never the element name. A typing read-back
+    /// must use this: a label's name is not text anybody typed.
+    pub fn value_text(&self) -> Option<String> {
         use windows::Win32::UI::Accessibility::{
             IUIAutomationValuePattern, UIA_ValuePatternId,
         };
         unsafe {
-            if let Ok(pattern) = self.0.GetCurrentPattern(UIA_ValuePatternId) {
-                if let Ok(vp) = pattern.cast::<IUIAutomationValuePattern>() {
-                    if let Ok(val) = vp.CurrentValue() {
-                        return val.to_string();
-                    }
-                }
-            }
-            self.name()
+            let pattern = self.0.GetCurrentPattern(UIA_ValuePatternId).ok()?;
+            let vp = pattern.cast::<IUIAutomationValuePattern>().ok()?;
+            vp.CurrentValue().ok().map(|v| v.to_string())
         }
     }
 }

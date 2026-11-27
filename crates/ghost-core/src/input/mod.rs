@@ -3,7 +3,7 @@ pub mod keyboard;
 pub mod mouse;
 pub mod postmessage;
 
-pub use postmessage::{is_text_control, window_class, BackgroundClicker, EditCommand};
+pub use postmessage::{is_text_control, may_settext, settext_allowed, window_class, BackgroundClicker, EditCommand};
 
 pub use hotkey::{
     human_stop_active, is_stopped, register_emergency_stop, release_all_modifiers, reset_human_stop, reset_stop,

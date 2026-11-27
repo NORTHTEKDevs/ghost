@@ -361,6 +361,18 @@ impl Region {
     }
 }
 
+/// May WM_SETTEXT type into this windowed control? See
+/// `ghost_core::input::settext_allowed`; other platforms have no caption trap.
+fn settext_ok(ctrl: isize, control_type: u32) -> bool {
+    #[cfg(windows)]
+    return crate::engine::input::may_settext(ctrl, control_type);
+    #[cfg(not(windows))]
+    {
+        let _ = (ctrl, control_type);
+        true
+    }
+}
+
 /// Read-back is the only honest verification of a type. Providers update their
 /// accessible value asynchronously (Chromium's AX tree in particular), so poll
 /// briefly instead of judging one stale read. Newlines are folded because some
@@ -369,7 +381,7 @@ async fn read_back_matches(el: crate::GhostElement, want: &str) -> (crate::Ghost
     let fold = |s: &str| s.replace("\r\n", "\n");
     let deadline = std::time::Instant::now() + Duration::from_millis(600);
     loop {
-        let got = el.get_text();
+        let got = el.typed_value();
         if got.trim() == want.trim() || fold(&got).contains(&fold(want)) {
             return (el, true);
         }
@@ -2697,6 +2709,18 @@ impl GhostSession {
                 let via_message = ctrl_hwnd != 0;
                 let mut rung: &str;
                 let mut note: Option<&str> = None;
+                if via_message && !settext_ok(ctrl_hwnd, el.control_type()) {
+                    // WM_SETTEXT on a label or button rewrites its caption, and
+                    // that caption would then read back as the typed text.
+                    return Err(GhostError::ElementNotInteractable {
+                        element: name,
+                        reason: format!(
+                            "'{}' is not a text field ({}); type into an edit control",
+                            el.name(),
+                            crate::engine::uia::element::role_id_to_name(el.control_type())
+                        ),
+                    });
+                }
                 if via_message {
                     // Real Win32 control: WM_SETTEXT. A failure here PROPAGATES -
                     // we do NOT silently fall back to the focus-stealing UIA path.

@@ -572,6 +572,18 @@ impl GhostSession {
                             core(BackgroundClicker::send_char(target, ch))?;
                         }
                     } else if info.ctrl != 0 {
+                        // WM_SETTEXT on a label or button rewrites its caption,
+                        // which would then read back as the typed text.
+                        if !ghost_core::input::may_settext(info.ctrl, info.control_type) {
+                            return Err(GhostError::ElementNotInteractable {
+                                reason: format!(
+                                    "'{}' is not a text field ({}); type into an edit control",
+                                    info.name,
+                                    ghost_core::uia::element::role_id_to_name(info.control_type)
+                                ),
+                                element: info.name,
+                            });
+                        }
                         core(BackgroundClicker::set_text(info.ctrl, &value))?;
                     } else {
                         core(patterns::set_value_ex(&el, &value, false))?;
@@ -584,7 +596,7 @@ impl GhostSession {
                     let deadline = Instant::now() + Duration::from_millis(600);
                     let mut ok = false;
                     loop {
-                        let got = element_value(&el);
+                        let got = crate::element::typed_value(&el);
                         if got.trim() == value.trim() || fold(&got).contains(&fold(&value)) {
                             ok = true;
                             break;

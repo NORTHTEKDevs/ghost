@@ -474,6 +474,21 @@ pub fn is_text_control(hwnd_raw: isize) -> bool {
     BackgroundClicker::is_text_control(hwnd_of(hwnd_raw))
 }
 
+/// May `WM_SETTEXT` be used to type into a control of window class `class`
+/// (lowercased) whose UIA control type is `control_type`? Only for a text
+/// control: an edit-family class, or a control UIA reports as editable. On any
+/// other window the message rewrites the CAPTION (a Static label, a Button),
+/// which then reads back like a successful type.
+pub fn settext_allowed(class: &str, control_type: u32) -> bool {
+    TEXT_CLASS_PREFIXES.iter().any(|p| class.starts_with(p))
+        || crate::uia::patterns::is_editable_role(control_type)
+}
+
+/// [`settext_allowed`] for a live control handle.
+pub fn may_settext(hwnd_raw: isize, control_type: u32) -> bool {
+    settext_allowed(&window_class(hwnd_raw), control_type)
+}
+
 /// The window class of a top-level or child window, lowercased ("" if unreadable).
 /// Lets callers recognise GPU-composited families (Chromium/Electron report
 /// `chrome_widgetwin_*`) whose `PrintWindow` on a non-displayed desktop falls
@@ -495,6 +510,22 @@ mod tests {
     #[test]
     fn button_click_returns_error_when_hwnd_is_zero() {
         assert!(matches!(BackgroundClicker::button_click(0), Err(CoreError::WindowGone)));
+    }
+
+    #[test]
+    fn settext_is_only_for_text_controls() {
+        // A Static label or a Button: WM_SETTEXT would rewrite the caption and
+        // the read-back of that caption would look like a successful type.
+        assert!(!settext_allowed("static", 50020));
+        assert!(!settext_allowed("button", 50000));
+        assert!(!settext_allowed("", 0));
+        // A real edit class, whatever UIA calls it.
+        assert!(settext_allowed("edit", 50004));
+        assert!(settext_allowed("richedit50w", 50030));
+        // A custom-class control that UIA reports as editable.
+        assert!(settext_allowed("windowsforms10.edit.app.0", 50004));
+        assert!(settext_allowed("mycustomfield", 50004));
+        assert!(settext_allowed("combobox", 50003));
     }
 
     #[test]
