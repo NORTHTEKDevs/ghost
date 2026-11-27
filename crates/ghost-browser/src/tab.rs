@@ -177,8 +177,9 @@ impl Tab {
     // Navigation
     // -----------------------------------------------------------------------
 
-    /// Navigate and wait for the document to finish loading.
-    pub async fn navigate(&self, url: &str, timeout_ms: u64) -> Result<()> {
+    /// Navigate and wait for the document to finish loading. Ok carries a note
+    /// when the navigation worked without rendering a page (a download, a 204).
+    pub async fn navigate(&self, url: &str, timeout_ms: u64) -> Result<Option<&'static str>> {
         crate::error::ensure_not_stopped()?;
         let r = self.call("Page.navigate", json!({ "url": url })).await?;
         crate::policy::classify_navigation(&r, None).map_err(BrowserError::Navigation)?;

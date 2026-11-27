@@ -131,8 +131,12 @@ pub async fn dispatch(
             ghost_browser::policy::check_nav_url(&url)?;
             let timeout_ms = p["timeout_ms"].as_u64().unwrap_or(30_000);
             let tab = session.tab(&browser, &tab_id).await.map_err(|e| e.to_string())?;
-            tab.navigate(&url, timeout_ms).await.map_err(|e| e.to_string())?;
-            Ok(json!({ "ok": true, "background": true, "url": tab.url().await.unwrap_or_default() }))
+            let note = tab.navigate(&url, timeout_ms).await.map_err(|e| e.to_string())?;
+            let mut out = json!({ "ok": true, "background": true, "url": tab.url().await.unwrap_or_default() });
+            if let Some(note) = note {
+                out["note"] = json!(note);
+            }
+            Ok(out)
         }
         "ghost_tab_click" => {
             let (browser, tab_id) = browser_tab(p)?;

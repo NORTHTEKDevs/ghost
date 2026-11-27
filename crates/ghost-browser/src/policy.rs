@@ -57,12 +57,19 @@ pub fn truncate_chars(s: &str, max: usize) -> (String, Option<usize>) {
 /// Decide whether a navigation worked, from the `Page.navigate` result and
 /// (once known) the URL the tab landed on. A failed load (DNS error, refused
 /// connection) is a successful CDP call that parks the tab on chrome-error://.
+///
+/// `net::ERR_ABORTED` is what Chromium reports when the response was a
+/// download or a 204/205 (nothing to render, the tab stays put): that request
+/// worked, so it is Ok with a note, unless the tab landed on an error page.
 pub fn classify_navigation(
     navigate_result: &serde_json::Value,
     landed_url: Option<&str>,
-) -> Result<(), String> {
+) -> Result<Option<&'static str>, String> {
+    let mut note = None;
     if let Some(err) = navigate_result.get("errorText").and_then(|e| e.as_str()) {
-        if !err.is_empty() {
+        if err == "net::ERR_ABORTED" {
+            note = Some(NAV_ABORTED_NOTE);
+        } else if !err.is_empty() {
             return Err(format!("navigation failed: {err}"));
         }
     }
@@ -70,9 +77,12 @@ pub fn classify_navigation(
         Some(u) if u.starts_with("chrome-error://") => {
             Err(format!("navigation failed: the page failed to load (tab landed on {u})"))
         }
-        _ => Ok(()),
+        _ => Ok(note),
     }
 }
+
+/// The note for a navigation Chromium answered with net::ERR_ABORTED.
+pub const NAV_ABORTED_NOTE: &str = "the browser did not render a new page (net::ERR_ABORTED): the response was most likely a download or an empty 204/205 response, so the tab stayed on its previous page";
 
 #[cfg(test)]
 mod tests {
@@ -97,6 +107,24 @@ mod tests {
         // errorText wins when both are present.
         let e = classify_navigation(&dns, Some("chrome-error://chromewebdata/")).unwrap_err();
         assert!(e.contains("net::ERR_NAME_NOT_RESOLVED"), "{e}");
+    }
+
+    /// A download or a 204 answers Page.navigate with net::ERR_ABORTED: the
+    /// request worked and the tab stayed where it was.
+    #[test]
+    fn an_aborted_navigation_from_a_download_or_204_is_not_a_failure() {
+        use serde_json::json;
+        let aborted = json!({ "frameId": "F", "loaderId": "L", "errorText": "net::ERR_ABORTED" });
+        assert_eq!(classify_navigation(&aborted, None), Ok(Some(NAV_ABORTED_NOTE)));
+        assert_eq!(classify_navigation(&aborted, Some("https://example.com/page")), Ok(Some(NAV_ABORTED_NOTE)));
+        assert_eq!(classify_navigation(&json!({ "frameId": "F" }), Some("https://example.com/")), Ok(None));
+        // Landing on the error page is still a failure.
+        let e = classify_navigation(&aborted, Some("chrome-error://chromewebdata/")).expect_err("error page");
+        assert!(e.contains("chrome-error://"), "{e}");
+        // Other errorText still fails.
+        for err in ["net::ERR_CONNECTION_REFUSED", "net::ERR_ABORTED_X", "net::ERR_BLOCKED_BY_CLIENT"] {
+            assert!(classify_navigation(&json!({ "errorText": err }), None).is_err(), "{err}");
+        }
     }
 
     #[test]
