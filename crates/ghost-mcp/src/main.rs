@@ -263,18 +263,29 @@ fn allow_private() -> bool {
 /// both the URL-literal check and the DNS filter.
 fn is_blocked(ip: std::net::IpAddr) -> bool {
     use std::net::IpAddr;
-    // An IPv4-mapped (::ffff:127.0.0.1) or IPv4-compatible (::127.0.0.1)
-    // IPv6 address reaches the IPv4 host: judge the embedded IPv4. `::` and
-    // `::1` stay IPv6 (unspecified, loopback).
+    // IPv6 forms that carry an IPv4 address reach that IPv4 host: judge the
+    // embedded IPv4. IPv4-mapped (::ffff:a.b.c.d), IPv4-compatible
+    // (::a.b.c.d; `::` and `::1` stay IPv6), NAT64 (64:ff9b::/96 and the
+    // local-use 64:ff9b:1::/48, last 32 bits) and 6to4 (2002::/16, bits
+    // 16-47). Teredo (2001::/32) hides its client address behind a relay and
+    // is refused whole below.
     let ip = match ip {
-        IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
-            Some(v4) => IpAddr::V4(v4),
-            None if v6.segments()[..6] == [0; 6] && !v6.is_loopback() && !v6.is_unspecified() => {
-                let o = v6.octets();
-                IpAddr::V4(std::net::Ipv4Addr::new(o[12], o[13], o[14], o[15]))
+        IpAddr::V6(v6) => {
+            let s = v6.segments();
+            let o = v6.octets();
+            let last32 = std::net::Ipv4Addr::new(o[12], o[13], o[14], o[15]);
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                IpAddr::V4(v4)
+            } else if (s[..6] == [0; 6] && !v6.is_loopback() && !v6.is_unspecified())
+                || (s[0] == 0x64 && s[1] == 0xff9b && (s[2..6] == [0; 4] || s[2] == 1))
+            {
+                IpAddr::V4(last32)
+            } else if s[0] == 0x2002 {
+                IpAddr::V4(std::net::Ipv4Addr::new(o[2], o[3], o[4], o[5]))
+            } else {
+                IpAddr::V6(v6)
             }
-            None => IpAddr::V6(v6),
-        },
+        }
         v4 => v4,
     };
     match ip {
@@ -296,6 +307,7 @@ fn is_blocked(ip: std::net::IpAddr) -> bool {
                 || (o[0] & 0xfe) == 0xfc            // fc00::/7 unique local
                 || (o[0] == 0xfe && (o[1] & 0xc0) == 0x80) // fe80::/10 link-local
                 || (o[0] == 0xfe && (o[1] & 0xc0) == 0xc0) // fec0::/10 site-local (deprecated, still routed on some LANs)
+                || (o[0] == 0x20 && o[1] == 0x01 && o[2] == 0 && o[3] == 0) // 2001::/32 Teredo
                 || o[0] == 0xff // ff00::/8 multicast
         }
     }
@@ -4554,6 +4566,28 @@ mod validate_url_tests {
             "http://[ff02::1]/",
         ] {
             assert!(validate_url(url).is_err(), "{url} was allowed");
+        }
+    }
+
+    /// IPv6 transition forms that carry an IPv4 address: NAT64 (64:ff9b::/96
+    /// and the local-use 64:ff9b:1::/48), 6to4 (2002::/16, bits 16-47) and
+    /// Teredo (2001::/32, refused whole). Each reaches the embedded IPv4.
+    #[test]
+    fn ipv6_transition_forms_embedding_a_private_ipv4_are_refused() {
+        for url in [
+            "http://[64:ff9b::7f00:1]/",
+            "http://[64:ff9b::a9fe:a9fe]/latest/meta-data",
+            "http://[64:ff9b:1::a00:1]/",
+            "http://[2002:7f00:1::]/",
+            "http://[2002:c0a8:101::1]/",
+            "http://[2002:a9fe:a9fe::]/",
+            "http://[2001:0:4136:e378:8000:63bf:3fff:fdd2]/",
+            "http://[2001::1]/",
+        ] {
+            assert!(validate_url(url).is_err(), "{url} was allowed");
+        }
+        for url in ["http://[64:ff9b::808:808]/", "http://[2002:808:808::1]/", "http://[2001:4860:4860::8888]/"] {
+            assert!(validate_url(url).is_ok(), "{url} was refused: {:?}", validate_url(url));
         }
     }
 
