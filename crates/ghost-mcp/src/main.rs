@@ -263,9 +263,18 @@ fn allow_private() -> bool {
 /// both the URL-literal check and the DNS filter.
 fn is_blocked(ip: std::net::IpAddr) -> bool {
     use std::net::IpAddr;
-    // An IPv4-mapped IPv6 address (::ffff:127.0.0.1) reaches the IPv4 host.
+    // An IPv4-mapped (::ffff:127.0.0.1) or IPv4-compatible (::127.0.0.1)
+    // IPv6 address reaches the IPv4 host: judge the embedded IPv4. `::` and
+    // `::1` stay IPv6 (unspecified, loopback).
     let ip = match ip {
-        IpAddr::V6(v6) => v6.to_ipv4_mapped().map_or(IpAddr::V6(v6), IpAddr::V4),
+        IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+            Some(v4) => IpAddr::V4(v4),
+            None if v6.segments()[..6] == [0; 6] && !v6.is_loopback() && !v6.is_unspecified() => {
+                let o = v6.octets();
+                IpAddr::V4(std::net::Ipv4Addr::new(o[12], o[13], o[14], o[15]))
+            }
+            None => IpAddr::V6(v6),
+        },
         v4 => v4,
     };
     match ip {
@@ -286,6 +295,7 @@ fn is_blocked(ip: std::net::IpAddr) -> bool {
                 || v6.is_unspecified()              // ::
                 || (o[0] & 0xfe) == 0xfc            // fc00::/7 unique local
                 || (o[0] == 0xfe && (o[1] & 0xc0) == 0x80) // fe80::/10 link-local
+                || (o[0] == 0xfe && (o[1] & 0xc0) == 0xc0) // fec0::/10 site-local (deprecated, still routed on some LANs)
                 || o[0] == 0xff // ff00::/8 multicast
         }
     }
@@ -4513,6 +4523,9 @@ mod validate_url_tests {
             "http://[fe80::1]/",
             "http://[fd00::1]/",
             "http://[::]/",
+            "http://[fec0::1]/",
+            "http://[::127.0.0.1]:9222/json",
+            "http://[::10.0.0.1]/",
             "http://0.0.0.0:9222/",
             "http://2130706433:9222/json",
             "http://10.0.0.1/",
@@ -4577,6 +4590,37 @@ mod validate_url_tests {
         let e = resolve_via(vec!["127.0.0.1:0"], "evil.test").expect_err("loopback name refused");
         assert!(e.contains("evil.test"), "{e}");
         assert!(resolve_via(vec!["100.100.1.1:0", "[::1]:0"], "127.0.0.1.nip.io").is_err());
+    }
+
+    #[test]
+    fn site_local_and_ipv4_compatible_answers_are_refused() {
+        for addr in ["[fec0::1]:0", "[feff::1]:0", "[::127.0.0.1]:0", "[::192.168.0.1]:0"] {
+            assert!(resolve_via(vec![addr], "evil.test").is_err(), "{addr} was allowed");
+        }
+        // The embedded IPv4 decides: a public one passes.
+        assert!(resolve_via(vec!["[::8.8.8.8]:0"], "compat.test").is_ok());
+    }
+
+    /// The client ghost_http_get/post use really carries the filtering
+    /// resolver: a name for this machine is refused at resolve time, before
+    /// any connection (port 1 has no listener, so a dial would say "refused"
+    /// instead). No external network: localhost resolves locally.
+    #[test]
+    fn the_http_client_refuses_a_loopback_name_before_connecting() {
+        if super::allow_private() {
+            eprintln!("SKIP: GHOST_HTTP_ALLOW_PRIVATE=1 in this environment");
+            return;
+        }
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let err = rt.block_on(async { super::http_client().get("http://localhost:1/").send().await }).expect_err("must fail");
+        let mut chain = err.to_string();
+        let mut src = std::error::Error::source(&err);
+        while let Some(e) = src {
+            chain.push_str(" | ");
+            chain.push_str(&e.to_string());
+            src = e.source();
+        }
+        assert!(chain.contains("resolves only to private"), "not refused by the resolver: {chain}");
     }
 
     #[test]

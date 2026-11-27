@@ -564,7 +564,7 @@ Three more environment variables change behaviour; none is set by default:
 
 | Variable | Effect |
 | --- | --- |
-| `GHOST_HTTP_ALLOW_PRIVATE=1` | lets `ghost_http_get`/`ghost_http_post` reach loopback, private and link-local addresses (refused otherwise) |
+| `GHOST_HTTP_ALLOW_PRIVATE=1` | lets `ghost_http_get`/`ghost_http_post` reach loopback, private and link-local addresses (refused otherwise). These verbs always connect directly: `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` are ignored, because a proxy would resolve the name itself and bypass the address check |
 | `GHOST_BROWSER_PATH` | the Chromium-family browser `ghost_browser_launch` starts, instead of the one Ghost finds |
 | `GHOST_TOOL_DEADLINE_MS` | the per-call deadline for a tool, default 180000 ms (a call's own `timeout_ms` raises it) |
 
