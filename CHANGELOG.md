@@ -5,7 +5,13 @@ dash, what that release was about. Versions follow [Semantic
 Versioning](https://semver.org/); Ghost is pre-1.0, so a minor version can
 change behaviour.
 
-## [Unreleased]
+## [0.24.5] - a Linux install that works from the archive
+
+The Linux archive's own installer could not install it, and `ghost_browser_launch`
+on Linux found no browser. Both are fixed, with CI now running each the way a
+user does. Also: bounded `timeout_ms` on every tab wait, full-size
+`max_dim=0` screenshots, and a README and docs written for a first-time
+visitor.
 
 ### Fixed
 
@@ -33,7 +39,17 @@ change behaviour.
   there). It now installs the `ghost`, `ghost-mcp` and `ghost-http` beside it
   and builds only when run from a checkout. CI runs it from the real archive
   layout with cargo off the PATH, and the release job runs it from the exact
-  archive it publishes.
+  archive it publishes. New `--no-doctor` flag; a relative `--prefix` is made
+  absolute before it is registered with Claude Code.
+- **A `max_dim` past 4294967295 no longer wraps to 0** (which means "no
+  resize" since the fix above); it saturates.
+
+### Changed
+
+- Dependencies: tokio 1.54, serde_json 1.0.154, clap 4.6.7 and eight other
+  minor and patch updates. CI actions moved to their current majors, and the
+  release workflow gained a dry-run mode (`workflow_dispatch`) that runs every
+  step except publishing.
 
 ### Documentation
 
