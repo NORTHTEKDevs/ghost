@@ -62,3 +62,26 @@ before the server starts. Then:
   `exit 57005` is a normal exit.
 - `ghost-linux` (CI): a stop kills the shell's process group; a reused group id is not
   signalled; only a real (non-XTEST) resume key resumes.
+
+## After the release: the published v0.24.2 binary
+
+`ghost-windows-x64.zip` downloaded from the v0.24.2 release: sha256
+`b507afc7225340999af20b8b84bf9de4065f49805259c46285ba9b8d0f690b6f`, matching the
+`.sha256` asset; `ghost.exe --version` = `ghost 0.24.2`.
+(`published-0.24.2-owned-close.txt`; the real shared event sampled 237 times, never signalled.)
+
+| Step (extracted `ghost-mcp.exe`) | Result |
+|---|---|
+| launch the testbed (hidden), a headless browser Ghost launches, open a tab | ok |
+| `ghost_stop scope=process` | ok |
+| `ghost_tab_close` on Ghost's own tab | **ok** - the tab is gone from `ghost_browser_tabs` |
+| `ghost_window op=state close` (a window close) | **refused**, -32004 |
+| `ghost_act` click | refused; after `ghost_reset scope=process` it works (Count 0 -> 1) |
+| `GHOST_ISOLATED_STOP_NS` set, with a SYSTEM-only squatter on that isolated name | the published server ignores it: the launch is not refused (a build that honoured it would fail closed) |
+
+The human-stop semantics, on a private debug build of the release commit fdea477
+(`release-commit-h1-private.txt`, real event sample in `release-commit-real-event-sample.txt`):
+human stop refuses act and both agent resets ("only the human can resume it - wait for
+them"); `ghost reset` over a pipe exits 2 with the events still raised; `ghost reset` in a
+real terminal with the word typed back lifts it; an agent stop is lifted by its own reset.
+The live Ctrl+Alt+G check on the human's running sessions was not done (not authorised).

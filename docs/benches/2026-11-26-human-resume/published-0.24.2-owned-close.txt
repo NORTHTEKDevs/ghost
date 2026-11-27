@@ -1,0 +1,38 @@
+>>> ghost_window {"op":"launch","exe":"C:/Users/Krist/projects/active/ghost/target-improve/release/ghost-testbed.exe"}  (121ms)
+<<< ok {"desktop":"auto","note":"started on a hidden desktop (never on your screen) and anchored: ghost_see / ghost_act / ghost_key now target it by default. Drive it 
+
+>>> ghost_browser_launch {"id":"pub","mode":"headless"}  (240ms)
+<<< ok {"browser":"default","dies_with_server":true,"id":"pub","mode":"headless","pid":14100,"port":5366}
+
+>>> ghost_tab_open {"browser":"pub","url":"about:blank"}  (25ms)
+<<< ok {"background":true,"tab":"5E3E9F1F594E159F7B36342A8FA20223"}
+
+>>> ghost_stop {"scope":"process"}  (1ms)
+<<< ok {"ok":true}
+
+>>> ghost_tab_close {"browser":"pub","tab":"5E3E9F1F594E159F7B36342A8FA20223"}  (1ms)
+<<< ok {"ok":true}
+
+>>> ghost_browser_tabs {"id":"pub"}  (8ms)
+<<< ok {"tabs":[{"target_id":"EFC11E270BB82C7CB988A3C73F600110","title":"about:blank","url":"about:blank"}]}
+
+>>> ghost_window {"op":"state","name":"Ghost Testbed","state":"close"}  (0ms)
+<<< ERR -32004: ghost_window refused: emergency stop active - Ghost is stopped and refuses actions until the stop is lifted
+    hint: automation is stopped (Ctrl+Alt+G or ghost_stop) - issue no more actions; a stop the human raised is theirs to lift, so wait for them to resume
+
+>>> ghost_act {"action":"click","name":"Count","window":"Ghost Testbed"}  (0ms)
+<<< ERR -32004: ghost_act refused: emergency stop active - Ghost is stopped and refuses actions until the stop is lifted
+    hint: automation is stopped (Ctrl+Alt+G or ghost_stop) - issue no more actions; a stop the human raised is theirs to lift, so wait for them to resume
+
+>>> ghost_reset {"scope":"process"}  (0ms)
+<<< ok {"ok":true}
+
+>>> ghost_act {"action":"click","name":"Count","window":"Ghost Testbed"}  (194ms)
+<<< ok {"action":"click","cursor_preserved":true,"focus_preserved":true,"mode":"hidden","name":"Count 0","ok":true,"rect":{"bottom":351,"left":378,"right":488,"top":32
+
+>>> ghost_browser_close {"id":"pub"}  (1ms)
+<<< ok {"ok":true}
+
+>>> ghost_desktop_close {"id":"auto"}  (0ms)
+<<< ok {"ok":true,"terminated_pids":[30380]}
+
