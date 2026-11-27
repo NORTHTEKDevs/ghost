@@ -1,905 +1,367 @@
+<div align="center">
+
+<img src="assets/icon.png" alt="" width="88" height="88">
+
 # Ghost
+
+**Lets AI agents use the apps on your computer, in the background, and proves every action worked.**
 
 [![CI](https://github.com/NORTHTEKDevs/ghost/actions/workflows/ci.yml/badge.svg)](https://github.com/NORTHTEKDevs/ghost/actions/workflows/ci.yml)
 [![Linux](https://github.com/NORTHTEKDevs/ghost/actions/workflows/linux.yml/badge.svg)](https://github.com/NORTHTEKDevs/ghost/actions/workflows/linux.yml)
 [![Release](https://img.shields.io/github/v/release/NORTHTEKDevs/ghost)](https://github.com/NORTHTEKDevs/ghost/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![MCP registry](https://img.shields.io/badge/MCP_registry-io.github.NORTHTEKDevs%2Fghost-6e40c9)](https://registry.modelcontextprotocol.io/v0/servers?search=io.github.NORTHTEKDevs/ghost)
 
-**Verified control of the whole desktop, for agents and programs, on Windows and
-Linux.** Ghost gives Claude Code, Codex, Cursor, any MCP harness, or a plain script
-the operating system's own control surface: the apps with no API, the windows, the
-shell, and the browser you are already logged into - **in the background without
-taking your screen or cursor**, with **every action proven to have happened**.
+[Quick start](#quick-start) · [Safety](#safety-model) · [Troubleshooting](#troubleshooting) · [Docs](docs/README.md) · [Tool reference](docs/tools.md) · [Changelog](CHANGELOG.md)
 
-Like Playwright, but for the native desktop, and built for agents. Ghost does the
-perceiving, the acting, and the verifying; the model you are already running does
-any looking that is needed, so there is no vision API key to set.
+</div>
 
-One MCP surface, two engines: Win32 UI Automation on Windows, AT-SPI2 over D-Bus
-on Linux. The verbs, the locator tiers and the act-then-verify loop are written
-once and behave the same on both. [Platform support](#platforms) ·
-[Linux setup](docs/linux-fedora.md)
+<p align="center">
+  <img src="assets/demo.gif" width="860" alt="An agent launches an app with Ghost, types into a field and clicks two buttons. Each call returns verified: true, focus_preserved: true and cursor_preserved: true, and the screenshots Ghost takes show the text typed, the status label changed and the window title counting the click. The app runs on Ghost's hidden desktop, and the run records zero changes to the user's foreground window.">
+</p>
 
-## Why Ghost is different
+Ghost is an [MCP](https://modelcontextprotocol.io) server, a CLI and a local
+REST API that give an agent (Claude Code, Claude Desktop, Cursor, Codex, VS
+Code, or your own script) the operating system's own control surface: the
+windows and controls of any app, including the ones with no API, plus the
+shell and the browser you are already signed into. It works through the OS
+accessibility layer (UI Automation on Windows, AT-SPI2 on Linux), so the agent
+gets real buttons and fields with names, not pixels to guess at.
 
-- **Runs in the background, and that is enforced.** An agent can click, type, and
-  use shortcuts inside an app *while you keep working in another window* - no focus
-  steal, no cursor jump. It posts window messages to real controls and uses UI
-  Automation patterns on windowless ones; most tools can only drive whatever is in
-  the foreground. Since 0.19 this is a policy, not a preference: the focus policy
-  defaults to `background`. Since 0.20 it is also *constructive*: anything Ghost
-  starts (an app, a windowed browser) is born on a hidden desktop that has its own
-  input queue and cannot take your foreground, and the ordinary verbs drive it there
-  by window title. A call that truly has no background path fails naming the action
-  instead of quietly taking the screen. Since 0.22 the policy is *locked* there:
-  no tool call can raise it, so an agent cannot decide on its own to take your
-  mouse. You can, by setting `GHOST_FOCUS_LOCK=off` in the server's environment.
-  And since 0.23 a window that grabs the foreground on its own - browsers do, on
-  their own accessibility calls - is handed straight back, so your typing keeps
-  going where you are looking. Measured on a real desktop with a person typing
-  throughout: of roughly 490 keystrokes a run, zero to one reached the window
-  the agent was driving.
-  ([how](#background-mode-agent-harness--computer-use))
-- **Never your window by accident.** The session remembers the last window the
-  agent named or launched and every window-scoped verb targets it by default. The
-  human's foreground window is used only when nothing was ever anchored, and the
-  response says so. Three weeks of real transcripts showed "element not found in the
-  foreground window" as the top failure before this; it was the agent searching the
-  window *you* had open.
-- **Many agents at once.** Requests are dispatched in parallel, so a 15-second wait
-  in one tab does not stall an instant query behind it, and a second Ghost process
-  runs its own browser alongside the first without contending for the mouse.
-- **Prove it on your machine.** `ghost verify` drives the real MCP server over
-  stdio and audits every claim above against hard timing budgets, exiting non-zero
-  if any of them does not hold on your hardware.
-- **Every action is verified.** Ghost re-checks the screen (or reads the control's
-  value back) after acting and returns `verified` / `focus_confirmed` - never a
-  blind `ok:true`. Agents fail by acting and not knowing if it worked; Ghost closes
-  that loop.
-- **Drives apps with no API.** Legacy Win32, WPF, Electron, UWP, vendor portals - 
-  the software that has no integration and most needs automating. No CDP, no
-  browser, no app cooperation required.
-- **No vision key.** The model driving Ghost reads `ghost_see` (every element with
-  its name, role and on-screen centre) or `ghost_screenshot` itself. Ghost's own
-  vision tier is optional, exists for callers with no model of their own, and is off
-  until configured.
-- **Accessibility-native and deep.** Real element discovery through the OS's own
-  accessibility API - UI Automation on Windows, AT-SPI2 on Linux - not
-  pixel-guessing. Elements come back with real names, roles and bounds.
+The demo above is recorded, not drawn: [`scripts/demo-capture.mjs`](scripts/demo-capture.mjs)
+makes those calls against a test app on Ghost's hidden desktop and
+[`scripts/demo-gif.py`](scripts/demo-gif.py) lays out what came back.
 
-See it in one script: [`examples/background_agent_demo.py`](examples/background_agent_demo.py)
-drives an app in the background while the foreground stays yours.
-Honest comparison vs Playwright-MCP / cua-driver / Computer Use:
-[`docs/comparison.md`](docs/comparison.md).
+## Why Ghost
 
-## What people use it for
+Two promises, and how they were measured:
 
-Vision is the smallest part of it. In a typical session an agent calls Ghost mostly
-to act, to manage windows and processes, to run commands, and to read state back.
+**It does not take your screen.** Agents click, type and scroll inside apps
+while you keep working in another window. Apps Ghost starts run on a hidden
+desktop you never see, and the focus policy is locked so an agent cannot
+decide to take your mouse; only you can unlock it, in the server's config.
+*Measured:* a person typed into another window while an agent worked; 1 of
+about 2,950 keystrokes over six runs landed in the agent's window
+([how](docs/background-mode.md#when-an-app-takes-the-foreground-itself)). A
+160-action soak lost focus 0 times.
 
-| Use | Tools | Typical caller |
-| --- | --- | --- |
-| Driving apps with no API: installers, legacy line-of-business software, vendor portals, WPF and Electron tools | `ghost_act`, `ghost_key`, `ghost_scroll`, `ghost_drag` | agents, RPA scripts |
-| Window and process control: launch invisibly, focus, minimize, restore, close, recover hidden windows, sweep orphaned browsers | `ghost_window`, `ghost_desktop_*`, `ghost_stats` | agents, ops scripts |
-| A terminal for the agent: builds, git, CLIs, persistent PowerShell state, spawning another Claude Code session | `ghost_shell`, `ghost_run` | coding agents on Windows |
-| Driving the browser you are already signed into, through its DevTools port: tabs, navigation, DOM clicks, JS eval, page text | 19 `ghost_browser_*` and `ghost_tab_*` tools | agents, web automations |
-| Reading data out of apps with no export: accessibility text, tab text, OCR | `ghost_see mode=text`, `ghost_tab_text` | agents, reporting scripts |
-| Making "did it work" a machine check: element exists, value equals, wait for idle or text | `ghost_assert`, `ghost_wait` | QA agents, CI |
-| Isolated desktops: overnight GUI work and parallel agents that never touch the human's screen | `ghost_window op=launch`, the focus policy, `ghost_desktop_*` | autonomous runs |
-| Reproducible multi-step flows with retries and conditions, no model in the loop | intents via `ghost run`, `POST /run`, `ghost_execute_intent` | scheduled jobs |
-| The clipboard as a bridge into apps that resist typing | `ghost_clipboard` | all of the above |
+**Every action is verified.** After acting, Ghost re-reads the control or the
+screen and returns `verified: true` only when the change really happened; a
+call it cannot complete fails with an error that says why. *Measured:* 14 of 14
+benchmark tasks passed when scored by re-observing the app, never by trusting
+the return value, and 0 unverified results in the soak
+([benchmarks](docs/benchmarks.md)).
 
-Every row runs under the same guarantees: the action returns `verified`, the
-default policy never takes your foreground, and Ctrl+Alt+G stops every Ghost
-process at once.
+Check both on your own hardware with `ghost verify`, which exits non-zero if a
+claim does not hold. And you stay in charge: see the [safety model](#safety-model).
 
-## What is Ghost?
+## Quick start
 
-Ghost is the layer between a model and the desktop. The model reasons; Ghost sees
-the screen the way the operating system does, acts on real controls without
-touching your foreground, and reports whether the action took. It gives
-programmatic control over any desktop application - native Win32, Electron, WPF,
-UWP, GTK, Qt, or otherwise - to an agent, a script, or a program.
+### 1. Install
 
-On **Windows** it uses UI Automation for element discovery, SendInput for keyboard/mouse injection, and DXGI/GDI for screen capture. On **Linux** it uses AT-SPI2 over D-Bus for discovery and actions, XTEST (X11) or the RemoteDesktop portal / uinput (Wayland) for input, and X11 `GetImage` or the Screenshot portal for capture. The Linux engine is pure Rust - no `-devel` packages to install.
+Runs on Windows 10 (build 19041+) and 11, and Linux x86_64 (X11 verified,
+Wayland not yet). No macOS yet: see [platform support](#platform-support).
 
-Ship it three ways:
+**Claude Desktop, one click:** download `ghost-windows-x64.mcpb` (or
+`ghost-linux-x86_64.mcpb`) from the
+[latest release](https://github.com/NORTHTEKDevs/ghost/releases/latest) and
+open it: *Settings -> Extensions -> Install from file*. Done; skip to step 3.
 
-- **`ghost-mcp` server** - the primary surface: a Model Context Protocol server for
-  Claude Code, Claude Desktop, Codex, Cursor, and any MCP client (54 tools on Windows)
-- **`ghost` CLI** - one-shot commands, great for scripts and CI (`ghost click --name "Submit"`)
-- **`ghost-http` server** - local REST API, call it from Python, Node, curl, anything (`curl http://127.0.0.1:7878/list-windows`)
+**Windows** (PowerShell):
 
-The MCP surface is 20 desktop verbs, 19 `ghost_browser_*` / `ghost_tab_*` tools for
-driving individual browser tabs in the background (Chrome, Comet, Edge, Brave), and
-15 Windows-only tools: the focus policy plus `ghost_desktop_*` for explicit control of
-isolated Windows desktops the user never sees. Under the default policy you rarely
-need the latter: `ghost_window op=launch` already starts the app on the hidden
-desktop `auto`, and `ghost_see` / `ghost_act` / `ghost_key` / `ghost_scroll` reach it
-with `window=<title>` exactly as they reach a window on your own desktop
-(`target.surface` in the response tells you which). UIA, window messages and capture
-work fully there. Real `SendInput` does not, because Windows refuses it off the
-input desktop, and typing is proven by reading the control's value back, so a target
-that drops posted characters returns an error rather than a false success. The
-desktop verbs and the browser tools build on Linux as well; the focus policy and
-hidden desktops are Windows-only.
-
-No Claude required. No browser required. No CDP. It drives apps through the OS's
-own automation and input APIs, so it works with native apps that have no API and
-no automation hooks of their own - the same reliability whether or not an app was
-built to be automated.
-
-### Platforms
-
-| Platform | Status | Engine |
-| --- | --- | --- |
-| **Windows** | ✅ full and verified | `ghost-core` - Win32 UI Automation, SendInput, posted window messages, DXGI/GDI capture |
-| **Linux, X11** | ✅ functional - verified by live CI tests against a real GTK app | `ghost-linux` - AT-SPI2 over D-Bus, XTEST input, X11 `GetImage` capture |
-| **Linux, Wayland** | ⚠️ implemented, NOT verified - no test has run it on hardware | same AT-SPI2 discovery and actions; input and capture go through the RemoteDesktop / Screenshot portals or uinput instead |
-| **macOS** | 🚧 scaffold | Accessibility + CGEvent + ScreenCaptureKit - to be built on a Mac |
-
-Wayland deserves the separate row rather than a footnote: it is the default
-session on current Ubuntu and Fedora, so it is what most Linux users would
-actually run, and it is the part with no test behind it. The discovery and
-action layer is shared with X11 and is covered, and it is the layer that
-matters most here - AT-SPI2 asks the application to do the thing, so there is
-no pointer to move and no window to raise. What is unverified is the fallback
-underneath: portal input, portal capture, uinput. If you run Wayland, treat
-`ghost doctor` as the first thing to run and expect to file bugs. Reports are
-welcome and are the fastest way that row changes.
-
-`ghost-session` and `ghost-mcp` are shared: the locator tiers, grounding cascade,
-act-then-verify loop and the 20 core MCP verbs are written once and run on both
-platforms. Only the engine underneath changes, behind a one-line `cfg` alias. The
-browser and tab tools are engine-independent and build for both; the focus policy
-and isolated desktops are Windows-only and are reported as such rather than faked.
-
-**The wedge survives the port.** On Windows, driving an app without stealing
-focus is built on posted window messages. Linux has a cleaner analogue in
-AT-SPI2 actions: the application performs the operation through its own toolkit,
-so there is no pointer to move and no window to raise. That layer is the same
-code under X11 and Wayland; synthetic input is only the fallback beneath it,
-and the fallback is the part Wayland has not been tested on.
-
-This is tested, not asserted: CI stands up a real desktop (Xvfb + D-Bus +
-at-spi-bus-launcher), drives a real GTK application, and requires that text
-written through AT-SPI reads back from the app and that invoking a button
-actually dismisses the dialog. Wayland portal input and capture are implemented
-but not yet verified on hardware.
-
-Linux setup, verification checklist and honest limitations:
-[`docs/linux-fedora.md`](docs/linux-fedora.md). Capability matrix across all
-three: [`docs/cross-platform.md`](docs/cross-platform.md).
-
-Ghost is a general-purpose automation tool. Use it on systems you own or are
-authorized to automate, and in line with the terms of the software you drive.
-
-## Install
-
-**One-click - MCP Bundle (free).** Every release ships `ghost-windows-x64.mcpb` and
-`ghost-linux-x86_64.mcpb` on the [Releases page](https://github.com/NORTHTEKDevs/ghost/releases/latest).
-Open one in a client that supports MCP Bundles (Claude Desktop: *Settings -> Extensions ->
-Install from file*) and Ghost is registered, no PATH or config editing, and no API key. Ghost is also listed in
-the [MCP registry](https://registry.modelcontextprotocol.io) as `io.github.NORTHTEKDevs/ghost`,
-so registry-aware clients can install it from there. The bundle holds the `ghost-mcp` server
-only; the CLI and HTTP server are in the archives below.
-
-**Prebuilt binaries (free).** Every release ships signed-by-checksum
-archives for both platforms on the
-[Releases page](https://github.com/NORTHTEKDevs/ghost/releases/latest):
-
-```bash
-# Linux x86_64
-curl -LO https://github.com/NORTHTEKDevs/ghost/releases/latest/download/ghost-linux-x86_64.tar.gz
-curl -LO https://github.com/NORTHTEKDevs/ghost/releases/latest/download/ghost-linux-x86_64.tar.gz.sha256
-sha256sum -c ghost-linux-x86_64.tar.gz.sha256
-tar -xzf ghost-linux-x86_64.tar.gz && ./install.sh
+```powershell
+$dir = "$env:LOCALAPPDATA\Programs\ghost"
+$url = "https://github.com/NORTHTEKDevs/ghost/releases/latest/download"
+Invoke-WebRequest "$url/ghost-windows-x64.zip" -OutFile ghost.zip
+Expand-Archive ghost.zip -DestinationPath $dir -Force
+Get-ChildItem $dir | Unblock-File
+$path = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($path -notlike "*$dir*") {
+  [Environment]::SetEnvironmentVariable("Path", "$path;$dir", "User")
+}
+& "$dir\ghost.exe" doctor
 ```
 
-Windows: download `ghost-windows-x64.zip` from the same page. Verify the
-checksum, unzip, and add the folder to your `PATH`. Then run `ghost doctor`.
+Open a new terminal afterwards so `ghost` is on your PATH. To update later,
+quit your MCP client and run the same block again.
 
-**Check where a download came from.** Every release artifact carries a signed
-build provenance attestation, so you can prove a file came out of this
-repository's release workflow and nowhere else, at a named commit:
+**Linux** (x86_64):
 
 ```bash
-gh attestation verify ghost-windows-x64.mcpb --repo NORTHTEKDevs/ghost
-```
-
-The binaries are **not code-signed yet**, so Windows SmartScreen will warn you on first run (click *More info*
-→ *Run anyway*). That warning is about publisher identity, which needs a paid certificate tied to a verified legal
-entity; the attestation above is the stronger statement about origin and costs nothing, but Windows does not read it.
-The pipeline signs the moment a certificate is configured, from any CA - see
-[`docs/code-signing.md`](docs/code-signing.md), and
-[`docs/signing-policy.md`](docs/signing-policy.md) for what gets signed, by
-whom, and what leaves your machine (nothing, unless you configure a vision key). If an antivirus engine quarantines a release, verify the
-checksum and see [`docs/antivirus.md`](docs/antivirus.md) for what the binaries do to stay recognisable and how
-to report a false positive. The kit buys convenience, not capability - everything Ghost can do is in the free source
-below, and building it yourself takes one command.
-
-**Option C - Build from source (free, MIT).** Ghost is open source. Compile it yourself:
-
-```bash
-git clone https://github.com/NORTHTEKDevs/ghost
-cd ghost
-cargo build --release --bin ghost --bin ghost-http --bin ghost-mcp
-# binaries in target/release/
-```
-
-Requirements: Windows 10 build 19041+, or Linux with `at-spi2-core` (and Rust
-stable only if building from source).
-
-**On Linux:**
-
-```bash
-sudo dnf install at-spi2-core xdg-desktop-portal xdg-desktop-portal-gnome
+url=https://github.com/NORTHTEKDevs/ghost/releases/latest/download
+mkdir -p ghost-download ~/.local/bin
+curl -L "$url/ghost-linux-x86_64.tar.gz" | tar -xz -C ghost-download
+cd ghost-download && install -m 0755 ghost ghost-mcp ghost-http ~/.local/bin/
 gsettings set org.gnome.desktop.interface toolkit-accessibility true
-./scripts/install.sh          # build, install, register the MCP server, run doctor
+~/.local/bin/ghost doctor
 ```
 
-No `-devel` packages are needed - the Linux engine is pure Rust. Full setup and
-troubleshooting: [`docs/linux-fedora.md`](docs/linux-fedora.md).
+If `ghost` is not found afterwards, add `~/.local/bin` to your PATH
+(`export PATH="$HOME/.local/bin:$PATH"` in your shell's rc file).
 
-**Check your machine first:**
+`ghost doctor` reports PASS, WARN or FAIL for everything Ghost needs. On
+Wayland, run it and read [platform support](#platform-support) first.
+Checksums, provenance, SmartScreen, building from source:
+[docs/install.md](docs/install.md).
+
+### 2. Connect your client
+
+<details open>
+<summary><b>Claude Code</b></summary>
+
+Windows (PowerShell):
+
+```powershell
+claude mcp add ghost --scope user -- "$env:LOCALAPPDATA\Programs\ghost\ghost-mcp.exe"
+```
+
+Linux:
 
 ```bash
-ghost doctor
+claude mcp add ghost --scope user -- "$HOME/.local/bin/ghost-mcp"
 ```
 
-Reports PASS/WARN/FAIL and exits 1 if anything is FAIL. Run it before opening an
-issue - it usually names the problem outright.
+</details>
 
-- **Windows:** build version, interactive desktop, UI Automation, DPI awareness,
-  monitor layout, screen capture, optional vision credentials.
-- **Linux:** session type (X11/Wayland), AT-SPI bus reachability, whether
-  applications are actually exposing accessible trees, the selected input
-  backend, and screen capture.
+The other clients take a JSON or TOML file, which cannot expand variables, so
+replace `YOU` with your user name. The Windows path is shown; on Linux use
+`/home/YOU/.local/bin/ghost-mcp`.
 
-## Quick Start - coding agents and MCP clients
+<details>
+<summary><b>Claude Desktop</b> (without the bundle)</summary>
 
-This is the path Ghost is built for. Nothing to configure and no API key.
-
-**Claude Desktop:** download `ghost-windows-x64.mcpb` (or the Linux bundle) from the
-[latest release](https://github.com/NORTHTEKDevs/ghost/releases/latest) and open it:
-*Settings -> Extensions -> Install from file*.
-
-**Claude Code:**
-
-```bash
-claude mcp add ghost --scope user -- C:/path/to/ghost-mcp.exe
-```
-
-**Any other MCP client** (Codex, Cursor, a custom harness): register the binary as a
-stdio server.
+Add to `%APPDATA%\Claude\claude_desktop_config.json`, then restart Claude Desktop:
 
 ```json
 {
   "mcpServers": {
-    "ghost": { "command": "C:/path/to/ghost-mcp.exe" }
+    "ghost": { "command": "C:/Users/YOU/AppData/Local/Programs/ghost/ghost-mcp.exe" }
   }
 }
 ```
 
-Ghost is also listed in the [MCP registry](https://registry.modelcontextprotocol.io)
-as `io.github.NORTHTEKDevs/ghost` for clients that install from there.
+</details>
 
-The repo's `Dockerfile` builds a headless image (`docker build -t ghost-mcp .`) that
-answers `initialize` and `tools/list` with no display; registries and CI use it to
-introspect the server. A container has no windows to drive, so it is not an install
-path for real use.
+<details>
+<summary><b>Cursor</b></summary>
 
-**How an agent uses it.** The loop is look, act, confirm:
-
-1. `ghost_see window="Invoice Editor"` - every element in the window with its name,
-   role, enabled state, and on-screen centre. Text mode extracts the readable text
-   instead, roughly ten times cheaper in tokens than an image.
-2. `ghost_act window="Invoice Editor" name="Save" action="click"` - Ghost drives the
-   control in the background and returns `verified: true` only when the screen or
-   the control's value shows the action took.
-3. `ghost_screenshot window="Invoice Editor"` - pixels, for the moments a layout,
-   a chart, or a canvas needs the model's own eyes.
-
-The model reads step 1 and step 3 and chooses; Ghost never has to guess what a
-picture means, and no vision key is involved.
-
-Beyond the loop: `ghost_shell` runs commands and persistent PowerShell sessions,
-`ghost_window` launches, lists, focuses, restores and closes windows (on a hidden
-desktop by default), `ghost_assert` and `ghost_wait` turn "did it work" into a
-check, and the `ghost_tab_*` tools drive the browser you are already signed into.
-
-Most real sessions spend more calls there than on looking.
-
-Tab navigation (`ghost_tab_open`, `ghost_tab_navigate`) is a real browser, so http and https to any host including localhost stay allowed (local dev servers are a core use case) and the `ghost_http_get` SSRF policy does not apply; every other scheme (file:, chrome:, data:, javascript:, ftp: and the like) is refused.
-
-54 tools on Windows (legacy names stay dispatchable): 20 desktop verbs covering
-see/snapshot/find/act/keys/scroll/drag/clipboard/screenshot/windows/shell/waits/query/run,
-19 `ghost_browser_*` / `ghost_tab_*` tools, and 15 Windows-only tools for the focus
-policy and isolated desktops. Building from source instead of downloading:
-`cargo build -p ghost-mcp --release`.
-
-Every tool runs on its own task, so a slow call does not block a fast one, and a
-second Ghost process can run alongside the first. Once it is mounted, run
-`ghost verify` to audit that on your own machine.
-
-**Speed.** Ghost's own time is small: about 75 ms for a text read, 200 ms for
-a verified click, 1 ms to list windows. What makes an agent session slow is
-what happens around the calls, and three habits remove most of it. Name the
-window once and omit `window=` afterwards: the anchor follows that window by
-handle, and a title it used to have still resolves instantly with
-`title_drift` in the response. Wait for a condition, not a duration:
-`ghost_wait for=element`, `for=value`, and `for=navigate` (sets the address
-bar in the background and returns when the title changes, about 0.4 to 1.4 s
-where a fixed sleep costs 6) return the moment the thing happened. Batch with
-`ghost_run` so one model turn does several steps. `scripts/speed-probe.mjs`
-measures all of this against any `ghost-mcp` binary.
-
-### Shell control (`ghost_shell`)
-
-Ghost drives GUIs *and* the command line. `ghost_shell` runs terminal commands and
-persistent PowerShell sessions - builds, git, CLIs, file edits on hosts without file
-tools, or launching apps. `op=run` is a one-shot (`powershell`/`pwsh`/`cmd`); `op=open`
-starts a persistent PowerShell whose variables and cwd survive across `op=send` calls.
-Output is merged stdout+stderr, tail-capped for the agent's context window; a timed-out
-command keeps running and is drained with `op=read`; `ghost_stop` kills a runaway.
-`op=kill` ends a session and every program its commands started, as does an `op=run`
-timeout (Windows: a job of the shell's own; Linux: its process group); a program
-left running by a finished command runs on until a stop (or, in a session, `op=kill`),
-unless it still holds the command's output open: then the command has not finished,
-and its timeout ends it too.
-`op=run` with the default `powershell` is served from a pre-spawned spare process, so
-a command costs about 85 ms instead of the 230-450 ms a fresh PowerShell start takes
-(the spare is single-use and replaced immediately; `GHOST_SHELL_WARM=off` disables it).
-
-Spawn a fresh Claude Code session from the agent:
-`ghost_shell op=run cmd='Start-Process wt -ArgumentList "pwsh","-NoExit","-Command","claude"'`,
-then drive the new terminal window with `ghost_see` / `ghost_act` / `ghost_key`.
-
-**Security:** shell access is powerful. Set `GHOST_SHELL=off` in the server's env to
-disable the verb entirely - every op then returns a clear refusal, leaving the GUI
-automation verbs fully usable. The launch verbs (`ghost_launch`, `ghost_window op=launch`,
-`ghost_desktop_launch`) then also refuse command interpreters, terminals, script hosts
-and programs that start other programs (cmd, PowerShell, wscript, python, wmic, explorer,
-xdg-open, env, ...), judged by the program's real name (8.3 aliases and symlinks resolved).
-That filter is a denylist and cannot be complete. For a strict rule set
-`GHOST_LAUNCH_ALLOW` to a comma-separated list of basenames or full paths
-(`notepad,C:\Tools\viewer.exe`): with the shell off, only those programs launch.
-This is not a sandbox either way: typing and clicking can still start programs.
-
-## Quick Start - CLI
-
-```bash
-# Launch Notepad and type into it
-ghost launch notepad.exe
-ghost focus-window "Notepad"
-ghost type --role edit --text "hello from ghost"
-
-# Keys and hotkeys
-ghost press Enter
-ghost hotkey --mods Ctrl --key s
-
-# Screenshot
-ghost screenshot --out shot.png
-
-# Enumerate windows or UI
-ghost list-windows
-ghost describe --window "Notepad"
-
-# Click at coords or by name
-ghost click-at 500 300
-ghost click --name "Save"
-
-# Run a JSON intent (finite-state machine with retries, timeouts, conditions)
-ghost run my-flow.json
-echo '{"ops":[{"op":"launch","exe":"notepad.exe"}]}' | ghost run -
-```
-
-Everything outputs JSON for easy piping into `jq` or scripts.
-
-## Quick Start - HTTP Server
-
-Start the server:
-
-```bash
-ghost-http --addr 127.0.0.1:7878
-```
-
-`--addr` must be a loopback address. The server answers 403 to requests whose
-Host is not `127.0.0.1`, `localhost` or `[::1]` with its own port, and to any
-request carrying an `Origin` header (browsers), so a web page cannot drive it;
-scripts such as curl are unaffected. `/run` needs `Content-Type: application/json`.
-
-Then from **any language**:
-
-```bash
-# Bash / curl
-curl http://127.0.0.1:7878/list-windows
-curl -X POST http://127.0.0.1:7878/click \
-  -H 'content-type: application/json' \
-  -d '{"name":"Submit"}'
-curl http://127.0.0.1:7878/screenshot -o shot.png
-```
-
-```python
-# Python
-import requests
-requests.post("http://127.0.0.1:7878/launch", json={"exe": "notepad.exe"})
-requests.post("http://127.0.0.1:7878/type",
-              json={"role": "edit", "text": "hello from python"})
-```
-
-```javascript
-// Node
-await fetch("http://127.0.0.1:7878/hotkey", {
-  method: "POST",
-  headers: { "content-type": "application/json" },
-  body: JSON.stringify({ mods: ["Ctrl"], key: "s" }),
-});
-```
-
-Endpoints: `/health`, `/tools`, `/click`, `/click-at`, `/type`, `/press`, `/hotkey`, `/screenshot`, `/launch`, `/list-windows`, `/focus-window`, `/window-state`, `/describe`, `/clipboard` (GET/POST), `/run`.
-
-## Quick Start - Rust SDK
-
-```toml
-[dependencies]
-ghost-session = { git = "https://github.com/NORTHTEKDevs/ghost" }
-```
-
-```rust
-use ghost_session::{GhostSession, By, session::Region};
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let session = GhostSession::new()?;
-    session.launch("notepad.exe").await?;
-    let edit = session.find(By::role("edit")).await?;
-    edit.type_text("hello world")?;
-    let png = session.screenshot(Region::full()).await?;
-    std::fs::write("screen.png", png)?;
-    Ok(())
-}
-```
-
-## Reliability Model
-
-Desktop automation driven from an MCP client has a hostile focus environment: between tool
-calls, the client's own terminal usually retakes OS focus. Ghost is built for that:
-
-- **`ghost_act` is atomic** - find → act → verify via screen delta. One call, no
-  cross-call race. Under the default `background` policy it drives the control in
-  place and never raises the window; raise the policy and it additionally brings the
-  target's window to the foreground first (AttachThreadInput, confirmed).
-- **Every action response is honest**: `verified` (did the screen actually change),
-  `focus_confirmed` (was the right window foreground), and a `warning` when either is off - 
-  never a blind `ok:true`. Check `verified` before re-issuing an action.
-- **Nothing is left running.** Browsers Ghost launches are in a kill-on-close job
-  object: when the server ends, however it ends, they end with it
-  (`dies_with_server` on the launch response). At startup the server also sweeps
-  browsers abandoned by earlier servers and reports them in
-  `ghost_stats.orphan_sweep`.
-- **Anchor to a window** - `ghost_see`, `ghost_find`, `ghost_act`, `ghost_key`,
-  `ghost_click_at`, `ghost_scroll`, `ghost_wait`, `ghost_assert` and `ghost_screenshot`
-  (unless `full=true`) all take `window`
-  (a title substring, resolved across your desktop and Ghost's hidden desktops: exact
-  title beats prefix beats substring, a window that is not minimised wins ties). The
-  match becomes the session **anchor**: later calls without `window` target it, never
-  the window the human happens to be using. `ghost_window op=focus` anchors without
-  raising under the background policy; `op=anchor` sets, clears or reports it; every
-  response carries `target {hwnd, title, surface, source}`. A title that matches
-  nothing lists the open windows and returns code -32007.
-- **Your own browser, through its own protocol** - when a window's process was started
-  with `--remote-debugging-port` (Comet, Chrome, Edge, Brave), the same anchored verbs
-  route through the DevTools protocol instead of UI Automation: DOM names and
-  `aria-label`s rather than a sparse tree, selectors that survive re-renders, trusted
-  input events into that renderer, full modifier combos, and focus emulation so pages
-  that check `document.hasFocus()` still accept typing. Nothing about it can reach your
-  foreground. The response carries `route: {browser, port, tab}` and `coords: viewport`;
-  a browser without a port keeps the UI Automation path unchanged. `GHOST_CDP_ROUTE=off`
-  turns it off. Start Comet or Chrome once with `--remote-debugging-port=9333` to get it.
-- **Misses name the alternatives** - "element not found" is followed by the closest
-  element names in that window, so an agent does not spend a round trip on `ghost_see`
-  to learn what the app calls the thing.
-- **Disambiguate duplicates** - `index` selects the nth match when several elements share a
-  name/role (multiple "Close Tab" buttons); responses carry a `matches` count.
-- **It audits itself** - an independent sampler watches the foreground window and the
-  OS's last-input time; any foreground change with no real hardware input behind it is
-  recorded as synthetic, with the tool calls that were in flight. `ghost_stats` reports
-  the tally, so the headline claim is proven continuously, not once.
-- **Read, don't screenshot** - `ghost_see mode=text` extracts a window/page's readable text
-  straight from the accessibility tree: faster and ~10x cheaper in tokens than images.
-- **Latency is visible**: every response carries `ms`, and `escalated: true` flags when a
-  find had to pay a network VLM round trip (local tiers: cache → UIA → OCR are all on-device).
-- **Windows never disappear**: minimized windows stay in `ghost_window list` (with `state`)
-  and `op=focus` auto-restores them. A window that something hid outright (not visible,
-  not minimized) shows up with `op=list include_hidden=true` as `state: "hidden"`, and
-  `op=state state=restore` brings it back without activating it. `op=state` also
-  reaches windows on Ghost's own hidden desktops, so an app started with `op=launch`
-  can be closed by name.
-- **Stop always works**: `ghost_stop` preempts the in-flight call the moment it arrives
-  (dedicated stdin reader), and Ctrl+Alt+G remains the OS-level kill switch.
-
-## Background mode (agent-harness / computer-use)
-
-Agent harnesses (OpenClaw, Hermes/cua-driver, and any MCP client) mount a
-computer-use tool to let an LLM operate the desktop. Ghost is that tool - and it acts
-**without stealing your focus or moving your cursor**, so an agent drives an app
-while you keep working in another window.
-
-Since 0.19 this is the default and it is enforced. The process-wide focus policy
-starts at `background`, and every primitive that could only work by taking the real
-cursor or foreground window is gated behind it. There is no silent fallback: a call
-with no background path returns an error naming the action and the route that
-needs no policy change (launch the app on the hidden desktop, or the browser over
-CDP).
-
-Since 0.22 the policy is also **locked** there. A default is only a promise if the
-agent cannot flip it, and until 0.22 any agent could call `ghost_set_focus_policy
-foreground` the moment a background action was refused, which is exactly when a
-human notices Ghost moving the mouse. Now that call is refused too, with an error
-that says so. The key is the operator's, not the agent's: set
-`GHOST_FOCUS_LOCK=off` in the MCP server's environment (the host config you
-write) to allow `prefer_background` and `foreground` again, and optionally
-`GHOST_FOCUS_POLICY` to start there. `ghost_focus_policy` reports the policy and
-whether it is locked; the server logs both at start.
-
-```jsonc
-// Only if you WANT an agent to be able to drive your real mouse and keyboard:
-{ "mcpServers": { "ghost": {
-    "command": "ghost-mcp",
-    "env": { "GHOST_FOCUS_LOCK": "off", "GHOST_FOCUS_POLICY": "background" }
-}}}
-```
-
-### What you are agreeing to
-
-Ghost has two settings that decide how much of your computer an agent gets.
-Installing the bundle shows both as checkboxes; running the binary directly,
-they are environment variables. The server prints where it stands on both at
-start-up, so the host's log always answers the question.
-
-| Setting | Default | What "on" means |
-| --- | --- | --- |
-| Keep Ghost off your mouse and keyboard (`GHOST_FOCUS_LOCK`) | **on** | The agent can never raise the focus policy, so it drives windows in the background and cannot take your cursor. Turn it off only if you want an agent to use your real input. |
-| Allow shell commands (`GHOST_SHELL`) | **on** | `ghost_shell` runs programs with your account's rights, which is how an agent runs builds, git and scripts - and it is why most agents use Ghost. It is full access to the machine. Turn it off and every shell call refuses and the launch verbs refuse shells and launchers (a denylist that cannot be complete; set `GHOST_LAUNCH_ALLOW` for a strict list); windows, screen reading and input still work, and typing can still start programs. |
-
-The shell is on by default deliberately. It is the capability, not a bonus, and
-a tool that quietly ships without the thing people install it for is worse than
-one that tells you plainly what it can do. If that is more than you want to
-hand over, the checkbox is right there and the refusal is explicit.
-
-Three more environment variables change behaviour; none is set by default:
-
-| Variable | Effect |
-| --- | --- |
-| `GHOST_HTTP_ALLOW_PRIVATE=1` | lets `ghost_http_get`/`ghost_http_post` reach loopback, private and link-local addresses (refused otherwise). These verbs always connect directly: `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` are ignored, because a proxy would resolve the name itself and bypass the address check |
-| `GHOST_BROWSER_PATH` | the Chromium-family browser `ghost_browser_launch` starts, instead of the one Ghost finds |
-| `GHOST_TOOL_DEADLINE_MS` | the per-call deadline for a tool, default 180000 ms (a call's own `timeout_ms` raises it) |
-
-A locked policy still leaves one thing outside Ghost's control: an application
-can activate its OWN window, and Chromium does exactly that when an agent types
-into a page or clicks a button through the accessibility API. Nothing outside
-the browser can stop that call. So since 0.23 Ghost undoes it. The interference
-audit doubles as a sentinel: it is told the moment any window takes the
-foreground (a Windows event, about a millisecond) and hands it straight back
-unless you chose that window yourself - by clicking it or alt-tabbing to it,
-which it can tell apart from typing because it watches for REAL input, not
-synthesized input. `ghost_session_state` reports how often that happened
-(`foreground_handed_back`).
-
-How well it works, measured with an independent observer while a person typed
-into another window for the whole run (`scripts/background-desktop-probe.mjs`,
-`scripts/interference-watch.ps1`):
-
-| | before 0.23 | now |
-| --- | --- | --- |
-| keystrokes delivered to the wrong window | 48 | **1 in six runs of ~493** |
-| how soon a stolen foreground is noticed | never | ~1 ms |
-
-Since 0.23.2 the foreground is watched by event rather than by polling, so the
-hand-back starts about a millisecond after the window takes it. Six clean runs
-with a person typing throughout gave 0, 0, 0, 1, 0 and 0 keystrokes into the
-window Ghost was driving. It is not a guarantee - undoing an activation can
-never be one - and for a guarantee let Ghost start the app, so the activation
-never happens at all.
-
-For zero activation rather than a brief one, let Ghost start the app: anything
-it launches lives on a hidden desktop with its own input queue and cannot take
-your foreground at all, and a browser it launches is driven over CDP.
-
-```jsonc
-// Drive an app while the human keeps working. No flag needed: background is the default.
-ghost_window { "op": "launch", "exe": "notepad.exe" }
-// -> { "surface": "hidden", "desktop": "auto", "window": { "title": "Notepad", ... }, "target": {...} }
-ghost_act { "role": "edit", "action": "type", "text_input": "hello" }   // targets the anchor
-// -> { "verified": true, "focus_preserved": true, "cursor_preserved": true, "mode": "hidden" }
-ghost_act { "window": "Comet", "name": "Post", "action": "click" }      // a window on YOUR desktop
-// -> { "verified": true, "focus_preserved": true, "cursor_preserved": true, "mode": "background" }
-```
-
-- **Launches never surface.** Measured on this repo's CI box: Edge and Chrome
-  activate their first window on launch in every launch style (normal, hidden,
-  minimised, from a background parent, placed at -32000,-32000). A window created on
-  your desktop takes your keyboard the moment it exists. So under the background
-  policy Ghost never creates one there: `ghost_window op=launch`, `ghost_run` launch
-  steps and `ghost_browser_launch mode=windowed` start on a hidden desktop with its
-  own input queue, and the window is anchored so the next `ghost_see` shows it. An
-  independent observer sampling the foreground at 100 ms across a full
-  launch-drive-close run reported zero changes.
-- **True background via posted window messages.** Real Win32 controls are driven
-  with `BM_CLICK` / `WM_LBUTTONDOWN·UP` (click), `WM_SETTEXT` (type) and
-  `WM_MOUSEWHEEL` (scroll). These do not activate the window.
-- **Windowless controls, without the screen.** UWP/WinUI/Chromium/Electron controls
-  have no window handle. Ghost drives them with UI Automation patterns - `Invoke` for
-  a click, `ValuePattern` for typing. Chromium answers some of these by activating
-  its own window when Windows lets it (right after you used that browser): measured
-  on Edge, a `SetValue` on a web input or the address bar, an `Invoke` on a page
-  button and a posted click all pulled the window forward within ~90 ms. Since
-  0.21.10 that is undone on the spot: Ghost watches the foreground around every
-  user-desktop verb, and when the target or any window of its process takes it,
-  hands it back to the window you had, in 30 to 50 ms, and reports
-  `focus_preserved: false` with a `focus_guard` record saying so. Posted single
-  keys reach the page's focused element and do not activate anything.
-- **Shell children never open a terminal.** The MCP server has no console, so a
-  shell started plainly has none either, and every console program it ran (node,
-  python, cargo, cmd) got a brand-new Windows Terminal window that took the
-  foreground for the length of the run. `ghost_shell` now creates its shells with
-  an invisible console; children inherit it and no window ever appears. Measured:
-  nine foreground changes in seven seconds before, zero after, output unchanged.
-- **Verified even while occluded.** `type` is confirmed by reading the control's
-  value back; `click` by a `PrintWindow` before/after delta that renders a window
-  that isn't visible. Every response carries `verified`, `focus_preserved`,
-  `cursor_preserved` - Ghost never claims a background action it can't confirm.
-- **Hidden desktops are the same vocabulary.** A window on the hidden desktop is
-  driven with the same `window=<title>` calls; `target.surface: "hidden"` is the only
-  difference. Chromium and Electron windows there are driven by posted messages
-  rather than UIA actions (Chromium services `Invoke`/`SetValue` on a non-composited
-  desktop only after a ~2 s internal wait; a posted click lands in ~100 ms), and pixel
-  verification is skipped for them because a software render there costs seconds -
-  confirm through `ghost_tab_eval` or `ghost_see`. Real `SendInput` still does not
-  work on a hidden desktop (Windows refuses it off the input desktop), so an app that
-  answers *only* real hardware input needs the `foreground` policy on your own desktop.
-- **Honest about single-instance apps.** Windows 11 Notepad, Explorer, or a browser on
-  its default profile hand a launch to their already-running process, whose windows
-  live on your desktop. Ghost cannot prevent that; it reports `surface: "user"` with a
-  warning rather than claiming the app is hidden.
-
-Supports `click`, `type`, `double_click`, `right_click`, `hover` and scrolling, plus
-`ghost_key` for single keys (Enter/Tab/F-keys/char via `WM_KEYDOWN`/`WM_CHAR`). The
-`background: true` flag is accepted for compatibility; it is the default behaviour.
-
-The clipboard and edit combos work in the background too - Ctrl+C, Ctrl+X, Ctrl+V,
-Ctrl+Z and Ctrl+A are sent as the semantic messages an app actually implements
-(`WM_COPY`, `WM_CUT`, `WM_PASTE`, `WM_UNDO`, `EM_SETSEL`) rather than as a posted
-modifier that apps reading `GetKeyState` would ignore. Combos outside that set are
-rejected rather than silently dropped, because posting cannot set the modifier state
-those apps read; use the `foreground` policy for them.
-
-## Vision: your agent is the model
-
-Ghost is eyes and hands, not a brain. When a model drives it over MCP, that model
-does the looking: `ghost_see` gives it the window as structured elements with
-coordinates, `ghost_see mode=text` gives it the readable text, and
-`ghost_screenshot` gives it pixels when the structure is not enough. Claude, GPT,
-Gemini, and the strong open-weight vision models all read those directly. There is
-no key to set and nothing to configure, and Ghost never has to interpret an image
-on the model's behalf.
-
-**The optional built-in vision tier** exists for callers that have no model of their
-own - the CLI, the HTTP API, an intent file - and for the convenience of a
-description target (`ghost_find description="the blue Submit button"`) when you would
-rather have Ghost resolve it than read the tree yourself. It works with any
-tool-capable vision model behind an OpenAI-compatible endpoint (OpenAI, Gemini, Groq,
-NVIDIA, or a local vLLM / Ollama / LM Studio server) or Anthropic. Point
-`GHOST_VISION_BASE_URL` and `GHOST_VISION_MODEL` at the endpoint and set
-`GHOST_VISION_API_KEY` (a keyless local server needs only the base URL; for Anthropic also
-set `GHOST_VISION_PROVIDER=anthropic`). Ambient `OPENAI_API_KEY`, `NVIDIA_API_KEY` and
-`ANTHROPIC_API_KEY` are ignored, so a screenshot is never sent to a cloud provider because
-of an unrelated key. Without it,
-description targets return a clear error naming the alternative; every other tool is
-unaffected.
-
-## Emergency Stop
-
-Press **Ctrl+Alt+G** at any time to immediately halt every acting call. Read-only
-queries (`ghost_see`, `ghost_snapshot`, `ghost_window` list) keep answering, so you
-can still inspect what happened while everything is stopped.
-- All queued actions are cancelled
-- Any held modifier keys (Shift, Ctrl, Alt) are released immediately
-- No stuck keys, no stuck modifier states
-- **Session-wide since 0.19.** The stop is a named kernel event
-  (`Local\ghost-emergency-stop-event`), so one press halts every Ghost process in
-  your logon session, not just the one that happened to register the hotkey.
-  On Linux the same two states are marker files (`stop`, `human-stop`) in
-  `$XDG_RUNTIME_DIR/ghost/`, or `/tmp/ghost-stop-<uid>/` where
-  `XDG_RUNTIME_DIR` is unset; the directory must be yours and closed to other
-  users (mode 0700), or every Ghost process counts as stopped. Ghost processes
-  of one user that see different `XDG_RUNTIME_DIR` values do not share a stop.
-- **Only you can lift your stop (0.24.2).** A stop raised with Ctrl+Alt+G is
-  marked as yours. An agent's `ghost_reset` cannot lift it; the agent is told
-  only that you stopped Ghost and to wait for you. You resume with either:
-  - **Ctrl+Alt+Shift+G**, pressed on the keyboard (a key a program injects is
-    ignored), or
-  - **`ghost reset`** in a terminal you type into: it shows a short word and you
-    type it back (a pipe or a script is refused).
-
-  A stop an agent raised itself with `ghost_stop` is lifted by its `ghost_reset`
-  as before. The limit: a program running as your user can still change the
-  named stop event directly; this protects you from an agent acting through
-  Ghost, not from arbitrary code you let it run.
-- While stopped, Ghost may still close what it created itself: tabs and
-  browsers it launched, and its own hidden desktops. It never closes your
-  windows, or tabs in a browser it only attached to.
-- Programs started by `ghost_shell` end with the stop, including whatever a
-  command launched, not just the shell itself. Your Ctrl+Alt+G stop also reaches
-  programs started by a Ghost server that has since restarted, for up to 24
-  hours and within the same boot (and only while they are still in a job); an
-  agent's `ghost_stop` does not. Start an app that should outlive a stop with
-  `ghost_window op=launch`. On Linux the stop ends each shell's process group,
-  and the resume key works only where XInput2 can tell a real key from an
-  injected one.
-- A Ghost process that cannot read the shared stop event fails closed: it
-  refuses every action and its error says why, rather than missing a stop
-  raised elsewhere.
-
-## Element Locators
-
-```rust
-session.find(By::name("Save")).await?          // by accessible name (substring)
-session.find(By::role("edit")).await?          // by UIA control type
-session.find(By::role("button")).await?
-```
-
-From the CLI: `ghost click --name "Save"` or `ghost click --role button`.
-
-## Intents - Declarative Flows
-
-Write reproducible multi-step flows as JSON. The FSM executor supports retries, timeouts, and JSONLogic conditions for `abort_if` / `retry_if`.
+Add to `~/.cursor/mcp.json` (all projects) or `.cursor/mcp.json` (one project):
 
 ```json
 {
-  "ops": [
-    { "op": "launch", "exe": "notepad.exe" },
-    { "op": "focus_window", "name": "Notepad" },
-    { "op": "type", "role": "edit", "text": "hello" },
-    { "op": "hotkey", "mods": ["Ctrl"], "key": "s" }
-  ]
+  "mcpServers": {
+    "ghost": { "command": "C:/Users/YOU/AppData/Local/Programs/ghost/ghost-mcp.exe" }
+  }
 }
 ```
 
-Run with `ghost run flow.json`, `POST /run`, or `ghost_execute_intent` over MCP.
+</details>
 
-## Architecture
+<details>
+<summary><b>VS Code</b> (Copilot agent mode)</summary>
 
-```
-ghost-cli     ghost-http     ghost-mcp     Rust SDK
-    \            |            /   |           |
-     \           |           /    |           |
-      +-----> ghost-session <-----|-----------+   ← safe Rust API
-              /           \       |
-      ghost-core      ghost-linux |               ← one cfg alias picks the engine
-          |                |      |
-    Win32 UIA,       AT-SPI2 over |               ← ghost-core: SendInput, DXGI/GDI
-    posted msgs      D-Bus, XTEST |               ← ghost-linux: portal / uinput
-          |                |      |
-      Windows OS        Linux     +-> ghost-browser  ← CDP over the DevTools port,
-                                                        engine-independent
+Add to `.vscode/mcp.json`:
+
+```json
+{
+  "servers": {
+    "ghost": { "type": "stdio", "command": "C:/Users/YOU/AppData/Local/Programs/ghost/ghost-mcp.exe" }
+  }
+}
 ```
 
-Supporting crates: `ghost-cache` (UIA snapshot + delta), `ghost-intent` (FSM +
-JSONLogic executor), `ghost-ground` (the locator tier cascade), `ghost-platform`
-(the capability matrix reported per OS).
+</details>
 
-## The built-in vision tier (Set-of-Marks)
+<details>
+<summary><b>Codex CLI</b></summary>
 
-This section describes the optional tier above; an agent driving Ghost over MCP
-gets the same information from `ghost_see` and does not need it.
+Add to `~/.codex/config.toml`:
 
-When you locate an element by natural-language description (`ghost_find
-description="the blue submit button"`, or when a name/text lookup misses and
-escalates to the VLM), Ghost does **not** ask the model to guess pixel
-coordinates - models are unreliable at that (in testing, a plain "give me the
-coordinates of the equals button" landed ~250px off the target). Instead it uses
-**Set-of-Marks**: it overlays numbered badges on the window's detected elements,
-sends that marked screenshot plus each badge's accessible-name label, and asks
-the model which *number* matches. The number maps back to that element's exact
-rect, so the result is a real on-element coordinate, not a regression guess.
+```toml
+[mcp_servers.ghost]
+command = "C:/Users/YOU/AppData/Local/Programs/ghost/ghost-mcp.exe"
+```
 
-In a live check on Calculator, four descriptions ("the equals button", "the plus
-button", "the number seven key", "the multiply button") each landed exactly on
-the correct button - versus ~250px off with coordinate regression.
+</details>
 
-Honest scope: when detected elements carry accessible names (most apps), the
-labels do much of the disambiguation; for unlabeled icons the model leans on the
-badge's visual position/appearance.
+<details>
+<summary><b>Windsurf, Cline, or any other MCP client</b></summary>
 
-**Canvas / no-accessibility-tree apps.** When the UIA tree is sparse (custom-drawn
-UIs, remote-desktop surfaces, game canvases), Ghost augments the Set-of-Marks
-candidates with a built-in **CPU classical-CV detector** (`ghost_ground::cv_detect`):
-edge density → connected components → size/aspect filter, no GPU and no model
-download. It gives the VLM real boxes to pick from where the accessibility tree
-has nothing. It is coarser than a trained detector - an optional OmniParser ONNX
-tier (`--features yolo` + `GHOST_YOLO_MODEL`) plugs into the same Set-of-Marks
-path when a GPU model is available. The CV-marks → VLM-pick end-to-end needs a
-configured vision key.
+Register `ghost-mcp` as a **stdio** server with no arguments. Most clients take
+this shape:
 
-## Benchmark - task success, not "did the call return ok"
+```json
+{
+  "mcpServers": {
+    "ghost": { "command": "/home/YOU/.local/bin/ghost-mcp" }
+  }
+}
+```
 
-`bench/` holds a reproducible end-to-end benchmark: it drives the real
-`ghost-mcp` binary through 14 Windows desktop tasks and scores each by
-**re-observing the actual result** (does the Calculator display really read 42?
-is the typed value really present?), never by trusting a tool call's return.
+Registry-aware clients can also install `io.github.NORTHTEKDevs/ghost` from
+the [MCP registry](https://registry.modelcontextprotocol.io).
 
-Latest run (see [`bench/results/latest.md`](bench/results/latest.md)):
+</details>
 
-> **14/14 tasks passed (100%)**, median ~2.9 s per task (full wall-clock incl.
-> app launch) - perception, click/keyboard action+verify, waits, window
-> management (list/minimize/restore), text extraction, disambiguation, flow
-> chaining, clipboard round-trip, structured errors, element screenshots, and
-> value assertions.
+### 3. Try it
 
-And it proves it can *fail*: `--self-test` runs deliberately-wrong negative
-controls (assert the display reads 99 when it reads 42, etc.) and passes only if
-the harness scores every one as FAIL - so the green run above is a real signal,
-not a rubber stamp.
+Restart your client so it picks up the server. Its tool list should now show
+the `ghost_*` tools (54 on Windows); if it does not, see
+[troubleshooting](#troubleshooting). Then ask your agent something like:
 
-Reproduce on any Windows 10/11 machine:
+> Use Ghost to list my open windows, then read the text of the one I'm
+> working in and summarise it.
+
+To check the whole background-and-verify loop on your machine:
 
 ```bash
-cargo build --release -p ghost-mcp
-python bench/run_bench.py             # exit 0 iff every task passed
-python bench/run_bench.py --self-test # exit 0 iff the harness caught every planted failure
+ghost verify
 ```
 
-### Reliability soak
+## How an agent uses it
 
-`bench/soak.py` drives many act-then-verify cycles and gates on the signals unit
-tests can't see: how often `verified` comes back null/false, focus-loss rate,
-error rate, whether each action's real effect happened (the display is
-re-observed, never trusted from the return), and latency percentiles.
+The loop is look, act, confirm:
 
-> Latest (160 acts): **PASS** - verify-null 0.0, focus-loss 0.0, effect-mismatch
-> 0 (100% correct), p50 149ms / p95 155ms. See
-> [`bench/results/soak.md`](bench/results/soak.md).
+1. `ghost_see window="Invoice Editor"` returns every control in the window with
+   its name, role, state and position. `mode=text` returns the readable text
+   instead, about ten times cheaper than an image.
+2. `ghost_act name="Save" action="click"` drives the control in the background
+   and returns `verified: true` only when the change shows.
+3. `ghost_screenshot` returns pixels when a chart or canvas needs the model's
+   own eyes.
+
+Around that loop: `ghost_window` launches, lists and closes windows (on the
+hidden desktop by default), `ghost_wait` and `ghost_assert` turn "did it work"
+into a check, `ghost_shell` runs builds, git and scripts, and the
+`ghost_browser_*` / `ghost_tab_*` tools drive browser tabs over the DevTools
+protocol. All 54 tools with every parameter: [docs/tools.md](docs/tools.md).
+
+Not using an agent? The same engine is a CLI and a local REST API:
 
 ```bash
-python bench/soak.py                  # exit 0 iff every reliability threshold holds
-python bench/soak.py --cycles 250     # ~1000 acts
-python bench/soak.py --self-test      # exit 0 iff the harness flags a planted-wrong effect
+ghost list-windows
+ghost click --name "Save"
+ghost-http --addr 127.0.0.1:7878   # then: curl http://127.0.0.1:7878/list-windows
 ```
 
-We deliberately publish only Ghost's own measured numbers - never invented
-columns for other tools. `bench/README.md` gives an honest protocol for
-comparing against Playwright-MCP / Computer Use / UI-TARS, and explains why a
-naive same-suite comparison isn't apples-to-apples (Playwright is browser-only;
-vision agents need an API + VM).
+Window anchoring, what every response promises, intents (JSON flows with
+retries and conditions), the HTTP API and the Rust SDK:
+[docs/usage.md](docs/usage.md). Runnable scripts: [`examples/`](examples).
 
-### Microbenchmarks
+## Safety model
 
-| Operation                          | Measured  |
-| ---------------------------------- | --------- |
-| Region capture, GDI, any size      | ~16.5 ms  |
-| Region capture, DXGI, 1600x900     | ~70-83 ms |
-| BGRA→RGBA convert, 400x300 region  | ~206 µs   |
-| JSONLogic eq/var                   | 32.2 ns   |
-| Intent compile (3op)               | 1.49 µs   |
+Anything that can reach a Ghost server can control the desktop as you, so
+Ghost is built around who can reach it, what an agent may do, and how you take
+control back.
 
-End-to-end capture measurement (release, `crates/ghost-core/tests/capture_latency_probe.rs`)
-corrected the v0.10.0 assumption: the DXGI *acquire* dominates and hits a cliff on
-large windows, so region captures (act-verify, screenshots, Set-of-Marks) route
-through flat ~16.5ms GDI BitBlt in v0.11.0; full-screen still uses DXGI. Run the
-convert microbench: `cargo bench -p ghost-core --bench convert`. Older baselines:
-`docs/benches/v030-baseline.md`.
+- **Emergency stop.** <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>G</kbd> halts every
+  acting call in every Ghost process, releases held keys and ends programs
+  Ghost's shells started. Read-only calls keep answering.
+- **Human-only resume.** A stop you raised can only be lifted by you:
+  <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> on the real
+  keyboard, or `ghost reset` typed in a terminal. An agent's `ghost_reset` is
+  refused.
+- **Background lock.** The focus policy is locked to `background`, so an agent
+  cannot take your mouse, keyboard or foreground window. Only the operator
+  unlocks it (`GHOST_FOCUS_LOCK=off`).
+- **Shell switch.** `ghost_shell` is on by default and has your account's
+  rights. `GHOST_SHELL=off` refuses it and blocks launching shells and script
+  hosts; `GHOST_LAUNCH_ALLOW` turns launching into an allowlist.
+- **SSRF guard.** `ghost_http_get` and `ghost_http_post` resolve the host first,
+  refuse loopback, private, link-local and reserved addresses, and ignore proxy
+  settings. Browser tabs accept http(s) only.
+- **Stop scopes.** `ghost_stop scope=process` stops one server; `everywhere`
+  (the default) stops them all. An unknown scope is rejected.
+- **Local transports only.** `ghost-mcp` speaks stdio and opens no port.
+  `ghost-http` binds loopback only and refuses requests from web pages.
+- **Nothing leaves your machine.** No telemetry and no vision API key: your
+  agent's own model reads what Ghost returns. The only outbound traffic is the
+  optional vision tier, to an endpoint you configure.
 
-## Requirements
+Details and limits: [docs/security-model.md](docs/security-model.md). How
+background control works and what was measured:
+[docs/background-mode.md](docs/background-mode.md).
 
-- **Windows** 10 build 19041 or later
-- **Linux** with `at-spi2-core` and a desktop session (X11 or Wayland);
-  `xdg-desktop-portal-gnome` additionally for Wayland input and capture
-- A Chromium-family browser (Chrome, Comet, Edge, or Brave) for the
-  `ghost_browser_*` / `ghost_tab_*` tools only; the desktop verbs need none
-- Rust stable (only for building from source)
+## Platform support
+
+| Platform | Status |
+| --- | --- |
+| **Windows 10 (19041+) and 11** | Full and verified. UI Automation, posted window messages, hidden desktops, DXGI/GDI capture. |
+| **Linux, X11** | Functional, verified by live CI tests against a real GTK app. AT-SPI2, XTEST, X11 capture. |
+| **Linux, Wayland** | Implemented, not yet verified on hardware. Same AT-SPI2 layer; input and capture through portals or uinput. Run `ghost doctor` first and please file what you find. |
+| **macOS** | Not yet. A compiling scaffold with an implementation map. |
+
+The focus policy and hidden desktops are Windows features. The browser tools
+need a Chromium-family browser (Chrome, Edge, Brave or Comet). Full matrix:
+[docs/cross-platform.md](docs/cross-platform.md); Linux setup:
+[docs/linux-fedora.md](docs/linux-fedora.md).
+
+## Troubleshooting
+
+**"Windows protected your PC" on first run.** The binaries are not code-signed
+yet. Choose *More info -> Run anyway*, or
+[verify the download](docs/install.md#check-where-a-download-came-from) first.
+
+**`ghost: command not found`.** Open a new terminal after installing. On Linux,
+add `export PATH="$HOME/.local/bin:$PATH"` to your shell's rc file.
+
+**The Ghost tools do not appear in the client.** Use an absolute path to
+`ghost-mcp`, restart the client, and check that `ghost-mcp --version` prints a
+version.
+
+**"element not found".** The error lists the closest names in that window;
+`ghost_see window="..."` shows every control and its name.
+
+**"focus policy is locked".** By design: that action would take your screen.
+Let Ghost start the app (`ghost_window op=launch`) or the browser
+(`ghost_browser_launch`) and drive it there.
+
+**"the human stopped Ghost".** Someone pressed the emergency stop. Resume with
+<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> or `ghost reset`.
+
+**Linux: windows have no elements.** Turn on the accessibility bus (step 1) and
+restart the apps; `ghost doctor` checks this.
+
+**An antivirus quarantined Ghost.** See [docs/antivirus.md](docs/antivirus.md).
+
+Still stuck? [Open an issue](https://github.com/NORTHTEKDevs/ghost/issues/new/choose)
+with the output of `ghost doctor`.
+
+## FAQ
+
+**Which apps can it drive?** Anything that exposes accessibility: native Win32,
+WinForms, WPF, UWP/WinUI, Electron, Chromium, Qt and GTK. Canvas-only apps
+(games, remote desktops) expose little, so the agent relies on screenshots
+there.
+
+**How is this different from Playwright or Computer Use?** Playwright drives
+web pages; Ghost drives the desktop (and tabs too). Screenshot-based computer
+use guesses coordinates from pixels and takes your screen; Ghost acts on named
+controls in the background and verifies each action. See
+[docs/comparison.md](docs/comparison.md).
+
+**Can several agents use it at once?** Yes. Calls run in parallel, and a
+second Ghost process runs alongside the first without contending for the mouse.
+
+**How do I update?** Quit your MCP client, then re-run the install block from
+step 1. To remove Ghost, see [uninstall](docs/install.md#uninstall).
+
+## Documentation
+
+[Install](docs/install.md) · [Using Ghost](docs/usage.md) · [Configuration](docs/configuration.md) ·
+[Security model](docs/security-model.md) · [Background mode](docs/background-mode.md) ·
+[Tool reference](docs/tools.md) · [Benchmarks](docs/benchmarks.md) ·
+[Linux](docs/linux-fedora.md) · [All docs](docs/README.md)
+
+## Contributing and security
+
+Contributions are welcome: read [CONTRIBUTING.md](CONTRIBUTING.md) and the
+[code of conduct](CODE_OF_CONDUCT.md). To report a vulnerability, follow
+[SECURITY.md](SECURITY.md) rather than opening a public issue.
 
 ## License
 
-MIT - Copyright 2026 Northtek
+[MIT](LICENSE). Copyright 2026 Northtek.
+
+Ghost is a general-purpose automation tool. Use it on systems you own or are
+authorized to automate, and within the terms of the software you drive.

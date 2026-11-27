@@ -9,10 +9,25 @@ change behaviour.
 
 ### Fixed
 
-- **`ghost_tab_navigate` rejects an invalid `timeout_ms`**, as
-  `ghost_tab_open` does: an integer from 1 to 600000, default 30000. A zero
-  used to time out at once, and a negative number or a string was silently
-  replaced by 30 seconds.
+- **`ghost_tab_navigate`, `ghost_tab_click`, `ghost_tab_wait_for` and
+  `ghost_desktop_wait_for_window` reject an invalid `timeout_ms`**, as
+  `ghost_tab_open` does: an integer from 1 to 600000, with each tool's default
+  unchanged. A zero used to time out at once, a negative number or a string was
+  silently replaced by the default, and a huge number waited without bound. The
+  schemas now state the bounds.
+- **`ghost_screenshot max_dim=0` returns the full-size image**, on Windows and
+  Linux. For a window (named, anchored, or on a hidden desktop) it returned a
+  1x1 picture, because 0 was taken as the size to shrink to instead of "no
+  resize". Found while recording the README demo. The schema now also says what
+  0 does: no resize everywhere, and a lossless PNG only with `full=true`.
+
+### Documentation
+
+- A shorter README with a demo recorded on Ghost's own hidden desktop,
+  copy-paste setup for each MCP client, and a FAQ. Its deep sections moved to
+  `docs/`: install, configuration, security model, background mode,
+  benchmarks, and a tool reference generated from the server and checked by a
+  test.
 
 ## [0.24.4] - the rough edges an end-to-end test found
 
