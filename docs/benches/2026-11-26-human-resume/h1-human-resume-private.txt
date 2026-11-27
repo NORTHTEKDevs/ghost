@@ -1,7 +1,7 @@
->>> ghost_window {"op":"launch","exe":"C:/Users/Krist/projects/active/ghost/target-private/debug/ghost-testbed.exe"}  (112ms)
+>>> ghost_window {"op":"launch","exe":"<repo>/target-private/debug/ghost-testbed.exe"}  (112ms)
 <<< ok {"desktop":"auto","note":"started on a hidden desktop (never on your screen) and anchored: ghost_see / ghost_act / ghost_key now target it by default. Drive it 
 
-$$ powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/Krist/ghost-published-0.24.1/private/ev.ps1 -Ns h1final-386 -Which both -Up 1
+$$ powershell -NoProfile -ExecutionPolicy Bypass -File <home>/ghost-published-0.24.1/private/ev.ps1 -Ns h1final-386 -Which both -Up 1
 human raised
 stop raised
 
@@ -20,27 +20,27 @@ stop raised
 <<< ERR -32004: ghost_act refused: the human stopped Ghost (Ctrl+Alt+G); only the human can resume it - wait for them
     hint: automation is stopped (Ctrl+Alt+G or ghost_stop) - issue no more actions; a stop the human raised is theirs to lift, so wait for them to resume
 
-$$ powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/Krist/ghost-published-0.24.1/private/ev.ps1 -Ns h1final-386 -Which read
+$$ powershell -NoProfile -ExecutionPolicy Bypass -File <home>/ghost-published-0.24.1/private/ev.ps1 -Ns h1final-386 -Which read
 stop=SIGNALLED
 human=SIGNALLED
 
 ghost reset: refused - run it yourself in an interactive terminal; it shows a word for you to type back (a pipe or a script cannot)
-$$ C:/Users/Krist/projects/active/ghost/target-private/debug/ghost.exe reset
+$$ <repo>/target-private/debug/ghost.exe reset
 exit 2: ghost reset: refused - run it yourself in an interactive terminal; it shows a word for you to type back (a pipe or a script cannot)
 
-$$ python C:/Users/Krist/ghost-published-0.24.1/private/pty_reset.py C:/Users/Krist/projects/active/ghost/target-private/debug/ghost.exe
+$$ python <home>/ghost-published-0.24.1/private/pty_reset.py <repo>/target-private/debug/ghost.exe
 [pty] challenge word: pjbrx
 [pty] transcript: Type pjbrx to lift the emergency stop: pjbrx lifted the emergency stop the human raised (Ctrl+Alt+G); every Ghost process resumes
 [pty] exit code: 0
 
-$$ powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/Krist/ghost-published-0.24.1/private/ev.ps1 -Ns h1final-386 -Which read
+$$ powershell -NoProfile -ExecutionPolicy Bypass -File <home>/ghost-published-0.24.1/private/ev.ps1 -Ns h1final-386 -Which read
 stop=clear
 human=clear
 
 >>> ghost_act {"action":"click","name":"Count","window":"Ghost Testbed"}  (199ms)
 <<< ok {"action":"click","cursor_preserved":true,"focus_preserved":true,"mode":"hidden","name":"Count 0","ok":true,"rect":{"bottom":351,"left":378,"right":488,"top":32
 
-$$ powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/Krist/ghost-published-0.24.1/private/ev.ps1 -Ns h1final-386 -Which stop -Up 1
+$$ powershell -NoProfile -ExecutionPolicy Bypass -File <home>/ghost-published-0.24.1/private/ev.ps1 -Ns h1final-386 -Which stop -Up 1
 stop raised
 
 >>> ghost_reset {"scope":"process"}  (0ms)

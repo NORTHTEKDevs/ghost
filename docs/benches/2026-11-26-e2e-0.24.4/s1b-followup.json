@@ -10,7 +10,7 @@
 "tool": "ghost_window",
 "args": {
 "op": "launch",
-"exe": "C:/Users/Krist/projects/active/ghost/target-improve/release/ghost-testbed.exe --title \"E2E Testbed 0243b\""
+"exe": "<repo>/target-improve/release/ghost-testbed.exe --title \"E2E Testbed 0243b\""
 },
 "expect": "ok",
 "contains": "hidden desktop",

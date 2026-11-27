@@ -4,7 +4,7 @@
 {"tool": "ghost_shell", "args": {"cmd": "echo e2e-cmd", "shell": "cmd"}, "expect": "ok", "contains": "e2e-cmd", "max": 300},
 {"tool": "ghost_shell", "args": {"cmd": "Get-Item C:/definitely/not/here"}, "contains": "\"exit_code\":1", "max": 400},
 {"tool": "ghost_shell", "args": {"cmd": "Write-Output 1", "cwd": "C:/definitely/not/here"}, "expect": "err", "max": 300},
-{"tool": "ghost_shell", "args": {"cmd": "(Get-Location).Path", "cwd": "~"}, "expect": "ok", "contains": "Krist", "max": 300},
+{"tool": "ghost_shell", "args": {"cmd": "(Get-Location).Path", "cwd": "~"}, "expect": "ok", "contains": "Users", "max": 300},
 {"tool": "ghost_shell", "args": {"cmd": "Start-Sleep 30", "timeout_ms": 1500}, "max": 300},
 {"note": "F one-shot: a child the command starts ends with the job"},
 {"tool": "ghost_shell", "args": {"cmd": "$psi = New-Object System.Diagnostics.ProcessStartInfo 'ping.exe','-n 120 127.0.0.1'; $psi.UseShellExecute=$false; $psi.CreateNoWindow=$true; $psi.RedirectStandardOutput=$true; $c=[Diagnostics.Process]::Start($psi); 'CHILD=' + $c.Id"}, "expect": "ok", "capture": {"c1": "CHILD=(\\d+)"}, "max": 300},

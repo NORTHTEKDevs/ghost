@@ -116,7 +116,7 @@ direction from `reporter-repro.md`, with the same proof: no change while stopped
 >>> ghost_act {"action":"click","name":"Advanced view","role":"checkbox","mode":"instant_only","window":"Character Map"}  (1ms)
 <<< {"content":[{"text":"{\n  \"data\": null,\n  \"error\": \"ghost_act refused: emergency stop active - Ghost is stopped and refuses actions until ghost_reset\",\n  \"error_code\": -32004,\n  \"foreground\": {\n    \"hwnd\": 132208,\n    \"title\":\"<redacted>\"\n  },\n  \"ms\": 0,\n  \"ok\": false,\n  \"suggested_action\": \"automation was stopped - call ghost_reset before issuing more actions\"\n}","type":"text"}],"isError":true}
 
->>> ghost_window {"op":"launch","exe":"C:/Users/Krist/projects/active/ghost/target/release/ghost-testbed.exe"}  (0ms)
+>>> ghost_window {"op":"launch","exe":"<repo>/target/release/ghost-testbed.exe"}  (0ms)
 <<< {"content":[{"text":"{\n  \"data\": null,\n  \"error\": \"ghost_window refused: emergency stop active - Ghost is stopped and refuses actions until ghost_reset\",\n  \"error_code\": -32004,\n  \"foreground\": {\n    \"hwnd\": 132208,\n    \"title\":\"<redacted>\"\n  },\n  \"ms\": 0,\n  \"ok\": false,\n  \"suggested_action\": \"automation was stopped - call ghost_reset before issuing more actions\"\n}","type":"text"}],"isError":true}
 
 >>> ghost_key {"key":"Enter"}  (0ms)
@@ -176,7 +176,7 @@ verify exit=0
 ## After: fresh process launches and closes the testbed hidden (redacted)
 
 ```
->>> ghost_window {"op":"launch","exe":"C:/Users/Krist/projects/active/ghost/target/release/ghost-testbed.exe"}  (123ms)
+>>> ghost_window {"op":"launch","exe":"<repo>/target/release/ghost-testbed.exe"}  (123ms)
 <<< {"content":[{"text":"{\"data\":{\"desktop\":\"auto\",\"note\":\"started on a hidden desktop (never on your screen) and anchored: ghost_see / ghost_act / ghost_key now target it by default. Drive it by title like any other window; ghost_desktop_close id=auto ends it.\",\"pid\":31988,\"surface\":\"hidden\",\"target\":{\"desktop\":\"auto\",\"hwnd\":108530050,\"pid\":31988,\"source\":\"anchor\",\"surface\":\"hidden\",\"title\":\"Ghost Testbed\"},\"window\":{\"hwnd\":108530050,\"pid\":31988,\"title\":\"Ghost Testbed\"}},\"foreground\":{\"hwnd\":132208,\"title\":\"<redacted>\"},\"ms\":122,\"ok\":true}","type":"text"}]}
 
 >>> ghost_desktop_close {"id":"auto"}  (1ms)

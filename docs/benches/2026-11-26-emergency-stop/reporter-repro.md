@@ -88,7 +88,7 @@ does not report toggle state for this control.
 >>> ghost_act {"action":"click","name":"Advanced view","role":"checkbox","mode":"instant_only","window":"Character Map"}  (0ms)
 <<< {"content":[{"text":"{\n  \"data\": null,\n  \"error\": \"ghost_act refused: emergency stop active - Ghost is stopped and refuses actions until ghost_reset\",\n  \"error_code\": -32004,\n  \"foreground\": {\n    \"hwnd\": 65898,\n    \"title\": \"\"\n  },\n  \"ms\": 0,\n  \"ok\": false,\n  \"suggested_action\": \"automation was stopped - call ghost_reset before issuing more actions\"\n}","type":"text"}],"isError":true}
 
->>> ghost_window {"op":"launch","exe":"C:/Users/Krist/projects/active/ghost/target/release/ghost-testbed.exe"}  (0ms)
+>>> ghost_window {"op":"launch","exe":"<repo>/target/release/ghost-testbed.exe"}  (0ms)
 <<< {"content":[{"text":"{\n  \"data\": null,\n  \"error\": \"ghost_window refused: emergency stop active - Ghost is stopped and refuses actions until ghost_reset\",\n  \"error_code\": -32004,\n  \"foreground\": {\n    \"hwnd\": 65898,\n    \"title\": \"\"\n  },\n  \"ms\": 0,\n  \"ok\": false,\n  \"suggested_action\": \"automation was stopped - call ghost_reset before issuing more actions\"\n}","type":"text"}],"isError":true}
 
 >>> ghost_key {"key":"Enter"}  (1ms)

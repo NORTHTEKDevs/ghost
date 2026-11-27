@@ -1,7 +1,7 @@
 # server pid 13364, env {"GHOST_SHELL":"off"}
 
 ## D2 type with value read-back (ValuePattern), negative control, key names
->>> ghost_window {"op":"launch","exe":"C:/Users/Krist/projects/active/ghost/target-improve/release/ghost-testbed.exe --title \"E2E Testbed 0243b\""}  (112ms)
+>>> ghost_window {"op":"launch","exe":"<repo>/target-improve/release/ghost-testbed.exe --title \"E2E Testbed 0243b\""}  (112ms)
 <<< ok {"desktop":"auto","note":"started on a hidden desktop (never on your screen) and anchored: ghost_see / ghost_act / ghost_key now target it by default. Drive it by title like any other window; ghost
 [PASS]
 

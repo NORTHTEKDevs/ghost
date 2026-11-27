@@ -72,7 +72,7 @@ let btn = session.find(By::name("Save")).await?;
 btn.click().await?;
 
 let input = session.find(By::role("edit").near("Username")).await?;
-input.type_text("kristian").await?;
+input.type_text("hello").await?;
 
 session.click_at(420, 880).await?;
 

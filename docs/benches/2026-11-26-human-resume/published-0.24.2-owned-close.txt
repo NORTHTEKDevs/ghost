@@ -1,4 +1,4 @@
->>> ghost_window {"op":"launch","exe":"C:/Users/Krist/projects/active/ghost/target-improve/release/ghost-testbed.exe"}  (121ms)
+>>> ghost_window {"op":"launch","exe":"<repo>/target-improve/release/ghost-testbed.exe"}  (121ms)
 <<< ok {"desktop":"auto","note":"started on a hidden desktop (never on your screen) and anchored: ghost_see / ghost_act / ghost_key now target it by default. Drive it 
 
 >>> ghost_browser_launch {"id":"pub","mode":"headless"}  (240ms)

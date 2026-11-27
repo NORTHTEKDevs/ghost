@@ -15,7 +15,7 @@
 
 
 ## C reads on a Ghost-launched testbed (hidden desktop)
->>> ghost_window {"op":"launch","exe":"C:/Users/Krist/projects/active/ghost/target-improve/release/ghost-testbed.exe --title \"E2E Testbed 0243\""}  (115ms)
+>>> ghost_window {"op":"launch","exe":"<repo>/target-improve/release/ghost-testbed.exe --title \"E2E Testbed 0243\""}  (115ms)
 <<< ok {"desktop":"auto","note":"started on a hidden desktop (never on your screen) and anchored: ghost_see / ghost_act / ghost_key now target it by default. Drive it by title like any other window; ghost_desktop_close id=auto ends it.","pid":29332,"surface":"hidden","target":{"desktop":"auto","hwnd":27920944,"pid":29332,"source":"anchor","surface":"hidden","title":"E2E Testbed 0243"},"window":{"hwnd":27920944,"pid":29332,"title":"E2E Testbed 0243"}}
 [PASS]
 

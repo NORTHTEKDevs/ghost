@@ -12,4 +12,4 @@ ghost verify - proving the product claims on this machine
   [PASS] foreground window never changed                hwnd Some(1116950) -> Some(1116950)
 
 ALL CLAIMS HOLD: 10 checks passed in 8.0s. Ghost operates as advertised on this machine.
-exit=0 wall_s=8 GHOST_MCP_PATH=/c/Users/Krist/projects/active/ghost/target-improve/release/ghost-mcp.exe
+exit=0 wall_s=8 GHOST_MCP_PATH=<repo>/target-improve/release/ghost-mcp.exe
