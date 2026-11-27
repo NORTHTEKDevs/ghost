@@ -89,12 +89,15 @@ quit your MCP client and run the same block again.
 
 ```bash
 url=https://github.com/NORTHTEKDevs/ghost/releases/latest/download
-mkdir -p ghost-download ~/.local/bin
+mkdir -p ghost-download
 curl -L "$url/ghost-linux-x86_64.tar.gz" | tar -xz -C ghost-download
-cd ghost-download && install -m 0755 ghost ghost-mcp ghost-http ~/.local/bin/
-gsettings set org.gnome.desktop.interface toolkit-accessibility true
-~/.local/bin/ghost doctor
+./ghost-download/install.sh
 ```
+
+The installer copies `ghost`, `ghost-mcp` and `ghost-http` to `~/.local/bin`,
+turns on the accessibility setting, registers the server with Claude Code if
+the `claude` CLI is installed (`--no-register` skips that) and runs
+`ghost doctor`. It never uses sudo.
 
 If `ghost` is not found afterwards, add `~/.local/bin` to your PATH
 (`export PATH="$HOME/.local/bin:$PATH"` in your shell's rc file).

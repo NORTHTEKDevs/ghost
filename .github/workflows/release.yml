@@ -184,6 +184,19 @@ jobs:
           tar -czf ghost-linux-x86_64.tar.gz -C dist .
           sha256sum ghost-linux-x86_64.tar.gz > ghost-linux-x86_64.tar.gz.sha256
 
+      # Run the installer from the exact archive that ships, with cargo off
+      # PATH: it must install the binaries beside it, never try to build.
+      # doctor may FAIL on a runner with no desktop, so the exit code is not
+      # the check; the installed binaries are.
+      - name: Install from the archive
+        run: |
+          set -euo pipefail
+          t="$(mktemp -d)"
+          tar -xzf ghost-linux-x86_64.tar.gz -C "$t"
+          env -i HOME="$t/home" PATH=/usr/bin:/bin \
+            bash "$t/install.sh" --no-register --prefix "$t/bin" || true
+          for b in ghost ghost-mcp ghost-http; do "$t/bin/$b" --version; done
+
       - name: Pack the MCP Bundle (.mcpb)
         run: |
           set -euo pipefail
@@ -265,21 +278,16 @@ jobs:
             **Linux** (x86_64) — needs `at-spi2-core` and a desktop session:
 
             ```bash
-            tar -xzf ghost-linux-x86_64.tar.gz
             sudo dnf install at-spi2-core at-spi2-atk        # or apt install
-            gsettings set org.gnome.desktop.interface toolkit-accessibility true
-            ./ghost doctor                                   # verify the machine
+            mkdir ghost && tar -xzf ghost-linux-x86_64.tar.gz -C ghost && ./ghost/install.sh
             ```
 
-            Restart any applications that were already open after enabling
-            accessibility — they only publish an accessible tree at startup.
-            Full setup and troubleshooting: `LINUX-SETUP.md` in the archive.
-
-            Register the MCP server:
-
-            ```bash
-            claude mcp add ghost --scope user -- "$PWD/ghost-mcp"
-            ```
+            `install.sh` copies the binaries to `~/.local/bin`, turns on toolkit
+            accessibility, registers the MCP server with Claude Code if the
+            `claude` CLI is installed, and runs `ghost doctor`. Restart any
+            applications that were already open; they only publish an
+            accessible tree at startup. Full setup and troubleshooting:
+            `LINUX-SETUP.md` in the archive.
 
             **Windows** (x64): unzip and run `ghost.exe doctor`. The binaries are
             not code-signed, so SmartScreen will warn on first run.

@@ -52,12 +52,14 @@ release, check the hash and see [antivirus](antivirus.md).
 curl -LO https://github.com/NORTHTEKDevs/ghost/releases/latest/download/ghost-linux-x86_64.tar.gz
 curl -LO https://github.com/NORTHTEKDevs/ghost/releases/latest/download/ghost-linux-x86_64.tar.gz.sha256
 sha256sum -c ghost-linux-x86_64.tar.gz.sha256
-mkdir ghost && tar -xzf ghost-linux-x86_64.tar.gz -C ghost
-mkdir -p ~/.local/bin && install -m 0755 ghost/ghost ghost/ghost-mcp ghost/ghost-http ~/.local/bin/
-~/.local/bin/ghost doctor
+mkdir ghost && tar -xzf ghost-linux-x86_64.tar.gz -C ghost && ./ghost/install.sh
 ```
 
-The server is then `~/.local/bin/ghost-mcp`.
+`install.sh` copies the three binaries to `~/.local/bin` (`--prefix DIR` to
+choose another), turns on toolkit accessibility, registers the server with
+Claude Code when the `claude` CLI is present (`--no-register` to skip) and
+runs `ghost doctor`. It never uses sudo. The server is then
+`~/.local/bin/ghost-mcp`.
 
 Ghost reads applications through the accessibility bus, which most desktops
 leave off:

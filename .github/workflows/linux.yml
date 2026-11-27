@@ -257,6 +257,21 @@ jobs:
           test -x "$HOME/.local/bin/ghost-http"
           echo "installer placed all three binaries"
 
+      # The release archive puts install.sh beside prebuilt binaries. Rebuild
+      # that layout from the binaries just built and run it with cargo off
+      # PATH: it must install what is there, never try to build.
+      - name: Run the installer from the release archive layout
+        run: |
+          set -euo pipefail
+          t="$(mktemp -d)"
+          mkdir "$t/dist" "$t/x"
+          cp target/release/ghost target/release/ghost-mcp target/release/ghost-http scripts/install.sh "$t/dist/"
+          tar -czf "$t/ghost.tar.gz" -C "$t/dist" .
+          tar -xzf "$t/ghost.tar.gz" -C "$t/x"
+          env -i HOME="$t/home" PATH=/usr/bin:/bin \
+            bash "$t/x/install.sh" --no-register --prefix "$t/bin" || true
+          for b in ghost ghost-mcp ghost-http; do "$t/bin/$b" --version; done
+
   release:
     name: Release binaries
     runs-on: ubuntu-latest

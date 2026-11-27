@@ -20,6 +20,13 @@ change behaviour.
   1x1 picture, because 0 was taken as the size to shrink to instead of "no
   resize". Found while recording the README demo. The schema now also says what
   0 does: no resize everywhere, and a lossless PNG only with `full=true`.
+- **The Linux archive's `install.sh` installs the binaries it ships with.** Run
+  from an extracted `ghost-linux-x86_64.tar.gz`, it used to look for a source
+  checkout one directory up and stop with "cargo not found" (or try to build
+  there). It now installs the `ghost`, `ghost-mcp` and `ghost-http` beside it
+  and builds only when run from a checkout. CI runs it from the real archive
+  layout with cargo off the PATH, and the release job runs it from the exact
+  archive it publishes.
 
 ### Documentation
 

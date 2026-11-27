@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # Ghost installer for Linux.
 #
-# Builds the binaries, installs them to a user-writable prefix, registers the
-# MCP server with Claude Code, and runs `ghost doctor` so a broken setup is
-# reported here rather than in the middle of the first session.
+# Installs the binaries to a user-writable prefix, registers the MCP server
+# with Claude Code, and runs `ghost doctor` so a broken setup is reported here
+# rather than in the middle of the first session. From an extracted release
+# archive it installs the prebuilt binaries beside it; from a source checkout
+# it builds them first.
 #
-#   ./scripts/install.sh                 # build + install + register + doctor
-#   ./scripts/install.sh --no-register   # skip the Claude Code MCP registration
-#   ./scripts/install.sh --prefix ~/bin  # install somewhere else
+#   ./install.sh                         # release archive: install + register + doctor
+#   ./scripts/install.sh                 # source checkout: build first
+#   ./install.sh --no-register           # skip the Claude Code MCP registration
+#   ./install.sh --prefix ~/bin          # install somewhere else
 #
 # Deliberately does not use sudo. Everything lands under $HOME.
 
@@ -20,7 +23,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --prefix) PREFIX="$2"; shift 2 ;;
     --no-register) REGISTER=0; shift ;;
-    -h|--help) sed -n '2,13p' "$0" | sed 's|^# \{0,1\}||'; exit 0 ;;
+    -h|--help) sed -n '2,16p' "$0" | sed 's|^# \{0,1\}||'; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -29,12 +32,23 @@ say()  { printf '\033[1m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[33mwarning:\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$ROOT"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BINS=(ghost ghost-mcp ghost-http)
+
+# A release archive ships the binaries beside this script; a source checkout
+# keeps the script in scripts/ with the workspace one level up.
+prebuilt=1
+for b in "${BINS[@]}"; do
+  [[ -x "$HERE/$b" ]] || prebuilt=0
+done
 
 # --------------------------------------------------------------- preflight
 
-command -v cargo >/dev/null || die "cargo not found. Install Rust: https://rustup.rs"
+if [[ $prebuilt -eq 0 ]]; then
+  [[ -f "$HERE/../Cargo.toml" ]] \
+    || die "no ghost, ghost-mcp and ghost-http beside $HERE/install.sh, and no source checkout above it"
+  command -v cargo >/dev/null || die "cargo not found. Install Rust: https://rustup.rs"
+fi
 
 # Runtime components. The engine itself is pure Rust, so nothing is needed at
 # BUILD time; these are what the accessibility and portal paths talk to.
@@ -55,12 +69,19 @@ fi
 
 # --------------------------------------------------------------- build
 
-say "Building release binaries"
-cargo build --release --bin ghost --bin ghost-mcp --bin ghost-http
+if [[ $prebuilt -eq 1 ]]; then
+  SRC="$HERE"
+  say "Installing the prebuilt binaries from $SRC"
+else
+  ROOT="$(cd "$HERE/.." && pwd)"
+  say "Building release binaries"
+  (cd "$ROOT" && cargo build --release --bin ghost --bin ghost-mcp --bin ghost-http)
+  SRC="$ROOT/target/release"
+fi
 
 mkdir -p "$PREFIX"
-for b in ghost ghost-mcp ghost-http; do
-  install -m 0755 "target/release/$b" "$PREFIX/$b"
+for b in "${BINS[@]}"; do
+  install -m 0755 "$SRC/$b" "$PREFIX/$b"
   say "installed $PREFIX/$b"
 done
 
@@ -110,6 +131,6 @@ echo
 if [[ $rc -eq 0 ]]; then
   say "Ghost is installed and its checks pass."
 else
-  warn "ghost doctor reported a FAIL. See docs/linux-fedora.md section 6."
+  warn "ghost doctor reported a FAIL. See LINUX-SETUP.md, section 6 (docs/linux-fedora.md in a checkout)."
 fi
 exit $rc
