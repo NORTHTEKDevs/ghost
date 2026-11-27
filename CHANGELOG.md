@@ -1,6 +1,46 @@
 # Changelog
 
-## [Unreleased] - the stop holds after it is raised
+## [0.24.2] - only you can lift your stop
+
+### Security
+
+- **A stop you raise with Ctrl+Alt+G can be lifted only by you.** It is marked
+  as yours (a second shared event). An agent's `ghost_reset` cannot lift it,
+  and agents are told only that you stopped Ghost and to wait - not how you
+  resume. You resume with:
+  - **Ctrl+Alt+Shift+G**, read by a low-level keyboard hook that ignores
+    injected keys (on Linux: X11 with XInput2, ignoring XTEST; without
+    XInput2 there is no resume key), or
+  - **`ghost reset`** in a terminal you type into: it refuses a pipe or a
+    script, then shows a short word for you to type back.
+
+  A stop an agent raised with `ghost_stop` is lifted by its `ghost_reset` as
+  before. The remaining limit: a program running as your user can still change
+  the named event directly, or drive a terminal; this protects you from an
+  agent acting through Ghost and from an agent's pipe-driven shell.
+- **Closing during a stop:** Ghost may close what it created itself - tabs and
+  browsers it launched, its own hidden desktops - so it can clean up. It never
+  closes your windows or tabs of a browser it only attached to.
+- **Your stop reaches programs started by an earlier Ghost server's shells**
+  (one that has since restarted), from a snapshot each server keeps of its
+  shell job: only within 24 hours and the same boot, only processes still in a
+  job, and only for your Ctrl+Alt+G stop, never an agent's `ghost_stop`.
+- **Linux:** a stop ends each shell's whole process group (what a command
+  started, not just the shell), never a group whose id was reused.
+- When the stop state cannot be read (fail closed), `ghost_reset` now says so
+  instead of answering ok, and every refusal, CLI and HTTP message names the
+  real cause.
+
+### Fixed
+
+- A shell ended by a stop after the stop was lifted says "ended by an
+  emergency stop (since lifted)"; a command that exits with code 57005 by
+  itself is no longer mistaken for a stop; dead shell sessions drop out of
+  `op=list`.
+- The private test feature that renames the stop events cannot be built into
+  a release binary.
+
+## Also in 0.24.2 - the stop holds after it is raised
 
 ### Security
 
