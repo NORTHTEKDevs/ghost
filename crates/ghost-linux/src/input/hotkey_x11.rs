@@ -87,6 +87,37 @@ impl ResumeGate {
     }
 }
 
+/// Whether an XInput2 device is a synthetic source: an XTEST device (X
+/// creates one per master, including masters added later with
+/// `xinput create-master`), or Ghost's own uinput device.
+fn is_synthetic_device(name: &str) -> bool {
+    name.contains("XTEST") || name.contains("ghost-virtual-input")
+}
+
+/// Which raw-event source devices are real keyboards, by device id.
+///
+/// Resolved by name the first time an id is seen, not from a list taken at
+/// registration: devices added later must not count as physical. Forgotten
+/// when the device hierarchy changes, since a removed device's id can be
+/// handed to a new one. A device whose name cannot be read is not real.
+#[derive(Default)]
+struct DeviceTrust {
+    known: std::collections::HashMap<u16, bool>,
+}
+
+impl DeviceTrust {
+    fn is_real(&mut self, id: u16, name_of: impl FnOnce(u16) -> Option<String>) -> bool {
+        *self
+            .known
+            .entry(id)
+            .or_insert_with(|| name_of(id).is_some_and(|n| !is_synthetic_device(&n)))
+    }
+
+    fn forget(&mut self) {
+        self.known.clear();
+    }
+}
+
 use crate::error::{CoreError, Result};
 use crate::session::{session_kind, SessionKind};
 
@@ -150,29 +181,26 @@ pub fn register() -> Result<()> {
     // tell a real key from an injected one (see ResumeGate). Without it the
     // chord is not grabbed at all: an injectable resume key would let any
     // program lift the human's stop.
-    let xtest_devices: Option<Vec<u16>> = conn
+    let has_xi2 = conn
         .xinput_xi_query_version(2, 0)
         .ok()
         .and_then(|c| c.reply().ok())
-        .filter(|v| v.major_version >= 2)
-        .and_then(|_| conn.xinput_xi_query_device(xinput::Device::ALL).ok())
-        .and_then(|c| c.reply().ok())
-        .map(|r| {
-            r.infos
-                .iter()
-                .filter(|d| String::from_utf8_lossy(&d.name).contains("XTEST"))
-                .map(|d| d.deviceid)
-                .collect()
-        });
+        .is_some_and(|v| v.major_version >= 2);
     // Shift's keycodes, to track whether it is physically held.
     let shift_keys: Vec<u8> = [0xffe1u32, 0xffe2].iter().filter_map(|&ks| keycode_for(&conn, ks)).collect();
-    let mut resume_grabbed = xtest_devices.is_some()
+    // HIERARCHY: devices added or removed later, whose ids must be resolved
+    // afresh (see DeviceTrust).
+    let mut resume_grabbed = has_xi2
         && conn
             .xinput_xi_select_events(
                 root,
                 &[xinput::EventMask {
                     deviceid: xinput::Device::ALL.into(),
-                    mask: vec![xinput::XIEventMask::RAW_KEY_PRESS | xinput::XIEventMask::RAW_KEY_RELEASE],
+                    mask: vec![
+                        xinput::XIEventMask::RAW_KEY_PRESS
+                            | xinput::XIEventMask::RAW_KEY_RELEASE
+                            | xinput::XIEventMask::HIERARCHY,
+                    ],
                 }],
             )
             .map(|c| c.check().is_ok())
@@ -188,7 +216,6 @@ pub fn register() -> Result<()> {
     if !resume_grabbed {
         tracing::warn!("the resume key is unavailable here (needs XInput2 and a free Ctrl+Alt+Shift+G)");
     }
-    let xtest_devices = xtest_devices.unwrap_or_default();
     for (extra, label) in lock_variants {
         let ok = conn
             .grab_key(true, root, base | extra, keycode, GrabMode::ASYNC, GrabMode::ASYNC)
@@ -230,6 +257,12 @@ pub fn register() -> Result<()> {
                 }
             };
             let mut shift_down = false;
+            let mut devices = DeviceTrust::default();
+            // A device's name, read when its id is first seen.
+            let name_of = |id: u16| -> Option<String> {
+                let reply = conn.xinput_xi_query_device(id).ok()?.reply().ok()?;
+                reply.infos.first().map(|d| String::from_utf8_lossy(&d.name).into_owned())
+            };
             while let Ok(event) = conn.wait_for_event() {
                 match event {
                     Event::KeyPress(press) => {
@@ -241,7 +274,7 @@ pub fn register() -> Result<()> {
                         }
                     }
                     Event::XinputRawKeyPress(raw) => {
-                        let real = !xtest_devices.contains(&raw.sourceid);
+                        let real = devices.is_real(raw.sourceid, name_of);
                         if real && shift_keys.iter().any(|&k| u32::from(k) == raw.detail) {
                             shift_down = true;
                         }
@@ -250,11 +283,14 @@ pub fn register() -> Result<()> {
                         }
                     }
                     Event::XinputRawKeyRelease(raw)
-                        if !xtest_devices.contains(&raw.sourceid)
-                            && shift_keys.iter().any(|&k| u32::from(k) == raw.detail) =>
+                        if shift_keys.iter().any(|&k| u32::from(k) == raw.detail)
+                            && devices.is_real(raw.sourceid, name_of) =>
                     {
                         shift_down = false;
                     }
+                    // A device was added or removed: ids may now name other
+                    // devices.
+                    Event::XinputHierarchy(_) => devices.forget(),
                     _ => {}
                 }
             }
@@ -317,6 +353,25 @@ mod tests {
         let mut g = super::ResumeGate::default();
         assert_eq!(g.on_raw(300, false), None);
         assert_eq!(g.on_press(301), None, "a raw event of another press does not vouch");
+    }
+
+    /// Raw events from a device added after registration (a second master's
+    /// XTEST device) or from Ghost's uinput device never count as a human
+    /// key; a real keyboard does, and a reused id is resolved afresh.
+    #[test]
+    fn only_a_real_keyboard_counts_as_physical() {
+        let mut t = super::DeviceTrust::default();
+        assert!(t.is_real(3, |_| Some("AT Translated Set 2 keyboard".into())));
+        assert!(!t.is_real(4, |_| Some("Virtual core XTEST keyboard".into())));
+        // Added later with `xinput create-master second`.
+        assert!(!t.is_real(21, |_| Some("second XTEST keyboard".into())), "a later XTEST device counted as physical");
+        assert!(!t.is_real(22, |_| Some("ghost-virtual-input".into())), "Ghost's uinput device counted as physical");
+        assert!(!t.is_real(23, |_| None), "a device whose name cannot be read counted as physical");
+        // Cached: no second lookup for a known id.
+        assert!(t.is_real(3, |_| panic!("looked up a known device again")));
+        // The hierarchy changed: id 3 now names a different device.
+        t.forget();
+        assert!(!t.is_real(3, |_| Some("third XTEST keyboard".into())), "a reused id kept its old verdict");
     }
 
     #[test]
