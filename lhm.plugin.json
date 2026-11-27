@@ -1,7 +1,7 @@
 {
   "identifier": "northtekdevs-ghost",
   "name": "Ghost",
-  "version": "0.24.2",
+  "version": "0.24.3",
   "description": "Verified control of the whole desktop for agents on Windows and Linux: apps with no API, windows, shell, browser.",
   "author": "Northtek",
   "authorUrl": "https://northtek.io",

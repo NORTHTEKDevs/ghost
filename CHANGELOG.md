@@ -1,5 +1,83 @@
 # Changelog
 
+## [0.24.3] - a full quality pass
+
+A security audit, three code reviews, a docs review and two live probes of
+every core tool, each fix landed with a regression test and re-reviewed until
+nothing above LOW remained. Plan and evidence:
+`docs/plans/2026-11-26-quality-pass.md`.
+
+### Security
+
+- **`ghost-http` refuses browsers.** Every route answers 403 unless Host is the
+  server's own loopback address and port and no Origin header is present, and
+  `/run` takes JSON only. A web page could POST a text/plain body to `/run`
+  (no CORS preflight) or reach the API through DNS rebinding. `--addr` must
+  now be a loopback address.
+- **`GHOST_SHELL=off` also filters launches.** `ghost_launch`, `ghost_window
+  op=launch` and `ghost_desktop_launch` refuse command interpreters, script
+  hosts, terminals and programs that run other programs (wmic, explorer,
+  editors, git, debuggers, database shells...), judged by the resolved program
+  so 8.3 short names do not slip through, and refuse inline-script switches.
+  It is a denylist and cannot be complete: `GHOST_LAUNCH_ALLOW` (a list of
+  programs) is the strict option, and typing can still start programs.
+- **`ghost_http_get`/`ghost_http_post` resolve names before connecting.** A
+  name that resolves to loopback, private or reserved space is refused (it
+  reached a browser's DevTools port before), a caller `Host` header is
+  refused, and more ranges are blocked (100.64/10, 0/8, 198.18/15, multicast,
+  fec0::/10, IPv4-compatible, NAT64, 6to4, Teredo). Proxy settings are ignored.
+- **`ghost_stop`/`ghost_reset` with an unrecognized `scope`** are invalid
+  params. Any unknown value used to mean "everywhere", so a typo raised the
+  machine-wide stop.
+- **A stop reaches every program a shell started.** Shells start suspended and
+  run only once they are inside the stop job (a child started in that gap
+  escaped the stop), a stopped call ends the job itself, and a shell that
+  cannot be put in the job is refused. On Linux the stop now reaches every
+  Ghost process of the user (markers in `$XDG_RUNTIME_DIR/ghost`), AT-SPI
+  actions never run after their caller gave up or a stop, and timeouts and
+  `op=kill` end the shell's whole process group.
+- **Screenshots leave the machine only with `GHOST_VISION_API_KEY`.** An
+  ambient `OPENAI_API_KEY`, `NVIDIA_API_KEY` or `ANTHROPIC_API_KEY` no longer
+  turns on the cloud vision tier (Anthropic: `GHOST_VISION_PROVIDER=anthropic`).
+- **Tabs navigate only to http, https and about:blank** (`file:` read local
+  files through `ghost_tab_text`). Localhost stays reachable for dev servers.
+- CI and release workflows run with a read-only token by default and pin every
+  action by commit.
+
+### Fixed
+
+- `ghost_see` with an unknown mode (or `marks`/`selection`) read the human's
+  foreground window instead of the target; unknown modes are now refused.
+- A window Ghost launched on its hidden desktop lost to a same-titled window on
+  your desktop; the anchored window wins the tie.
+- `ghost_wait` searches only the target window, `for=value` reads the field's
+  value (not its label or name), and waiting for something to disappear
+  succeeds when its window closes.
+- Typing never rewrites a button's or label's caption, judges the read-back
+  against the value before typing, and never types twice into a field that
+  reformats input ("12" -> "$12.00").
+- A button that opens a modal dialog no longer reports a 2 s failure; clicks at
+  a point on no monitor are refused instead of clamped to the screen edge.
+- The vision fallback no longer rescales a pixel answer as 0-1000 coordinates.
+- A tool call is aborted at its deadline and on `notifications/cancelled`
+  (an aborted paste still restores your clipboard); `ping` answers `{}`;
+  unknown methods are -32601; `ghost_run` retries only read-only steps and
+  accepts short op names; batch ops get the same argument checks.
+- `ghost_shell`: `op=read` drains by default, a busy session stays listed and
+  killable, failed PowerShell commands report exit 1 with the error, a missing
+  `cwd` is refused (and `~` expands).
+- Browsers: a socket error or a >16 MiB reply no longer kills every tab, an
+  abandoned launch ends the browser it started and frees its id, tab text and
+  eval are capped (`max_chars`), a failed load is an error (a download is not).
+- `ghost-cache` invalidation keeps sequence numbers increasing.
+
+### Changed
+
+- Clearer invalid-params errors for unknown keys, window states, wait timeouts
+  (capped at 600000 ms), empty names and modes.
+- Documentation corrected against the code (bench figures, environment
+  variables, browser capabilities, Linux stop scope).
+
 ## [0.24.2] - only you can lift your stop
 
 ### Security
