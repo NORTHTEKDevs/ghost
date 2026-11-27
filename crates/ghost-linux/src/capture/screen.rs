@@ -153,6 +153,7 @@ pub fn capture_window_encoded(
 }
 
 /// Downscale to `max_dim` on the long edge when the image is larger, then encode.
+/// `Some(0)` means no resize, as ghost_screenshot documents (mirrors ghost-core).
 fn encode_scaled(
     rgba: Vec<u8>,
     w: usize,
@@ -162,7 +163,7 @@ fn encode_scaled(
 ) -> Result<Vec<u8>> {
     let img = RgbaImage::from_raw(w as u32, h as u32, rgba)
         .ok_or_else(|| CoreError::Platform("capture buffer does not match dimensions".into()))?;
-    let img = match max_dim {
+    let img = match max_dim.filter(|&m| m > 0) {
         Some(m) if w as u32 > m || h as u32 > m => DynamicImage::ImageRgba8(img)
             .resize(m, m, image::imageops::FilterType::Triangle)
             .to_rgba8(),
@@ -472,6 +473,19 @@ fn portal_err(e: ashpd::Error) -> CoreError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ghost_screenshot documents max_dim=0 as "no resize"; Some(0) used to
+    /// resize to 0x0, which the image crate clamps to a 1x1 picture.
+    #[test]
+    fn encode_scaled_max_dim_zero_keeps_full_size() {
+        let rgba = vec![200u8; 40 * 20 * 4];
+        let png = encode_scaled(rgba.clone(), 40, 20, Some(0), CaptureFormat::Png).unwrap();
+        let img = image::load_from_memory(&png).unwrap();
+        assert_eq!((img.width(), img.height()), (40, 20));
+        let small = encode_scaled(rgba, 40, 20, Some(10), CaptureFormat::Png).unwrap();
+        let img = image::load_from_memory(&small).unwrap();
+        assert_eq!((img.width(), img.height()), (10, 5), "a real max_dim still downscales");
+    }
 
     #[test]
     fn crop_returns_the_requested_size() {

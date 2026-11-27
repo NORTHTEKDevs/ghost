@@ -39,12 +39,12 @@ fn parse_port(p: &Value) -> Result<u16, String> {
         .ok_or_else(|| format!("port out of range: {n} (1-65535)"))
 }
 
-/// A page-load bound for `tool`: 30 s when absent, else an integer from 1 to
+/// `timeout_ms` for `tool`: `default` when absent, else an integer from 1 to
 /// 600000. Anything else is invalid params, never a silent default.
-fn tab_timeout_ms(p: &Value, tool: &str) -> Result<u64, String> {
+fn timeout_ms_arg(p: &Value, tool: &str, default: u64) -> Result<u64, String> {
     const MAX_MS: u64 = 600_000;
     match &p["timeout_ms"] {
-        Value::Null => Ok(30_000),
+        Value::Null => Ok(default),
         v => v.as_u64().filter(|ms| (1..=MAX_MS).contains(ms)).ok_or_else(|| {
             format!("invalid params: {tool} timeout_ms must be an integer from 1 to {MAX_MS} (got {v})")
         }),
@@ -59,7 +59,7 @@ fn tab_open_wait(p: &Value, url: &str) -> Result<Option<u64>, String> {
         Value::Bool(b) => *b,
         v => return Err(format!("invalid params: ghost_tab_open wait must be true or false (got {v})")),
     };
-    let timeout_ms = tab_timeout_ms(p, "ghost_tab_open")?;
+    let timeout_ms = timeout_ms_arg(p, "ghost_tab_open", 30_000)?;
     let blank = url.trim().to_ascii_lowercase().starts_with("about:blank");
     Ok((wait && !blank).then_some(timeout_ms))
 }
@@ -166,7 +166,7 @@ pub async fn dispatch(
             let (browser, tab_id) = browser_tab(p)?;
             let url = req_str(p, "url")?;
             ghost_browser::policy::check_nav_url(&url)?;
-            let timeout_ms = tab_timeout_ms(p, "ghost_tab_navigate")?;
+            let timeout_ms = timeout_ms_arg(p, "ghost_tab_navigate", 30_000)?;
             let tab = session.tab(&browser, &tab_id).await.map_err(|e| e.to_string())?;
             let note = tab.navigate(&url, timeout_ms).await.map_err(|e| e.to_string())?;
             let mut out = json!({ "ok": true, "background": true, "url": tab.url().await.unwrap_or_default() });
@@ -178,7 +178,7 @@ pub async fn dispatch(
         "ghost_tab_click" => {
             let (browser, tab_id) = browser_tab(p)?;
             let selector = req_str(p, "selector")?;
-            let timeout_ms = p["timeout_ms"].as_u64().unwrap_or(10_000);
+            let timeout_ms = timeout_ms_arg(p, "ghost_tab_click", 10_000)?;
             let tab = session.tab(&browser, &tab_id).await.map_err(|e| e.to_string())?;
             tab.click(&selector, timeout_ms).await.map_err(|e| e.to_string())?;
             Ok(bg_ok())
@@ -251,7 +251,7 @@ pub async fn dispatch(
         "ghost_tab_wait_for" => {
             let (browser, tab_id) = browser_tab(p)?;
             let selector = req_str(p, "selector")?;
-            let timeout_ms = p["timeout_ms"].as_u64().unwrap_or(15_000);
+            let timeout_ms = timeout_ms_arg(p, "ghost_tab_wait_for", 15_000)?;
             let tab = session.tab(&browser, &tab_id).await.map_err(|e| e.to_string())?;
             tab.wait_for_selector(&selector, timeout_ms).await.map_err(|e| e.to_string())?;
             Ok(bg_ok())
@@ -285,7 +285,7 @@ pub async fn dispatch(
         "ghost_desktop_wait_for_window" => {
             let (id, _) = desktop_ref(p);
             let title = req_str(p, "title")?;
-            let timeout_ms = p["timeout_ms"].as_u64().unwrap_or(20_000);
+            let timeout_ms = timeout_ms_arg(p, "ghost_desktop_wait_for_window", 20_000)?;
             session
                 .desktop_wait_for_window(&id, &title, timeout_ms)
                 .await
@@ -388,20 +388,20 @@ pub fn schemas() -> Vec<Value> {
           "inputSchema": { "type": "object", "properties": {
               "browser": { "type": "string" }, "url": { "type": "string" },
               "wait": { "type": "boolean", "description": "Wait for the page to load (default true; about:blank never waits)" },
-              "timeout_ms": { "type": "integer", "description": "Load timeout when waiting, default 30000, max 600000" }
+              "timeout_ms": { "type": "integer", "minimum": 1, "maximum": 600000, "description": "Load timeout when waiting, default 30000, max 600000" }
           }}}),
         json!({ "name": "ghost_tab_navigate",
           "description": "Navigate a tab and wait for load. Runs in a background tab; the user's view never changes. url must be http://, https:// or about:blank; every other scheme (file:, chrome:, data:, javascript:, ftp: ...) is refused. http(s) to any host including localhost is allowed. Returns an error (naming the net:: errorText) when the page fails to load, e.g. DNS failure or refused connection.",
           "inputSchema": { "type": "object", "required": ["tab", "url"], "properties": {
               "browser": { "type": "string" }, "tab": { "type": "string" },
               "url": { "type": "string" },
-              "timeout_ms": { "type": "integer", "description": "Load timeout, default 30000, max 600000" }
+              "timeout_ms": { "type": "integer", "minimum": 1, "maximum": 600000, "description": "Load timeout, default 30000, max 600000" }
           }}}),
         json!({ "name": "ghost_tab_click",
           "description": "Click an element by CSS selector via a trusted synthetic mouse event inside the tab's renderer. ~1-2ms; no cursor movement; works in a tab that is not in front.",
           "inputSchema": { "type": "object", "required": ["tab", "selector"], "properties": {
               "browser": { "type": "string" }, "tab": { "type": "string" },
-              "selector": { "type": "string" }, "timeout_ms": { "type": "integer" }
+              "selector": { "type": "string" }, "timeout_ms": { "type": "integer", "minimum": 1, "maximum": 600000 }
           }}}),
         json!({ "name": "ghost_tab_type",
           "description": "Focus an element by CSS selector and type into it. Layout-independent; does not touch the user's keyboard.",
@@ -456,7 +456,7 @@ pub fn schemas() -> Vec<Value> {
           "description": "Wait until a CSS selector matches an element in the tab.",
           "inputSchema": { "type": "object", "required": ["tab", "selector"], "properties": {
               "browser": { "type": "string" }, "tab": { "type": "string" },
-              "selector": { "type": "string" }, "timeout_ms": { "type": "integer" }
+              "selector": { "type": "string" }, "timeout_ms": { "type": "integer", "minimum": 1, "maximum": 600000 }
           }}}),
         json!({ "name": "ghost_tab_close",
           "description": "Close a tab by id.",
@@ -501,7 +501,7 @@ pub fn schemas() -> Vec<Value> {
               "description": "Wait for a window with a matching title to appear on an isolated desktop.",
               "inputSchema": { "type": "object", "required": ["title"], "properties": {
                   "desktop": { "type": "string" }, "title": { "type": "string" },
-                  "timeout_ms": { "type": "integer" }
+                  "timeout_ms": { "type": "integer", "minimum": 1, "maximum": 600000 }
               }}}),
             json!({ "name": "ghost_desktop_click",
               "description": "Click a client-area point in a window on an isolated desktop. button=left|right|double.",
@@ -679,13 +679,30 @@ mod tests {
     #[test]
     fn tab_navigate_timeout_arguments() {
         let nav = "ghost_tab_navigate";
-        assert_eq!(tab_timeout_ms(&json!({}), nav), Ok(30_000));
-        assert_eq!(tab_timeout_ms(&json!({ "timeout_ms": 5000 }), nav), Ok(5000));
-        assert_eq!(tab_timeout_ms(&json!({ "timeout_ms": 600_000 }), nav), Ok(600_000));
+        assert_eq!(timeout_ms_arg(&json!({}), nav, 30_000), Ok(30_000));
+        assert_eq!(timeout_ms_arg(&json!({ "timeout_ms": 5000 }), nav, 30_000), Ok(5000));
+        assert_eq!(timeout_ms_arg(&json!({ "timeout_ms": 600_000 }), nav, 30_000), Ok(600_000));
         for bad in [json!({ "timeout_ms": 0 }), json!({ "timeout_ms": -1 }),
                     json!({ "timeout_ms": 600_001 }), json!({ "timeout_ms": "5000" })] {
-            let e = tab_timeout_ms(&bad, nav).expect_err(&bad.to_string());
+            let e = timeout_ms_arg(&bad, nav, 30_000).expect_err(&bad.to_string());
             assert!(e.starts_with("invalid params: ghost_tab_navigate timeout_ms"), "{e}");
+        }
+    }
+
+    /// ghost_tab_click, ghost_tab_wait_for and ghost_desktop_wait_for_window
+    /// had the same unwrap_or: "5000" or -1 became the default, 0 timed out at
+    /// once, and u64::MAX was an unbounded wait. Each keeps its own default.
+    #[test]
+    fn sibling_timeouts_keep_their_defaults_and_reject_bad_values() {
+        for (tool, default) in [("ghost_tab_click", 10_000), ("ghost_tab_wait_for", 15_000),
+                                ("ghost_desktop_wait_for_window", 20_000)] {
+            assert_eq!(timeout_ms_arg(&json!({}), tool, default), Ok(default));
+            assert_eq!(timeout_ms_arg(&json!({ "timeout_ms": 250 }), tool, default), Ok(250));
+            for bad in [json!({ "timeout_ms": 0 }), json!({ "timeout_ms": "5000" }),
+                        json!({ "timeout_ms": u64::MAX })] {
+                let e = timeout_ms_arg(&bad, tool, default).expect_err(&bad.to_string());
+                assert!(e.starts_with(&format!("invalid params: {tool} timeout_ms")), "{e}");
+            }
         }
     }
 
