@@ -3286,11 +3286,50 @@ async fn handle_ghost_run(
         return Err("ghost_run: provide 'steps' (array), 'json_flow' (JSON string), or 'script' (YAML/JSON string)".into());
     };
 
-    let total = steps.len() as u64;
     // HIGH-3: clamp max_retries to prevent runaway loops (e.g. u64::MAX passed as JSON).
     let max_retries = p["max_retries"].as_u64().unwrap_or(2).min(10) as usize;
     let stop_on_error = p["stop_on_error"].as_bool().unwrap_or(true);
+    // Use in_run=true to prevent re-entering ghost_run recursively.
+    run_steps(steps, max_retries, stop_on_error, |name: String, step: Value| {
+        Box::pin(async move { dispatch_tool_inner(session, &name, &step, true).await }) as StepFuture<'_>
+    })
+    .await
+}
 
+/// How many times a ghost_run step may be retried. Only Observe steps retry by
+/// default: an Act step that failed may still have landed (an http_post sent,
+/// a click delivered), so repeating it repeats the effect. `retry:true` opts an
+/// Act step in; `retry:false` opts any step out.
+fn step_retries(op: &str, step: &Value, max_retries: usize) -> usize {
+    match step["retry"].as_bool() {
+        Some(true) => max_retries,
+        Some(false) => 0,
+        None if tool_class(op, step) == Some(ToolClass::Observe) => max_retries,
+        None => 0,
+    }
+}
+
+/// Errors that a retry cannot change: a wrong name, a missing parameter, a stop.
+fn is_deterministic_error(e: &str) -> bool {
+    ["unknown method", "unknown batch op", "missing param", "missing '", "emergency stop"]
+        .iter()
+        .any(|m| e.contains(m))
+}
+
+type StepFuture<'a> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = std::result::Result<Value, String>> + Send + 'a>>;
+
+/// The ghost_run step loop, over any dispatcher (tests count calls with a fake).
+async fn run_steps<'a, D>(
+    steps: &[Value],
+    max_retries: usize,
+    stop_on_error: bool,
+    dispatch: D,
+) -> std::result::Result<Value, String>
+where
+    D: Fn(String, Value) -> StepFuture<'a>,
+{
+    let total = steps.len() as u64;
     let mut results: Vec<Value> = Vec::with_capacity(steps.len());
     let mut errors: Vec<Value> = Vec::new();
 
@@ -3300,8 +3339,11 @@ async fn handle_ghost_run(
         // e.g. a center/name/text that step N found, without a second round-trip.
         let step = substitute_step_refs(step_raw, &results);
         let step = &step;
-        let op = step["op"].as_str()
+        let raw_op = step["op"].as_str()
             .ok_or_else(|| format!("ghost_run: step {i} missing 'op'"))?;
+        // The schema documents short names ({op:'find'}): same map as ghost_batch_actions.
+        let op = short_op_method(raw_op, step).unwrap_or(raw_op);
+        let retries = step_retries(op, step, max_retries);
 
         // last_err: the None initial value is not read on the Ok(break) path; that's
         // intentional - the None is replaced by the Err path, and read in if !succeeded.
@@ -3309,9 +3351,8 @@ async fn handle_ghost_run(
         let mut last_err: Option<String> = None;
         let mut succeeded = false;
 
-        for attempt in 0..=max_retries {
-            // Use in_run=true to prevent re-entering ghost_run recursively.
-            let outcome = dispatch_tool_inner(session, op, step, true).await;
+        for attempt in 0..=retries {
+            let outcome = dispatch(op.to_string(), step.clone()).await;
             match outcome {
                 Ok(v) => {
                     results.push(v);
@@ -3323,7 +3364,11 @@ async fn handle_ghost_run(
                     //   1. last_err → included in the errors[] array and the final Err msg.
                     //   2. tracing::warn → visible in the MCP server log for diagnostics.
                     // The actual error string is the authoritative failure reason for callers.
-                    if attempt < max_retries {
+                    if is_deterministic_error(&e) {
+                        last_err = Some(e);
+                        break;
+                    }
+                    if attempt < retries {
                         tracing::warn!(step = i, op, attempt, error = %e, "ghost_run: step failed, will retry");
                         // HIGH-3: exponential back-off so transient failures (focus settle,
                         // OCR lag, app mid-load) have time to resolve before the next attempt.
@@ -3668,7 +3713,7 @@ fn lean_tools_schema() -> Value {
           }}},
         // --- Flow ---
         { "name": "ghost_run",
-          "description": "Execute a declarative step-by-step flow in one round-trip. Each step: {op, ...params}. Op is any lean verb or legacy tool name. Retries each step on failure (max_retries). CHAINING: a param value of \"${steps.N.path}\" is replaced with a field from step N's result before dispatch - e.g. {op:'find',name:'Save'} then {op:'ghost_click_at', x:'${steps.0.center.x}', y:'${steps.0.center.y}'}. A whole-string ref keeps its type (number stays number). SPEED: name the window once; later steps can omit window= because the anchor follows that window by handle through title changes (a stale title still resolves and the response carries title_drift). Wait with {op:'ghost_wait', for:'element'|'value'|'navigate'} rather than for=ms - a fixed sleep costs its full length on every run.",
+          "description": "Execute a declarative step-by-step flow in one round-trip. Each step: {op, ...params}. Op is any lean verb, legacy tool name, or short name (find, click, type, press, click_at, wait...). RETRIES: a failing read-only step is retried up to max_retries; an acting step is NOT retried (its effect may have landed) unless the step sets retry:true; retry:false disables retries for a step; unknown op / missing param errors are never retried. CHAINING: a param value of \"${steps.N.path}\" is replaced with a field from step N's result before dispatch - e.g. {op:'find',name:'Save'} then {op:'ghost_click_at', x:'${steps.0.center.x}', y:'${steps.0.center.y}'}. A whole-string ref keeps its type (number stays number). SPEED: name the window once; later steps can omit window= because the anchor follows that window by handle through title changes (a stale title still resolves and the response carries title_drift). Wait with {op:'ghost_wait', for:'element'|'value'|'navigate'} rather than for=ms - a fixed sleep costs its full length on every run.",
           "inputSchema": { "type": "object", "properties": {
               "steps": { "type": "array", "items": { "type": "object" }, "description": "Array of {op, ...params} steps (direct)" },
               "json_flow": { "type": "string", "description": "JSON-encoded steps array string" },
@@ -4047,9 +4092,24 @@ async fn run_batch_op(
     op: &str,
     params: &Value,
 ) -> std::result::Result<Value, String> {
-    // Map batch op names (short form) to handle() method names.
-    // Most ops pass through directly: click, type, press, hotkey, etc.
-    let method = match op {
+    let method = short_op_method(op, params).ok_or_else(|| format!("unknown batch op: {op}"))?;
+    // Batch ops go straight to handle_tool, past dispatch_tool_inner's gate:
+    // check each one, so a stop raised mid-batch holds the rest back.
+    stop_gate(method, params, ghost_session::error::is_stopped()).map_err(|e| with_stop_reason(method, e))?;
+    Box::pin(handle_tool(session, method, params)).await
+}
+
+/// Short op names (ghost_batch_actions ops, ghost_run's documented `{op:'find'}`)
+/// to the tool they mean. None = not a short name.
+fn short_op_method(op: &str, params: &Value) -> Option<&'static str> {
+    Some(match op {
+        "describe" => {
+            if params["fast"].as_bool().unwrap_or(true) {
+                "ghost_describe_screen_fast"
+            } else {
+                "ghost_describe_screen"
+            }
+        }
         "click" => "ghost_click",
         "type" => "ghost_type",
         "find" => "ghost_find",
@@ -4064,14 +4124,6 @@ async fn run_batch_op(
         "wait" => "ghost_wait",
         "wait_for_idle" => "ghost_wait_for_idle",
         "wait_for_text" => "ghost_click_and_wait_for_text",
-        "describe" => {
-            let m = if params["fast"].as_bool().unwrap_or(true) {
-                "ghost_describe_screen_fast"
-            } else {
-                "ghost_describe_screen"
-            };
-            return Box::pin(handle_tool(session, m, params)).await;
-        }
         "screenshot" => "ghost_screenshot",
         "focus_window" => "ghost_focus_window",
         "get_clipboard" => "ghost_get_clipboard",
@@ -4090,12 +4142,8 @@ async fn run_batch_op(
         "describe_screen_fast" => "ghost_describe_screen_fast",
         // MEDIUM-2: ghost_act was absent from batch dispatch, causing silent failure.
         "act" | "ghost_act" => "ghost_act",
-        other => return Err(format!("unknown batch op: {other}")),
-    };
-    // Batch ops go straight to handle_tool, past dispatch_tool_inner's gate:
-    // check each one, so a stop raised mid-batch holds the rest back.
-    stop_gate(method, params, ghost_session::error::is_stopped()).map_err(|e| with_stop_reason(method, e))?;
-    Box::pin(handle_tool(session, method, params)).await
+        _ => return None,
+    })
 }
 
 /// `index` is an optional non-negative integer. Anything else present (a
@@ -4398,9 +4446,9 @@ mod tests {
             .block_on(guarded(counting_loop(n.clone()), std::time::Duration::from_millis(50), "ghost_wait".into(), None))
             .expect_err("overrun");
         assert!(e.contains("timed out"), "{e}");
-        std::thread::sleep((std::time::Duration::from_millis(20)));
+        std::thread::sleep(std::time::Duration::from_millis(20));
         let after = n.load(SeqCst);
-        std::thread::sleep((std::time::Duration::from_millis(150)));
+        std::thread::sleep(std::time::Duration::from_millis(150));
         assert_eq!(n.load(SeqCst), after, "the timed-out task kept running");
     }
 
@@ -4416,12 +4464,12 @@ mod tests {
             "ghost_wait".into(),
             Some(key),
         ));
-        std::thread::sleep((std::time::Duration::from_millis(30)));
+        std::thread::sleep(std::time::Duration::from_millis(30));
         assert!(cancel_request(Some(&json!({ "requestId": "req-cancel-1" }))), "registered call found");
         let e = rt.block_on(call).unwrap().expect_err("cancelled");
         assert!(e.contains("cancelled"), "{e}");
         let after = n.load(SeqCst);
-        std::thread::sleep((std::time::Duration::from_millis(100)));
+        std::thread::sleep(std::time::Duration::from_millis(100));
         assert_eq!(n.load(SeqCst), after, "the cancelled task kept running");
         assert!(!cancel_request(Some(&json!({ "requestId": "req-cancel-1" }))), "entry removed when done");
     }
@@ -5340,6 +5388,52 @@ mod tests {
         // Acceptable: "not yet implemented". Unacceptable: "VLM fallback for fields not found" (old text).
         assert!(!desc.contains("VLM fallback for fields not found"),
             "ghost_query description must not claim active VLM fallback");
+    }
+
+    /// Runs `steps` through run_steps with a fake dispatcher that fails every
+    /// call with `err` (or succeeds when `err` is None); returns the dispatched names.
+    fn run_fake(steps: Value, err: Option<&'static str>) -> Vec<String> {
+        let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let c = calls.clone();
+        let steps = steps.as_array().unwrap().clone();
+        let _ = rt().block_on(run_steps(&steps, 2, true, move |name: String, _step: Value| {
+            c.lock().unwrap().push(name);
+            Box::pin(async move { err.map_or(Ok(json!({})), |e| Err(e.to_string())) }) as StepFuture<'static>
+        }));
+        let v = calls.lock().unwrap().clone();
+        v
+    }
+
+    #[test]
+    fn ghost_run_never_retries_an_act_step_by_default() {
+        let calls = run_fake(json!([{ "op": "ghost_http_post", "url": "http://127.0.0.1:1/" }]), Some("connection reset"));
+        assert_eq!(calls.len(), 1, "an Act step may have landed; retrying repeats its effect: {calls:?}");
+    }
+
+    #[test]
+    fn ghost_run_retries_an_act_step_only_when_it_opts_in() {
+        let calls = run_fake(json!([{ "op": "ghost_act", "retry": true }]), Some("flaky"));
+        assert_eq!(calls.len(), 3);
+    }
+
+    #[test]
+    fn ghost_run_retries_observe_steps_on_transient_errors() {
+        let calls = run_fake(json!([{ "op": "ghost_see" }]), Some("element not found yet"));
+        assert_eq!(calls.len(), 3);
+    }
+
+    #[test]
+    fn ghost_run_never_retries_deterministic_errors() {
+        for e in ["unknown method: ghost_nope", "missing param: name", "ghost_key: missing 'keys' param"] {
+            let calls = run_fake(json!([{ "op": "ghost_see" }]), Some(e));
+            assert_eq!(calls.len(), 1, "{e}");
+        }
+    }
+
+    #[test]
+    fn ghost_run_accepts_the_documented_short_op_names() {
+        let calls = run_fake(json!([{ "op": "find", "name": "Save" }, { "op": "click_at" }, { "op": "ghost_see" }]), None);
+        assert_eq!(calls, vec!["ghost_find", "ghost_click_at", "ghost_see"]);
     }
 
     // HIGH-4: ghost_run ok:false when steps fail (pure logic test on the response shape).
