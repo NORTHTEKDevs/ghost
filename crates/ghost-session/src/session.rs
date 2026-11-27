@@ -2240,8 +2240,14 @@ impl GhostSession {
         let mut last_seq = bus.seq();
         loop {
             if is_stopped() { return Err(GhostError::Stopped); }
-            let probe = self.tree.find_by_name_in_hwnd(hwnd, expected_text)
-                .map_err(GhostError::Core)?;
+            let probe = match self.tree.find_by_name_in_hwnd(hwnd, expected_text) {
+                Ok(p) => p,
+                // Clicking Save in a dialog that then closes: the scoped lookup
+                // fails because the window is gone, and for appears=false that
+                // is the wait succeeding (as in wait_for_element).
+                Err(_) if closed_window_is_vanished(appears, window_gone(hwnd)) => return Ok(()),
+                Err(e) => return Err(GhostError::Core(e)),
+            };
             let found = probe.is_some();
             if found == appears {
                 tracing::debug!(elapsed_ms = start.elapsed().as_millis() as u64, "wait_for_text hit");
@@ -3930,6 +3936,17 @@ mod wait_vanish_tests {
         let body = &src[start..start + src[start..].find("\n    }\n").expect("end")];
         assert!(body.contains("closed_window_is_vanished(appears, window_gone(hwnd))"), "{body}");
         assert!(!body.contains("find_in_hwnd(hwnd, &by, \"wait_for_element\")?"), "a failed lookup still errors out first:\n{body}");
+    }
+
+    #[test]
+    fn click_and_wait_for_text_checks_the_window_before_failing_the_probe() {
+        // Clicking Save in a dialog that closes: wait for=text appears=false
+        // must succeed once the window is gone, not fail the lookup.
+        let src = include_str!("session.rs");
+        let start = src.find("pub async fn click_and_wait_for_text(").expect("click_and_wait_for_text");
+        let body = &src[start..start + src[start..].find("\n    }\n").expect("end")];
+        assert!(body.contains("closed_window_is_vanished(appears, window_gone(hwnd))"), "{body}");
+        assert!(!body.contains(".map_err(GhostError::Core)?;\n            let found"), "a failed probe still errors out first:\n{body}");
     }
 }
 
