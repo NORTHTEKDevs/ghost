@@ -40,6 +40,8 @@ jobs:
         run: cargo build --workspace
 
       - name: Test (unit only, skip display-dependent integration tests)
+        env:
+          GHOST_REQUIRE_BROWSER: "1"
         run: cargo test --workspace
 
       - name: Clippy

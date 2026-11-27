@@ -46,7 +46,11 @@ jobs:
       - name: Build workspace
         run: cargo build --workspace --all-targets
 
+      # The runner image ships Google Chrome, so the headless tab-wait test
+      # must run here rather than skip.
       - name: Unit tests
+        env:
+          GHOST_REQUIRE_BROWSER: "1"
         run: cargo test --workspace
 
       # The new crate is held to the strictest bar. The rest of the workspace is
