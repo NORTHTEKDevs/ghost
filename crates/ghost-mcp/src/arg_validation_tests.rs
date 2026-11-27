@@ -68,6 +68,39 @@ mod see_mode {
     }
 }
 
+mod event_wait {
+    //! L4: for=event answers a timeout like every other wait: ok:false and
+    //! timed_out:true, not ok:true with timed_out:true.
+    use crate::{event_wait_result, wrap_envelope};
+    use serde_json::json;
+
+    #[test]
+    fn an_event_is_ok_and_not_timed_out() {
+        let v = event_wait_result(Ok(7)).unwrap();
+        assert_eq!(v["seq"], json!(7));
+        assert_eq!(v["timed_out"], json!(false));
+        let env = wrap_envelope(Ok(v));
+        assert_eq!(env["ok"], json!(true));
+    }
+
+    #[test]
+    fn a_timeout_is_ok_false_and_timed_out() {
+        let r = event_wait_result(Err("Timeout after 5ms waiting for: wait_for_event".into()));
+        let env = wrap_envelope(r);
+        assert_eq!(env["ok"], json!(false));
+        assert_eq!(env["timed_out"], json!(true));
+    }
+
+    #[test]
+    fn every_wait_timeout_carries_timed_out() {
+        let env = wrap_envelope(Err("Timeout after 5ms waiting for: value equals \"x\" (last \"\")".into()));
+        assert_eq!(env["ok"], json!(false));
+        assert_eq!(env["timed_out"], json!(true));
+        let env = wrap_envelope(Err("params must include 'name' or 'role'".into()));
+        assert!(env.get("timed_out").is_none());
+    }
+}
+
 mod wait_timeout {
     //! L3: a wait's timeout_ms is capped at the documented maximum.
     use crate::{validate_args, MAX_WAIT_TIMEOUT_MS};

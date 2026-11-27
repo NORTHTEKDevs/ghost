@@ -227,6 +227,11 @@ fn wrap_envelope(r: Result<Value, String>) -> Value {
         Err(e) => {
             let (code, suggestion) = classify_error(&e);
             let mut env = json!({ "ok": false, "data": null, "foreground": fg, "error_code": code, "error": e });
+            // Every wait that runs out answers the same way: ok:false plus a
+            // machine-readable timed_out, so callers need not parse the text.
+            if code == -32003 {
+                env["timed_out"] = Value::Bool(true);
+            }
             if let Some(s) = suggestion {
                 env["suggested_action"] = Value::String(s.into());
             }
@@ -1651,6 +1656,13 @@ struct PreparedTarget {
     target: Option<WindowTarget>,
 }
 
+/// `for=event`'s answer: the next event's sequence number, or the timeout as
+/// an error like every other wait (the envelope then carries ok:false and
+/// timed_out:true). It used to answer a timeout with ok:true.
+fn event_wait_result(r: std::result::Result<u64, String>) -> std::result::Result<Value, String> {
+    r.map(|seq| json!({ "seq": seq, "timed_out": false }))
+}
+
 /// The longest any wait may run: the same ceiling as a ghost_shell command.
 /// Uncapped, timeout_ms=2^62 never returned.
 const MAX_WAIT_TIMEOUT_MS: u64 = 600_000;
@@ -2745,10 +2757,7 @@ async fn handle_tool(
         "ghost_wait_for_event" => {
             let since_seq = p["since_seq"].as_u64().unwrap_or(0);
             let timeout_ms = p["timeout_ms"].as_u64().unwrap_or(5000);
-            match session.wait_for_event(since_seq, timeout_ms).await {
-                Ok(seq) => Ok(json!({ "seq": seq, "timed_out": false })),
-                Err(_) => Ok(json!({ "seq": session.event_seq(), "timed_out": true })),
-            }
+            event_wait_result(session.wait_for_event(since_seq, timeout_ms).await.map_err(|e| e.to_string()))
         }
         "ghost_act" => {
             let action = p["action"].as_str().ok_or("missing param: action (click|type|double_click|right_click|hover)")?;
@@ -3939,7 +3948,7 @@ fn lean_tools_schema() -> Value {
               "window": { "type": "string", "description": "Window scope (for=idle|element|value|navigate); omit to use the anchor" },
               "settle_ms": { "type": "integer", "default": 250, "description": "for=navigate: pause after the title change so the page can paint (0 = return immediately)" },
               "stable_frames": { "type": "integer", "default": 3, "description": "for=idle" },
-              "timeout_ms": { "type": "integer", "default": 5000, "description": "Give up after this long (default 5000, max 600000; larger values are capped)" },
+              "timeout_ms": { "type": "integer", "default": 5000, "description": "Give up after this long (default 5000, max 600000; larger values are capped). Running out answers ok:false with timed_out:true for every for=" },
               "name": { "type": "string", "description": "Element name (for=element|value)" },
               "role": { "type": "string", "description": "Element role (for=element|value)" },
               "predicate": { "type": "string", "enum": ["equals","contains","changes"], "description": "for=value: how to compare the element's value to text (default equals)" },
