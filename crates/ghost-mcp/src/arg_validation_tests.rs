@@ -67,3 +67,44 @@ mod see_mode {
         assert_eq!(see_scope_hwnd(&json!({ "mode": "marks" })), Ok(None));
     }
 }
+
+mod wait_timeout {
+    //! L3: a wait's timeout_ms is capped at the documented maximum.
+    use crate::{validate_args, MAX_WAIT_TIMEOUT_MS};
+    use serde_json::json;
+
+    const WAITS: [&str; 8] = [
+        "ghost_wait", "ghost_wait_for_element", "ghost_wait_for_value", "ghost_wait_for_idle",
+        "ghost_wait_for_event", "ghost_wait_until", "ghost_navigate_and_wait",
+        "ghost_click_and_wait_for_text",
+    ];
+
+    #[test]
+    fn the_cap_matches_ghost_shell() {
+        assert_eq!(MAX_WAIT_TIMEOUT_MS, 600_000);
+    }
+
+    #[test]
+    fn a_huge_timeout_is_capped_on_every_wait() {
+        for name in WAITS {
+            let args = json!({ "for": "element", "name": "x", "timeout_ms": 1u64 << 62 });
+            let out = validate_args(name, &args).unwrap().expect("rewritten");
+            assert_eq!(out["timeout_ms"], json!(MAX_WAIT_TIMEOUT_MS), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_timeout_within_the_cap_is_untouched() {
+        let args = json!({ "for": "value", "timeout_ms": 600_000 });
+        assert!(validate_args("ghost_wait", &args).unwrap().is_none());
+        assert!(validate_args("ghost_wait", &json!({ "for": "element" })).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_non_integer_timeout_is_invalid_params() {
+        for bad in [json!(-1), json!(2.5), json!("5000")] {
+            let e = validate_args("ghost_wait", &json!({ "for": "element", "timeout_ms": bad })).unwrap_err();
+            assert!(e.starts_with("invalid params: ") && e.contains("timeout_ms"), "{e}");
+        }
+    }
+}

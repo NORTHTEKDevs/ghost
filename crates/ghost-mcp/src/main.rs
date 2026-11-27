@@ -1651,6 +1651,10 @@ struct PreparedTarget {
     target: Option<WindowTarget>,
 }
 
+/// The longest any wait may run: the same ceiling as a ghost_shell command.
+/// Uncapped, timeout_ms=2^62 never returned.
+const MAX_WAIT_TIMEOUT_MS: u64 = 600_000;
+
 /// The modes `ghost_see` accepts: its schema enum.
 const SEE_MODES: [&str; 6] = ["fast", "full", "delta", "text", "marks", "selection"];
 
@@ -1690,6 +1694,28 @@ fn validate_args(name: &str, args: &Value) -> std::result::Result<Option<Value>,
                     "{INVALID_PARAMS}{name} limit must be a non-negative integer (got {v})"
                 ))
             }
+        }
+    }
+    if matches!(
+        name,
+        "ghost_wait" | "ghost_wait_for_element" | "ghost_wait_for_value" | "ghost_wait_for_idle"
+            | "ghost_wait_for_event" | "ghost_wait_until" | "ghost_navigate_and_wait"
+            | "ghost_click_and_wait_for_text"
+    ) {
+        match args.get("timeout_ms") {
+            None | Some(Value::Null) => {}
+            Some(v) => match v.as_u64() {
+                Some(ms) if ms > MAX_WAIT_TIMEOUT_MS => {
+                    out.get_or_insert_with(|| args.clone())["timeout_ms"] = json!(MAX_WAIT_TIMEOUT_MS);
+                }
+                Some(_) => {}
+                None => {
+                    return Err(format!(
+                        "{INVALID_PARAMS}{name} timeout_ms must be a non-negative integer \
+                         (max {MAX_WAIT_TIMEOUT_MS}) (got {v})"
+                    ))
+                }
+            },
         }
     }
     Ok(out)
@@ -3913,7 +3939,7 @@ fn lean_tools_schema() -> Value {
               "window": { "type": "string", "description": "Window scope (for=idle|element|value|navigate); omit to use the anchor" },
               "settle_ms": { "type": "integer", "default": 250, "description": "for=navigate: pause after the title change so the page can paint (0 = return immediately)" },
               "stable_frames": { "type": "integer", "default": 3, "description": "for=idle" },
-              "timeout_ms": { "type": "integer", "default": 5000 },
+              "timeout_ms": { "type": "integer", "default": 5000, "description": "Give up after this long (default 5000, max 600000; larger values are capped)" },
               "name": { "type": "string", "description": "Element name (for=element|value)" },
               "role": { "type": "string", "description": "Element role (for=element|value)" },
               "predicate": { "type": "string", "enum": ["equals","contains","changes"], "description": "for=value: how to compare the element's value to text (default equals)" },
