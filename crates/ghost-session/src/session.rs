@@ -3433,12 +3433,8 @@ impl<'a> OpsDispatcher for SessionOpsDispatcher<'a> {
     }
 }
 
-/// Watch for the foreground moving from `fg_before` to a window `is_targets`
-/// accepts, for up to `settle_ms`, and answer that window. The foreground is
-/// checked at once and then every 20 ms, and every check comes before the
-/// deadline test, so a theft is still seen when a sleep overshoots.
-/// `wait_for_element`: a window-scoped lookup failed and the window itself has
-/// gone. The element went with it, so a wait for it to vanish is satisfied; a
+/// `wait_for_element` and `click_and_wait_for_text`: a window-scoped lookup
+/// failed and the window itself has gone. The element went with it, so a wait for it to vanish is satisfied; a
 /// wait for it to appear is not.
 fn closed_window_is_vanished(appears: bool, window_gone: bool) -> bool {
     !appears && window_gone
@@ -3508,6 +3504,10 @@ async fn paste_via_clipboard(
     result
 }
 
+/// Watch for the foreground moving from `fg_before` to a window `is_targets`
+/// accepts, for up to `settle_ms`, and answer that window. The foreground is
+/// checked at once and then every 20 ms, and every check comes before the
+/// deadline test, so a theft is still seen when a sleep overshoots.
 async fn wait_for_theft(
     fg_before: isize,
     settle_ms: u64,
