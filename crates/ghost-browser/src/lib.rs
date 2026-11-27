@@ -16,6 +16,7 @@ pub mod cdp;
 pub mod error;
 pub mod keys;
 pub mod launch;
+pub mod policy;
 pub mod tab;
 
 pub use browser::Browser;

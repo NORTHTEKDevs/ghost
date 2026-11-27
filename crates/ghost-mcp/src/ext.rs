@@ -110,6 +110,7 @@ pub async fn dispatch(
         "ghost_tab_open" => {
             let (browser, _) = browser_ref(p);
             let url = p["url"].as_str().unwrap_or("about:blank");
+            ghost_browser::policy::check_nav_url(url)?;
             let tab = session.tab_open(&browser, url).await.map_err(|e| e.to_string())?;
             Ok(json!({ "tab": tab, "background": true }))
         }
@@ -127,6 +128,7 @@ pub async fn dispatch(
         "ghost_tab_navigate" => {
             let (browser, tab_id) = browser_tab(p)?;
             let url = req_str(p, "url")?;
+            ghost_browser::policy::check_nav_url(&url)?;
             let timeout_ms = p["timeout_ms"].as_u64().unwrap_or(30_000);
             let tab = session.tab(&browser, &tab_id).await.map_err(|e| e.to_string())?;
             tab.navigate(&url, timeout_ms).await.map_err(|e| e.to_string())?;
@@ -337,12 +339,12 @@ pub fn schemas() -> Vec<Value> {
           "description": "List Chromium-family browsers installed on this machine (chrome, comet, edge, brave).",
           "inputSchema": { "type": "object", "properties": {}}}),
         json!({ "name": "ghost_tab_open",
-          "description": "Open a new background tab (never brings the tab or window to the front). Returns its id for the other ghost_tab_* tools.",
+          "description": "Open a new background tab (never brings the tab or window to the front). Returns its id for the other ghost_tab_* tools. url must be http://, https:// or about:blank (default); file:, chrome:, data:, javascript: and the like are refused. http(s) to any host including localhost is allowed.",
           "inputSchema": { "type": "object", "properties": {
               "browser": { "type": "string" }, "url": { "type": "string" }
           }}}),
         json!({ "name": "ghost_tab_navigate",
-          "description": "Navigate a tab and wait for load. Runs in a background tab; the user's view never changes.",
+          "description": "Navigate a tab and wait for load. Runs in a background tab; the user's view never changes. url must be http://, https:// or about:blank; every other scheme (file:, chrome:, data:, javascript:, ftp: ...) is refused. http(s) to any host including localhost is allowed.",
           "inputSchema": { "type": "object", "required": ["tab", "url"], "properties": {
               "browser": { "type": "string" }, "tab": { "type": "string" },
               "url": { "type": "string" }, "timeout_ms": { "type": "integer" }

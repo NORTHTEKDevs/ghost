@@ -307,7 +307,10 @@ Beyond the loop: `ghost_shell` runs commands and persistent PowerShell sessions,
 `ghost_window` launches, lists, focuses, restores and closes windows (on a hidden
 desktop by default), `ghost_assert` and `ghost_wait` turn "did it work" into a
 check, and the `ghost_tab_*` tools drive the browser you are already signed into.
+
 Most real sessions spend more calls there than on looking.
+
+Tab navigation (`ghost_tab_open`, `ghost_tab_navigate`) is a real browser, so http and https to any host including localhost stay allowed (local dev servers are a core use case) and the `ghost_http_get` SSRF policy does not apply; every other scheme (file:, chrome:, data:, javascript:, ftp: and the like) is refused.
 
 54 tools on Windows (legacy names stay dispatchable): 20 desktop verbs covering
 see/snapshot/find/act/keys/scroll/drag/clipboard/screenshot/windows/shell/waits/query/run,
