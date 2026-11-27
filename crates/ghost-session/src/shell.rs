@@ -1234,6 +1234,18 @@ pub(crate) fn default_shell() -> &'static str {
     }
 }
 
+/// Refuse a `cwd` that is not an existing directory, before any shell starts.
+/// Without this the cold path failed to spawn (os error 267) while the warm
+/// path's Set-Location failed quietly and ran the command in the server's cwd.
+fn check_cwd(cwd: Option<&str>) -> Result<()> {
+    match cwd {
+        Some(dir) if !std::path::Path::new(dir).is_dir() => Err(GhostError::Config(format!(
+            "ghost_shell: cwd '{dir}' is not an existing directory"
+        ))),
+        _ => Ok(()),
+    }
+}
+
 /// How long `op=read` waits: the caller's `timeout_ms`, else a short default.
 fn read_wait(ms: Option<u64>) -> Duration {
     clamp_timeout(Some(ms.unwrap_or(DEFAULT_READ_WAIT_MS)))
@@ -1289,6 +1301,7 @@ impl GhostSession {
         let shell = args.get("shell").and_then(|v| v.as_str()).unwrap_or(default_shell());
         let cwd = args.get("cwd").and_then(|v| v.as_str());
         let dur = clamp_timeout(args.get("timeout_ms").and_then(|v| v.as_u64()));
+        check_cwd(cwd)?;
 
         // Warm path: hand the command to the pre-spawned PowerShell. Only the
         // default shell qualifies (cmd starts in ~15 ms anyway; pwsh is rarely
@@ -1461,6 +1474,7 @@ impl GhostSession {
 
 async fn shell_open(shells: &Mutex<ShellRegistry>, args: &Value) -> Result<Value> {
     let cwd = args.get("cwd").and_then(|v| v.as_str());
+    check_cwd(cwd)?;
     let id = match args.get("id").and_then(|v| v.as_str()) {
         Some(s) if !s.trim().is_empty() => s.to_string(),
         _ => {
@@ -2800,6 +2814,29 @@ mod session_tests {
             status.ok().and_then(|s| s.ok()).and_then(|s| s.code())
         });
         assert_eq!(code, Some(5));
+    }
+
+    /// M4: a cwd that is missing or not a directory is refused with the same
+    /// clear error before any shell starts, warm path and cold alike.
+    #[test]
+    fn a_cwd_that_is_not_a_directory_is_refused_up_front() {
+        let missing = std::env::temp_dir().join(format!("ghost-no-such-dir-{}", std::process::id()));
+        let missing = missing.to_str().unwrap();
+        let file = std::env::current_exe().unwrap();
+        let file = file.to_str().unwrap();
+        let dir = std::env::temp_dir();
+        assert!(check_cwd(None).is_ok());
+        assert!(check_cwd(Some(dir.to_str().unwrap())).is_ok());
+        for bad in [missing, file] {
+            let e = check_cwd(Some(bad)).expect_err(bad).to_string();
+            assert!(e.contains("is not an existing directory") && e.contains(bad), "{e}");
+        }
+        let opened = rt().block_on(shell_open(
+            &Mutex::new(ShellRegistry::new()),
+            &json!({"id": "m4", "cwd": missing}),
+        ));
+        let e = format!("{:?}", opened.expect_err("open in a missing cwd"));
+        assert!(e.contains("is not an existing directory"), "{e}");
     }
 
     /// M2: a session stays visible while a command runs in it. list shows it
