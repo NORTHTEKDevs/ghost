@@ -7,10 +7,8 @@
 **Lets AI agents use the apps on your computer, in the background, and proves every action worked.**
 
 [![CI](https://github.com/NORTHTEKDevs/ghost/actions/workflows/ci.yml/badge.svg)](https://github.com/NORTHTEKDevs/ghost/actions/workflows/ci.yml)
-[![Linux](https://github.com/NORTHTEKDevs/ghost/actions/workflows/linux.yml/badge.svg)](https://github.com/NORTHTEKDevs/ghost/actions/workflows/linux.yml)
-[![Release](https://img.shields.io/github/v/release/NORTHTEKDevs/ghost)](https://github.com/NORTHTEKDevs/ghost/releases/latest)
+[![Release](https://img.shields.io/github/v/release/NORTHTEKDevs/ghost?color=blue)](https://github.com/NORTHTEKDevs/ghost/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![MCP registry](https://img.shields.io/badge/MCP_registry-listed-6e40c9)](https://registry.modelcontextprotocol.io/v0/servers?search=io.github.NORTHTEKDevs/ghost)
 
 **[Quick start](#quick-start)** · [Connect](#2-connect-your-client) · [Try it](#3-try-it) · [Safety](#safety-model) · [Troubleshooting](#troubleshooting) · [Docs](docs/README.md)
 
@@ -19,8 +17,11 @@
 <p align="center">
   <a href="assets/demo.gif"><img src="assets/demo-stacked.gif" width="520" alt="The run's result first: an agent's second click on a button returns verified: true, verified_by: title, focus_preserved: true and cursor_preserved: true, Ghost's screenshot shows the window title counting the click, and the user's foreground window recorded 0 changes. Then the run from the start: Ghost launches the app on its hidden desktop, types into a field and clicks a button, each call verified."></a>
   <br>
-  <sub>An agent drives an app it cannot see on your screen: every call comes back <code>verified: true</code>, and your foreground window records 0 changes. Recorded, not drawn (<a href="scripts/demo-capture.mjs">script</a>, <a href="assets/demo.gif">wide version</a>).</sub>
+  <sub>Recorded on Ghost's hidden desktop, not drawn: <a href="scripts/demo-capture.mjs">script</a> · <a href="assets/demo.gif">wide version</a></sub>
 </p>
+
+An agent drives an app that never appears on your screen. Every call comes back
+`verified: true`, and your foreground window records 0 changes.
 
 Ghost is an [MCP](https://modelcontextprotocol.io) server, a CLI and a local
 REST API. It gives an agent the operating system's own control surface: the
@@ -79,15 +80,17 @@ curl -L "$url/ghost-linux-x86_64.tar.gz" | tar -xz -C ghost-download
 ./ghost-download/install.sh
 ```
 
-Both installers copy `ghost`, `ghost-mcp` and `ghost-http` into place
-(Windows: `%LOCALAPPDATA%\Programs\ghost`, added to your PATH; Linux:
-`~/.local/bin`), register the server with Claude Code if the `claude` CLI is
-installed, and finish with
-`ghost doctor`, which reports PASS, WARN or FAIL for everything Ghost needs.
-Neither needs administrator rights. The Windows one checks the download
-against the release's SHA-256 ([read it first](scripts/install-windows.ps1));
-the Linux one turns on the desktop accessibility setting. Open a new terminal
-afterwards so `ghost` is found. On Wayland, read
+Both installers, with no administrator rights:
+
+- copy the three programs into place: on Windows into
+  `%LOCALAPPDATA%\Programs\ghost`, added to your PATH, after checking the
+  download's SHA-256 ([read the script](scripts/install-windows.ps1)); on
+  Linux into `~/.local/bin`, turning on the desktop accessibility setting;
+- register Ghost with Claude Code, if the `claude` CLI is installed;
+- finish with `ghost doctor`, which reports PASS, WARN or FAIL for
+  everything Ghost needs.
+
+Open a new terminal afterwards so `ghost` is found. On Wayland, read
 [platform support](#platform-support) first.
 
 <details>
@@ -115,9 +118,13 @@ building from source: [docs/install.md](docs/install.md).
 **Claude Code** is already connected if the `claude` CLI was installed when
 you ran the installer; `claude mcp list` shows `ghost`. To add it yourself:
 
+**Windows** (PowerShell):
+
 ```powershell
 claude mcp add ghost --scope user -- "$env:LOCALAPPDATA\Programs\ghost\ghost-mcp.exe"
 ```
+
+**Linux**:
 
 ```bash
 claude mcp add ghost --scope user -- "$HOME/.local/bin/ghost-mcp"
