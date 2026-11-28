@@ -6322,3 +6322,6 @@ mod arg_validation_tests;
 
 #[cfg(test)]
 mod tool_reference_tests;
+
+#[cfg(test)]
+mod manifest_tests;
