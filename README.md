@@ -17,9 +17,9 @@
 </div>
 
 <p align="center">
-  <a href="assets/demo.gif"><img src="assets/demo.gif" width="860" alt="An agent launches an app with Ghost, types into a field and clicks two buttons. Each call returns verified: true, focus_preserved: true and cursor_preserved: true, and the screenshots Ghost takes show the text typed, the status label changed and the window title counting the click. The app runs on Ghost's hidden desktop, and the run records zero changes to the user's foreground window."></a>
+  <a href="assets/demo.gif"><img src="assets/demo-stacked.gif" width="520" alt="An agent launches an app with Ghost, types into a field and clicks two buttons. Each call returns verified: true, focus_preserved: true and cursor_preserved: true, and the screenshots Ghost takes show the text typed, the status label changed and the window title counting the click. The app runs on Ghost's hidden desktop, and the run records zero changes to the user's foreground window."></a>
   <br>
-  <sub>Click for full size. Recorded on Ghost's hidden desktop by <a href="scripts/demo-capture.mjs">demo-capture.mjs</a>, not drawn.</sub>
+  <sub>Click for the wide version. Recorded on Ghost's hidden desktop by <a href="scripts/demo-capture.mjs">demo-capture.mjs</a>, not drawn.</sub>
 </p>
 
 Ghost is an [MCP](https://modelcontextprotocol.io) server, a CLI and a local
@@ -67,19 +67,30 @@ open it: *Settings -> Extensions -> Install from file*. Done; skip to step 3.
 **Windows** (PowerShell):
 
 ```powershell
+irm https://raw.githubusercontent.com/NORTHTEKDevs/ghost/main/scripts/install-windows.ps1 | iex
+```
+
+The [installer](scripts/install-windows.ps1) downloads the latest release,
+checks it against the release's SHA-256 file, installs to
+`%LOCALAPPDATA%\Programs\ghost`, adds that to your user PATH, registers the
+server with Claude Code if the `claude` CLI is installed, and runs
+`ghost doctor`. No administrator rights. Open a new terminal afterwards.
+
+<details>
+<summary>Install by hand instead</summary>
+
+```powershell
 $dir = "$env:LOCALAPPDATA\Programs\ghost"
 $url = "https://github.com/NORTHTEKDevs/ghost/releases/latest/download"
 Invoke-WebRequest "$url/ghost-windows-x64.zip" -OutFile ghost.zip
 Expand-Archive ghost.zip -DestinationPath $dir -Force
 Get-ChildItem $dir | Unblock-File
-$path = [Environment]::GetEnvironmentVariable("Path", "User")
-if ($path -notlike "*$dir*") {
-  [Environment]::SetEnvironmentVariable("Path", "$path;$dir", "User")
-}
 & "$dir\ghost.exe" doctor
 ```
 
-Open a new terminal afterwards so `ghost` is on your PATH.
+Then add `$dir` to your PATH, or use the full path to `ghost-mcp.exe` below.
+
+</details>
 
 **Linux** (x86_64):
 
@@ -130,6 +141,8 @@ Add to `%APPDATA%\Claude\claude_desktop_config.json`, then restart Claude Deskto
 }
 ```
 
+On Linux the command is `/home/YOU/.local/bin/ghost-mcp`.
+
 </details>
 
 <details>
@@ -144,6 +157,8 @@ Add to `~/.cursor/mcp.json` (all projects) or `.cursor/mcp.json` (one project):
   }
 }
 ```
+
+On Linux the command is `/home/YOU/.local/bin/ghost-mcp`.
 
 </details>
 
@@ -160,6 +175,8 @@ Add to `.vscode/mcp.json`:
 }
 ```
 
+On Linux the command is `/home/YOU/.local/bin/ghost-mcp`.
+
 </details>
 
 <details>
@@ -171,6 +188,8 @@ Add to `~/.codex/config.toml`:
 [mcp_servers.ghost]
 command = "C:/Users/YOU/AppData/Local/Programs/ghost/ghost-mcp.exe"
 ```
+
+On Linux the command is `/home/YOU/.local/bin/ghost-mcp`.
 
 </details>
 
@@ -187,6 +206,8 @@ this shape:
   }
 }
 ```
+
+On Linux the command is `/home/YOU/.local/bin/ghost-mcp`.
 
 Registry-aware clients can also install `io.github.NORTHTEKDevs/ghost` from
 the [MCP registry](https://registry.modelcontextprotocol.io).

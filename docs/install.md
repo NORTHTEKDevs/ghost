@@ -22,6 +22,21 @@ checkboxes. The bundle holds `ghost-mcp` only.
 Ghost is also in the [MCP registry](https://registry.modelcontextprotocol.io)
 as `io.github.NORTHTEKDevs/ghost` for clients that install from there.
 
+## Windows installer
+
+```powershell
+irm https://raw.githubusercontent.com/NORTHTEKDevs/ghost/main/scripts/install-windows.ps1 | iex
+```
+
+[`scripts/install-windows.ps1`](../scripts/install-windows.ps1) downloads the
+latest release zip, stops if it does not match the release's `.sha256` file,
+installs `ghost.exe`, `ghost-mcp.exe` and `ghost-http.exe` to
+`%LOCALAPPDATA%\Programs\ghost`, adds that folder to your user PATH, registers
+the server with Claude Code when the `claude` CLI is present and runs
+`ghost doctor`. A `ghost-mcp.exe` held open by a running client is renamed
+aside, not overwritten. To pass options, save the script and run it:
+`powershell -File install-windows.ps1 -Dir <path> -NoPath -NoRegister -NoDoctor`.
+
 ## Windows archive
 
 ```powershell
