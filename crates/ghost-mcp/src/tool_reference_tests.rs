@@ -51,6 +51,26 @@ fn param_type(spec: &Value) -> String {
     }
 }
 
+/// The tool's MCP annotations as one line under its description.
+fn annotation_line(a: &Value) -> String {
+    let title = a["title"].as_str().unwrap_or_default();
+    let mut tags = Vec::new();
+    if a["readOnlyHint"] == true {
+        tags.push("read-only");
+    } else if a["destructiveHint"] == true {
+        tags.push("may change or remove data");
+    } else {
+        tags.push("changes state, not destructive");
+    }
+    if a["idempotentHint"] == true {
+        tags.push("idempotent");
+    }
+    if a["openWorldHint"] == true {
+        tags.push("reaches the network or runs programs");
+    }
+    format!("\n**{title}**: {}.\n", tags.join(", "))
+}
+
 pub(crate) fn render_tool_reference(tools: &Value) -> String {
     let tools = tools.as_array().expect("tools/list is an array");
     let mut out = String::new();
@@ -74,6 +94,7 @@ pub(crate) fn render_tool_reference(tools: &Value) -> String {
         for t in members {
             let name = t["name"].as_str().unwrap_or_default();
             out.push_str(&format!("\n### `{name}`\n\n{}\n", flat(t["description"].as_str().unwrap_or_default())));
+            out.push_str(&annotation_line(&t["annotations"]));
             let schema = &t["inputSchema"];
             let Some(props) = schema["properties"].as_object().filter(|p| !p.is_empty()) else {
                 out.push_str("\nNo parameters.\n");
