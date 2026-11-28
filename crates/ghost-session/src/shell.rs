@@ -1349,14 +1349,57 @@ fn clamp_timeout(ms: Option<u64>) -> Duration {
 }
 
 /// Tail-truncate to the output cap, appending a marker with the dropped byte count.
-fn cap_output(mut s: String) -> (String, bool) {
+fn cap_output(s: String) -> (String, bool) {
+    cap_output_after(s, 0)
+}
+
+/// `cap_output` for text whose first `pre_dropped` bytes were already
+/// discarded while reading; the truncation note counts both.
+fn cap_output_after(mut s: String, pre_dropped: u64) -> (String, bool) {
     if s.chars().count() <= MAX_OUTPUT_CHARS {
-        return (s, false);
+        if pre_dropped == 0 {
+            return (s, false);
+        }
+        s = format!("...[{pre_dropped} bytes truncated]...\n{s}");
+        return (s, true);
     }
     let keep_from = s.char_indices().rev().nth(MAX_OUTPUT_CHARS - 1).map(|(i, _)| i).unwrap_or(0);
-    let dropped = keep_from;
+    let dropped = keep_from as u64 + pre_dropped;
     s = format!("...[{dropped} bytes truncated]...\n{}", &s[keep_from..]);
     (s, true)
+}
+
+/// Bytes of a stream `read_tail` keeps: enough for MAX_OUTPUT_CHARS of
+/// four-byte UTF-8 plus one split character, so the cap still has a full tail.
+const TAIL_KEEP_BYTES: usize = MAX_OUTPUT_CHARS * 4 + 4;
+
+/// Reads a child's output to the end, keeping only the last TAIL_KEEP_BYTES.
+/// Returns the kept tail and how many bytes before it were dropped. A read
+/// error ends the stream, as `read_to_end` did.
+async fn read_tail<R: tokio::io::AsyncRead + Unpin>(mut r: R) -> (Vec<u8>, u64) {
+    use tokio::io::AsyncReadExt;
+    let mut tail: Vec<u8> = Vec::new();
+    let mut dropped = 0u64;
+    let mut chunk = vec![0u8; 64 * 1024];
+    loop {
+        let n = match r.read(&mut chunk).await {
+            Ok(0) | Err(_) => break,
+            Ok(n) => n,
+        };
+        tail.extend_from_slice(&chunk[..n]);
+        // Trim once the tail is twice the keep size, so trimming is amortized.
+        if tail.len() > 2 * TAIL_KEEP_BYTES {
+            let cut = tail.len() - TAIL_KEEP_BYTES;
+            tail.drain(..cut);
+            dropped += cut as u64;
+        }
+    }
+    if tail.len() > TAIL_KEEP_BYTES {
+        let cut = tail.len() - TAIL_KEEP_BYTES;
+        tail.drain(..cut);
+        dropped += cut as u64;
+    }
+    (tail, dropped)
 }
 
 impl GhostSession {
@@ -1430,11 +1473,17 @@ impl GhostSession {
         let mut stdout = child.stdout.take().unwrap();
         let mut stderr = child.stderr.take().unwrap();
 
+        // Only the tail of each stream is kept while reading: the reply keeps
+        // the last MAX_OUTPUT_CHARS anyway, and `type` of a huge file must not
+        // hold the whole file in memory first.
         let mut obuf = Vec::new();
         let mut ebuf = Vec::new();
+        let mut dropped = 0u64;
         let collect = async {
-            use tokio::io::AsyncReadExt;
-            let _ = tokio::join!(stdout.read_to_end(&mut obuf), stderr.read_to_end(&mut ebuf));
+            let ((o, od), (e, ed)) = tokio::join!(read_tail(&mut stdout), read_tail(&mut stderr));
+            obuf = o;
+            ebuf = e;
+            dropped = od + ed;
         };
 
         let mut timed_out = false;
@@ -1468,7 +1517,7 @@ impl GhostSession {
             // plain text and passes through; CLIXML noise is stripped to text.
             merged.push_str(&sanitize_ps_stderr(&err));
         }
-        let (output, truncated) = cap_output(merged);
+        let (output, truncated) = cap_output_after(merged, dropped);
         Ok(json!({
             "ok": !timed_out,
             "output": output,
@@ -2020,6 +2069,34 @@ mod tests {
         let (s, t) = cap_output("hello".into());
         assert_eq!(s, "hello");
         assert!(!t);
+    }
+
+    /// 8 MB of output (a `type` of a big log) is read with a bounded buffer,
+    /// and the truncation note still counts every byte that was dropped.
+    #[tokio::test]
+    async fn read_tail_keeps_a_bounded_tail_and_counts_the_rest() {
+        let total = 8 * 1024 * 1024 + 7;
+        let mut data: Vec<u8> = (0..total).map(|i| b'a' + (i % 26) as u8).collect();
+        data.extend_from_slice(b"THE-END");
+        let (tail, dropped) = read_tail(&data[..]).await;
+        assert!(tail.len() <= TAIL_KEEP_BYTES, "kept {} bytes", tail.len());
+        assert!(tail.ends_with(b"THE-END"));
+        assert_eq!(dropped + tail.len() as u64, data.len() as u64);
+
+        let (out, truncated) = cap_output_after(String::from_utf8(tail).unwrap(), dropped);
+        assert!(truncated);
+        assert!(out.ends_with("THE-END"));
+        let note = format!("...[{} bytes truncated]...", data.len() - MAX_OUTPUT_CHARS);
+        assert!(out.starts_with(&note), "{}", &out[..60]);
+    }
+
+    #[tokio::test]
+    async fn read_tail_keeps_short_output_whole() {
+        let (tail, dropped) = read_tail(&b"hello\n"[..]).await;
+        assert_eq!((tail.as_slice(), dropped), (&b"hello\n"[..], 0));
+        assert_eq!(cap_output_after("hello".into(), 0), ("hello".to_string(), false));
+        let (s, t) = cap_output_after("hello".into(), 9);
+        assert!(t && s.starts_with("...[9 bytes truncated]...") && s.ends_with("hello"), "{s}");
     }
 
     #[test]
