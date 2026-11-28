@@ -11,11 +11,12 @@
 </div>
 
 <p align="center">
-  <a href="assets/demo.gif"><img src="assets/demo-stacked.gif" width="520" alt="The run's result first: an agent's second click on a button returns verified: true, verified_by: title, focus_preserved: true and cursor_preserved: true, Ghost's screenshot shows the window title counting the click, and the user's foreground window recorded 0 changes. Then the run from the start: Ghost launches the app on its hidden desktop, types into a field and clicks a button, each call verified."></a>
+  <a href="assets/demo.gif"><img src="assets/demo-stacked-title.gif" width="520" alt="The run's result first: an agent's second click on a button returns verified: true, verified_by: title, focus_preserved: true and cursor_preserved: true, Ghost's screenshot shows the window title counting the click (repeated at twice its size under the window), and the user's foreground window recorded 0 changes. Then the run from the start: Ghost launches the app on its hidden desktop, types into a field and clicks a button, each call verified."></a>
 </p>
 
-An agent drives an app on Ghost's hidden desktop, never on your screen. Recorded,
-not drawn: [recording script](scripts/demo-capture.mjs) ·
+An agent drives an app on Ghost's hidden desktop, never on your screen; the
+strip under each window is its title bar at twice the size. Recorded, not
+drawn: [recording script](scripts/demo-capture.mjs) ·
 [full-width recording](assets/demo.gif).
 
 Ghost is an [MCP](https://modelcontextprotocol.io) server, a CLI and a local
@@ -57,7 +58,12 @@ Three steps: install, connect your client, try it.
 Runs on Windows 10 (build 19041+) and 11, and Linux x86_64 (X11 verified,
 Wayland not yet). No macOS yet: see [platform support](#platform-support).
 
-**Claude Desktop**, one click: from the
+Pick one route: **[Claude Desktop](#claude-desktop)** (no terminal),
+**[Windows](#windows)** or **[Linux](#linux)**.
+
+#### Claude Desktop
+
+One click: from the
 [latest release](https://github.com/NORTHTEKDevs/ghost/releases/latest),
 download the bundle for your system and open it in *Settings > Extensions >
 Install from file*. Done; skip to step 3.
@@ -65,7 +71,9 @@ Install from file*. Done; skip to step 3.
 - Windows: `ghost-windows-x64.mcpb`
 - Linux: `ghost-linux-x86_64.mcpb`
 
-**Windows** (PowerShell):
+#### Windows
+
+In PowerShell:
 
 ```powershell
 $raw = "https://raw.githubusercontent.com" +
@@ -73,7 +81,9 @@ $raw = "https://raw.githubusercontent.com" +
 irm "$raw/install-windows.ps1" | iex
 ```
 
-**Linux** (x86_64):
+#### Linux
+
+On x86_64:
 
 ```bash
 repo=https://github.com/NORTHTEKDevs/ghost
@@ -83,7 +93,13 @@ curl -L $dl/ghost-linux-x86_64.tar.gz |
   tar -xz && ./install.sh
 ```
 
-Both installers, with no administrator rights:
+Open a new terminal afterwards so `ghost` is found. On Wayland, read
+[platform support](#platform-support) first.
+
+<details>
+<summary>What the installers do</summary>
+
+With no administrator rights, both installers:
 
 - copy the three programs into place: on Windows into
   `%LOCALAPPDATA%\Programs\ghost`, added to your PATH, after checking the
@@ -93,8 +109,7 @@ Both installers, with no administrator rights:
 - finish with `ghost doctor`, which reports PASS, WARN or FAIL for
   everything Ghost needs.
 
-Open a new terminal afterwards so `ghost` is found. On Wayland, read
-[platform support](#platform-support) first.
+</details>
 
 <details>
 <summary>Other ways to install</summary>
@@ -254,6 +269,10 @@ ghost verify
 ```
 
 ## How an agent uses it
+
+<p align="center">
+  <img src="assets/loop.png" width="520" alt="The loop: look with ghost_see, act with ghost_act, confirm with verified: true.">
+</p>
 
 The loop is look, act, confirm:
 

@@ -15,7 +15,7 @@ from PIL import Image, ImageDraw, ImageFont
 ROOT = Path(__file__).resolve().parent.parent
 BG, BORDER = "#0d1117", "#30363d"
 TEXT, MUTED, GREEN = "#e6edf3", "#8b949e", "#3fb950"
-W, PAD = 1200, 72
+W, PAD = 1200, 48  # 48 of 1200 is ~21px at 520, the demo frame's inset
 
 
 def first_font(names, size):
@@ -38,7 +38,11 @@ def display(size):
 
 
 def light(size):
-    return first_font(["segoeuil.ttf", "DejaVuSans-ExtraLight.ttf", "DejaVuSans.ttf"], size)
+    return first_font(["segoeuisl.ttf", "segoeuil.ttf", "DejaVuSans.ttf"], size)
+
+
+def mono(size):
+    return first_font(["consola.ttf", "DejaVuSansMono.ttf"], size)
 
 
 def fit(draw, text, maker, size, width):
@@ -96,7 +100,73 @@ def proof():
     im.save(ROOT / "assets/proof.png", optimize=True)
 
 
+def title_inset():
+    """assets/demo-stacked.gif with the captured window's title bar repeated
+    under the window at twice its size (nearest-neighbour, so it is the same
+    pixels, only larger). The title is what proves the click in the last
+    step, and at phone width the original is about 7px tall."""
+    src = Image.open(ROOT / "assets/demo-stacked.gif")
+    frames, durations = [], []
+    BAND, SCALE, CROP_W, CROP_H = 84, 2, 262, 26
+    for i in range(src.n_frames):
+        src.seek(i)
+        durations.append(src.info.get("duration", 2600))
+        f = src.convert("RGB")
+        w, h = f.size
+        # The window is the only thing light across the whole middle of the
+        # frame (the headline is light text on dark, with gaps).
+        def window_row(y):
+            return all(sum(f.getpixel((x, y))) > 500 for x in range(w * 3 // 10, w * 7 // 10, 8))
+        rows = [y for y in range(h) if window_row(y)]
+        top = rows[0]
+        left = next(x for x in range(w) if sum(f.getpixel((x, top + 4))) > 600)
+        # Walk down the window's light left margin to the end of its client
+        # area, then through the dark frame under it.
+        bottom = top
+        while bottom + 1 < h and sum(f.getpixel((left + 3, bottom + 1))) > 500:
+            bottom += 1
+        while bottom + 1 < h and sum(f.getpixel((left + 3, bottom + 1))) < 60 and \
+                sum(f.getpixel((left + 3, bottom + 1))) != sum(f.getpixel((2, bottom + 1))):
+            bottom += 1
+        crop = f.crop((left + 2, top, left + 2 + CROP_W, top + CROP_H))
+        zoom = crop.resize((CROP_W * SCALE, CROP_H * SCALE), Image.NEAREST)
+        out = Image.new("RGB", (w, h + BAND), BG)
+        out.paste(f.crop((0, 0, w, bottom + 1)), (0, 0))
+        y = bottom + 1 + (BAND - CROP_H * SCALE) // 2
+        out.paste(zoom, (left, y))
+        d = ImageDraw.Draw(out)
+        d.rectangle((left - 1, y - 1, left + CROP_W * SCALE, y + CROP_H * SCALE), outline=BORDER)
+        out.paste(f.crop((0, bottom + 1, w, h)), (0, bottom + 1 + BAND))
+        frames.append(out)
+    frames[0].save(ROOT / "assets/demo-stacked-title.gif", save_all=True, append_images=frames[1:],
+                   duration=durations, loop=0, optimize=True)
+
+
+def loop():
+    """The look, act, confirm loop from "How an agent uses it", as three
+    steps in the same panel language."""
+    steps = [("look", "ghost_see"), ("act", "ghost_act"), ("confirm", "verified: true")]
+    H = 300
+    im = Image.new("RGB", (W, H), BG)
+    d = ImageDraw.Draw(im)
+    gap = 56
+    box_w = (W - 2 * PAD - 2 * gap) // 3
+    word, code = display(58), mono(34)
+    for i, (label, call) in enumerate(steps):
+        x = PAD + i * (box_w + gap)
+        d.rounded_rectangle((x, 60, x + box_w, H - 60), radius=18, outline=BORDER, width=3)
+        d.text((x + box_w // 2, 125), label, font=word, fill=TEXT, anchor="mm")
+        d.text((x + box_w // 2, 190), call, font=code, fill=GREEN if i == 2 else MUTED, anchor="mm")
+        if i < 2:
+            ax = x + box_w + 10
+            d.line((ax, H // 2, ax + gap - 22, H // 2), fill=GREEN, width=5)
+            d.polygon([(ax + gap - 20, H // 2 - 12), (ax + gap - 4, H // 2), (ax + gap - 20, H // 2 + 12)], fill=GREEN)
+    im.save(ROOT / "assets/loop.png", optimize=True)
+
+
 if __name__ == "__main__":
     banner()
     proof()
-    print("wrote assets/banner.png, assets/proof.png")
+    title_inset()
+    loop()
+    print("wrote assets/banner.png, assets/proof.png, assets/demo-stacked-title.gif, assets/loop.png")
