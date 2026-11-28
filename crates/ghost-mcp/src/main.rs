@@ -7,6 +7,7 @@ use ghost_session::{GhostSession, LocateMode, Target, TargetSource, WindowTarget
 mod annotations;
 mod audit;
 mod param_docs;
+mod sibling_hints;
 mod cli;
 mod ext;
 mod realinput;
@@ -4212,6 +4213,7 @@ fn tools_schema() -> Value {
     let mut tools = raw_tools_schema();
     annotations::annotate(&mut tools);
     param_docs::document(&mut tools);
+    sibling_hints::add(&mut tools);
     tools
 }
 
