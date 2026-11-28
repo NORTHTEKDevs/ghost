@@ -1,11 +1,13 @@
 """Builds assets/demo.gif from the output of scripts/demo-capture.mjs.
 
     python scripts/demo-gif.py <capture-dir> assets/demo.gif
-    python scripts/demo-gif.py --stacked <capture-dir> assets/demo-stacked.gif
+    python scripts/demo-gif.py --stacked --result-first <capture-dir> assets/demo-stacked.gif
 
 --stacked lays each frame out in one narrow column with large type (the
 screenshot, then the call and what Ghost returned), so it still reads when a
-phone shows it about 360 px wide.
+phone shows it about 360 px wide. --result-first opens on the last step
+(the verified result and the foreground audit), then plays the run from the
+start, so the first thing a reader sees is the payoff.
 
 Each frame shows the tool call an agent made, the fields Ghost returned, and
 the screenshot Ghost took of its own window on the hidden desktop. Nothing is
@@ -143,7 +145,7 @@ def stacked_height(steps, shots):
     return tallest
 
 
-def main(src, out, stacked=False):
+def main(src, out, stacked=False, result_first=False):
     data = json.loads((Path(src) / "steps.json").read_text(encoding="utf-8"))
     steps = data["steps"]
     audit = data["stats"]["interference_audit"]["synthetic_foreground_changes"]
@@ -153,7 +155,11 @@ def main(src, out, stacked=False):
         shot.thumbnail((SW - 48, 10_000) if stacked else (W - 408 - 32, H - 72 - 70))
         shots.append(shot)
     height = stacked_height(steps, shots) if stacked else None
-    for i, (step, shot) in enumerate(zip(steps, shots)):
+    order = list(range(len(steps)))
+    if result_first:
+        order = order[-1:] + order[:-1]
+    for i in order:
+        step, shot = steps[i], shots[i]
         last = i == len(steps) - 1
         if stacked:
             frames.append(stacked_frame(step, i, len(steps), shot, height, audit if last else None))
@@ -162,11 +168,12 @@ def main(src, out, stacked=False):
         durations.append(4500 if last else 2600)
     paletted = [f.quantize(colors=128, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE) for f in frames]
     paletted[0].save(out, save_all=True, append_images=paletted[1:], duration=durations, loop=0, optimize=True)
-    frames[-1].save(Path(out).with_suffix(".png"))
+    frames[order.index(len(steps) - 1)].save(Path(out).with_suffix(".png"))
 
 
 if __name__ == "__main__":
-    args = [a for a in sys.argv[1:] if a != "--stacked"]
+    flags = {"--stacked", "--result-first"}
+    args = [a for a in sys.argv[1:] if a not in flags]
     if len(args) != 2:
         sys.exit(__doc__)
-    main(args[0], args[1], stacked="--stacked" in sys.argv)
+    main(args[0], args[1], stacked="--stacked" in sys.argv, result_first="--result-first" in sys.argv)
