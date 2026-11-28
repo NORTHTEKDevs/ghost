@@ -271,7 +271,13 @@ mod wait_timeout {
             assert_eq!(spec["maximum"], json!(600_000), "{name}");
         }
         seen.sort_unstable();
-        assert_eq!(seen, ["ghost_desktop_wait_for_window", "ghost_tab_wait_for", "ghost_wait"]);
+        // ghost_desktop_* (isolated desktops) is advertised on Windows only.
+        let expected: &[&str] = if cfg!(windows) {
+            &["ghost_desktop_wait_for_window", "ghost_tab_wait_for", "ghost_wait"]
+        } else {
+            &["ghost_tab_wait_for", "ghost_wait"]
+        };
+        assert_eq!(seen, expected);
     }
 
     #[test]
