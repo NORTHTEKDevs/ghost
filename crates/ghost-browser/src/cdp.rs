@@ -249,13 +249,15 @@ async fn open(ws_url: &str) -> Result<Conn> {
     let closed_r = closed.clone();
     tokio::spawn(async move {
         while let Some(Ok(msg)) = read.next().await {
-            let text = match msg {
-                Message::Text(t) => t.to_string(),
-                Message::Binary(b) => String::from_utf8_lossy(&b).into_owned(),
+            // Parse in place: a reply can be hundreds of MiB (a full-page
+            // screenshot), so it is not copied into a String first.
+            let parsed = match &msg {
+                Message::Text(t) => serde_json::from_str::<Value>(t.as_str()),
+                Message::Binary(b) => serde_json::from_str::<Value>(&String::from_utf8_lossy(b)),
                 Message::Close(_) => break,
                 _ => continue,
             };
-            let Ok(v) = serde_json::from_str::<Value>(&text) else {
+            let Ok(v) = parsed else {
                 continue;
             };
             let Some(id) = v.get("id").and_then(|i| i.as_u64()) else {
