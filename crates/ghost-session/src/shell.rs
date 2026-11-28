@@ -2842,6 +2842,30 @@ mod session_tests {
         all["sessions"].as_array().unwrap().iter().find(|s| s["id"] == id).cloned()
     }
 
+    /// Whether a process whose recorded parent is `ppid` really is a child of
+    /// `parent`. Windows never updates a process's parent id when the parent
+    /// exits, and process ids are reused, so the parent id alone is not
+    /// enough.
+    #[cfg(windows)]
+    fn is_child_of(ppid: u32, child_born: Option<u64>, parent: u32, parent_born: Option<u64>) -> bool {
+        ppid == parent && matches!((child_born, parent_born), (Some(c), Some(p)) if c >= p)
+    }
+
+    /// A process older than `parent` that names it as parent is an orphan
+    /// whose real parent exited and whose id `parent` now reuses. Under the
+    /// full suite's process churn one shell test matched another test's ping
+    /// this way, then saw it die (or killed it) and failed intermittently.
+    #[cfg(windows)]
+    #[test]
+    fn an_older_process_naming_a_reused_parent_id_is_not_its_child() {
+        assert!(is_child_of(40, Some(200), 40, Some(100)), "born after the parent: a child");
+        assert!(is_child_of(40, Some(100), 40, Some(100)), "same tick: a child");
+        assert!(!is_child_of(40, Some(90), 40, Some(100)), "born before the parent: an orphan of a reused id");
+        assert!(!is_child_of(41, Some(200), 40, Some(100)), "another parent");
+        assert!(!is_child_of(40, None, 40, Some(100)), "unknown birth: not claimed");
+        assert!(!is_child_of(40, Some(200), 40, None), "parent gone: not claimed");
+    }
+
     /// Child processes of `parent` named `exe` (Toolhelp snapshot).
     #[cfg(windows)]
     fn children_named(parent: u32, exe: &str) -> Vec<u32> {
@@ -2850,13 +2874,17 @@ mod session_tests {
             CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
         };
         let mut out = Vec::new();
+        let parent_born = platform::creation_time(parent);
         unsafe {
             let Ok(snap) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else { return out };
             let mut e = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
             if Process32FirstW(snap, &mut e).is_ok() {
                 loop {
                     let n = e.szExeFile.iter().position(|&c| c == 0).unwrap_or(e.szExeFile.len());
-                    if e.th32ParentProcessID == parent && String::from_utf16_lossy(&e.szExeFile[..n]).eq_ignore_ascii_case(exe) {
+                    if e.th32ParentProcessID == parent
+                        && String::from_utf16_lossy(&e.szExeFile[..n]).eq_ignore_ascii_case(exe)
+                        && is_child_of(e.th32ParentProcessID, platform::creation_time(e.th32ProcessID), parent, parent_born)
+                    {
                         out.push(e.th32ProcessID);
                     }
                     if Process32NextW(snap, &mut e).is_err() {
