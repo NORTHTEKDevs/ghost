@@ -189,8 +189,18 @@ fn json_err(e: (StatusCode, String)) -> (StatusCode, Json<Value>) {
 /// Ghost process) it answers 409 instead. The session paths check again when
 /// the command runs, in case the stop arrived while it waited in the queue.
 fn refuse_if_stopped() -> Result<(), (StatusCode, Json<Value>)> {
-    ghost_session::error::ensure_not_stopped()
-        .map_err(|_| json_err((StatusCode::CONFLICT, ghost_session::error::stop_refusal())))
+    refuse_if(ghost_session::error::is_stopped())
+}
+
+/// The refusal itself, given whether the stop is active. Split out so a test
+/// can check it without raising the process-wide stop flag, which made every
+/// route test running beside it answer 409.
+fn refuse_if(stopped: bool) -> Result<(), (StatusCode, Json<Value>)> {
+    if stopped {
+        Err(json_err((StatusCode::CONFLICT, ghost_session::error::stop_refusal())))
+    } else {
+        Ok(())
+    }
 }
 
 #[derive(Deserialize)]
@@ -425,23 +435,20 @@ fn build_router(tx: mpsc::UnboundedSender<Cmd>, bound: std::net::SocketAddr) -> 
 
 #[cfg(all(test, windows))]
 mod tests {
-    use super::refuse_if_stopped;
+    use super::{refuse_if, refuse_if_stopped};
     use axum::http::StatusCode;
-    use ghost_core::input::STOP_FLAG;
-    use std::sync::atomic::Ordering;
 
-    /// Only the process-local flag: the shared event would stop every Ghost
-    /// process on the machine.
+    /// The refusal is checked through `refuse_if` rather than by raising the
+    /// process-wide stop flag: the tests in this binary run in parallel, and
+    /// a raised flag made the route tests beside this one answer 409.
     #[test]
     fn action_routes_answer_409_while_stopped() {
-        STOP_FLAG.store(true, Ordering::Release);
-        let r = refuse_if_stopped();
-        STOP_FLAG.store(false, Ordering::Release);
-        let (code, body) = r.expect_err("must refuse while stopped");
+        let (code, body) = refuse_if(true).expect_err("must refuse while stopped");
         assert_eq!(code, StatusCode::CONFLICT);
         let error = body.0["error"].as_str().unwrap();
         assert!(error.contains("stopped") && !error.contains("ghost_reset"), "{error}");
-        assert!(refuse_if_stopped().is_ok());
+        assert!(refuse_if(false).is_ok());
+        assert!(refuse_if_stopped().is_ok(), "no stop is raised in this test process");
     }
 }
 
