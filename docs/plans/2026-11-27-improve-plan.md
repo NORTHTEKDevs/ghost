@@ -22,10 +22,10 @@ run; the rest are listed with what blocks them.
 | # | Item | Impact | Effort | Risk | Kind | Evidence |
 |---|------|--------|--------|------|------|----------|
 | 1 | STA pool `orphaned_jobs` wraps to ~usize::MAX when a caller is cancelled: the worker decrements on a failed reply send, but only the timeout branch increments | M | S | L | internal | `crates/ghost-core/src/uia/sta_pool.rs:83,94` vs `:152` |
-| 2 | `ghost_http_get` is classed Observe, so it still runs after the human presses stop; the class doc says outbound requests are Act | M | S | L | behaviour | `crates/ghost-mcp/src/main.rs:914-915` vs `:945` |
+| ~~2~~ | Moved to "Needs Kristian": `ghost_http_get` is classed Observe, so it still runs after the human presses stop; the class doc says outbound requests are Act | M | S | L | behaviour | `crates/ghost-mcp/src/main.rs:914-915` vs `:945` |
 | 3 | `ghost_assert value-equals/value-contains` turns a failed value read (dead tab, CDP timeout) into `""`, so `value-equals text=""` passes falsely | M | S | L | behaviour | `crates/ghost-mcp/src/main.rs:1387` |
-| 4 | ghost-http waits for the session thread's reply with no deadline; one stuck UIA call hangs every later request, and the queue is unbounded | H (http) | S | L | behaviour (new 504) | `crates/ghost-http/src/main.rs:175-178`, `:68` |
-| 5 | std `Mutex` + `.unwrap()` on shared state: one panic while locked poisons it and every later CDP call / locate call panics until restart | M | S | L | internal | `crates/ghost-browser/src/cdp.rs:186,191,196,210,269`; `crates/ghost-session/src/session.rs:988,1032,1046,1050,1251,1276` |
+| ~~4~~ | Moved to "Needs Kristian": ghost-http waits for the session thread's reply with no deadline; one stuck UIA call hangs every later request, and the queue is unbounded | H (http) | S | L | behaviour (new 504) | `crates/ghost-http/src/main.rs:175-178`, `:68` |
+| 5 | std `Mutex` + `.unwrap()` on shared state: one panic while locked poisons it and every later CDP call / locate call panics until restart. Demoted on a closer read: the code under these locks (HashMap insert/remove, the reflection recorders) cannot realistically panic | L | S | L | internal | `crates/ghost-browser/src/cdp.rs:186,191,196,210,269`; `crates/ghost-session/src/session.rs:988,1032,1046,1050,1251,1276` |
 | 6 | `ghost_shell` reads the child's whole stdout/stderr into memory before capping at 24k; `type bigfile` can exhaust memory | M | S | L | internal | `crates/ghost-session/src/shell.rs:1433-1437`, cap at `:1471` |
 | 7 | Flaky test: `shell_disabled_reads_env` / `warm_flag_reads_env` set process-global env vars while parallel tests read them | M | S | L | test-only | `crates/ghost-session/src/shell.rs:2108-2112`, `:2372-2375`; readers `:344`, `:1365`, `:1404` |
 | 8 | No guard that `server.json`, `plugin.json`, `lhm.plugin.json` versions match Cargo, or that the registry description stays within 100 chars (it is at exactly 100) | M | S | L | test-only | `server.json`, `Cargo.toml:23` |
@@ -47,7 +47,6 @@ run; the rest are listed with what blocks them.
 |------|-------------------------|----------|
 | MCP tool annotations (`readOnlyHint`, `destructiveHint`, `openWorldHint`), `title`, `outputSchema`/`structuredContent`, protocol version 2024-11-05 | Changes `tools/list`; some clients auto-approve on `readOnlyHint`, so the labels are a security call. The Observe/Act/Control table at `main.rs:926` is a ready source for `readOnlyHint`. Glama scores "Disambiguation 3/5" partly on this | `crates/ghost-mcp/src/main.rs:2011,4210`; no `annotations` anywhere in `crates/` |
 | Mark untrusted screen/page/clipboard text and add server `instructions` saying it is data | Changes result shapes; highest-impact prompt-injection defence while `ghost_shell` is on by default | `crates/ghost-mcp/src/ext.rs:203-220`; `main.rs:2013` |
-| ghost-http authentication (per-start token file or named pipe with a DACL) | Changes how every HTTP client connects; today any local process that sends `Host: 127.0.0.1` drives the desktop | `crates/ghost-http/src/main.rs:389-406` |
 | Human stop event is `EVENT_ALL_ACCESS` for the user, so a process outside the shell job (`ghost_window op=launch`, WMI) can reset it | Needs a design: hotkey owner keeps the stop in memory and re-raises on tamper | `crates/ghost-core/src/hotkey.rs:168-179,256-286`; `crates/ghost-session/src/hidden.rs:324-326`; `docs/security-model.md:80` |
 | Tab navigation to link-local/private hosts (e.g. 169.254.169.254) | Blocking it changes what tabs may load (local dev servers are a real use) | `crates/ghost-browser/src/policy.rs:3-25` |
 | Page scripts keep running after a stop | Needs a stop hook into Ghost-owned tabs (`Runtime.terminateExecution` / about:blank) and a stance on attached browsers | `crates/ghost-browser/src/tab.rs:171-174` |
@@ -55,10 +54,37 @@ run; the rest are listed with what blocks them.
 | Tool surface: overlapping inspect/click tools, inconsistent `window`/`name`/`hwnd`, 18 descriptions over 300 chars, empty param descriptions, `ghost_snapshot` vs `ghost_see` merge | Descriptions and names are the contract agents read | `docs/tools.md` (`ghost_shell` 1061 chars, `ghost_run` 1040, `ghost_act` 883) |
 | Window move/resize (`ghost_window op=move\|resize`) | New op | `docs/tools.md:198` |
 | `ghost_clipboard get` opt-out env var; allowed while stopped | New default/knob | `crates/ghost-mcp/src/main.rs:959` |
+| `ghost_http_get` while stopped (plan item 2) | The Observe class is deliberate (pinned by the test comment at `main.rs:4808`); making it Act also turns off its default `ghost_run` retry (`main.rs:3721`) | `crates/ghost-mcp/src/main.rs:914-915,945` |
+| ghost-http reply deadline (plan item 4) | `/run` carries its own `max_duration_ms`, and the single serial worker keeps a stuck call at the head of the queue, so the deadline length, the 504 contract and whether queued work is cancelled are design choices | `crates/ghost-http/src/main.rs:68-82,175-178` |
 | ghost-macos never runs in CI (33 unit + 9 integration tests) | macOS runner minutes cost ~10x | `crates/ghost-macos/src/lib.rs`; `.github/workflows/*.yml` |
 | LobeHub shows grade F and a stale README; Glama scored 3.2/5 on the 39-tool Linux build | External listing actions are out of scope for this run | lobehub.com/mcp/northtekdevs-ghost; glama.ai/mcp/servers/NORTHTEKDevs/ghost |
 
+## Status after the 2026-11-27 run
+
+| Item | PR | State |
+|------|----|-------|
+| Plan | #29 | merged (5e00e99) |
+| 1 STA orphan count | #30 | merged (406bd89) |
+| 3 `ghost_assert` read failure | #31 | open: behaviour change, for Kristian |
+| 6 shell output tail | #32 | merged (4ed72cb) |
+| 7 shell env test race | #33 | test-only |
+| 8 manifest version guard | #34 | test-only |
+| 9 argument helper tests | #35 | test-only; the audit's claim that ghost-mcp's base64 encoders were untested was wrong, so only ghost-cli's got one |
+| 2, 4 | - | need a decision (above) |
+| 5 | - | demoted to L |
+| 10-19 | - | not started; 10 and 11 (hidden-desktop deadline, desktops lock) are the next highest value |
+
+Follow-up found while doing item 6: the `ghost_shell op=open/read` session
+reader also accumulates a command's whole output until its sentinel line.
+
 ## Notes
+
+- Decided 2026-11-27 (Kristian): ghost-http stays unauthenticated; no token
+  or named-pipe auth will be added. It remains loopback-only with the
+  Host/Origin checks described in docs/security-model.md.
+- CI flake seen on PR #33: `ghost-browser/tests/tab_wait.rs:41` failed with
+  `DevToolsTimeout { ms: 20000 }` (the runner's headless browser never opened
+  DevTools); unrelated to the change, passed on re-run.
 
 - Sound on inspection, not re-reported: ghost-http binds loopback only and
   checks Host/Origin; every tool passes the stop gate (`main.rs:1028`); an
