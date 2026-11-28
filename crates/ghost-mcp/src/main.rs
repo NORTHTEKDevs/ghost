@@ -1790,20 +1790,17 @@ fn validate_args(name: &str, args: &Value) -> std::result::Result<Option<Value>,
             | "ghost_wait_for_event" | "ghost_wait_until" | "ghost_navigate_and_wait"
             | "ghost_click_and_wait_for_text"
     ) {
+        // The same rule as the ghost_tab_* waits: 0 would time out at once
+        // and a silent cap hides a caller's mistake, so both are refused.
         match args.get("timeout_ms") {
             None | Some(Value::Null) => {}
-            Some(v) => match v.as_u64() {
-                Some(ms) if ms > MAX_WAIT_TIMEOUT_MS => {
-                    out.get_or_insert_with(|| args.clone())["timeout_ms"] = json!(MAX_WAIT_TIMEOUT_MS);
-                }
-                Some(_) => {}
-                None => {
+            Some(v) => {
+                if !v.as_u64().is_some_and(|ms| (1..=MAX_WAIT_TIMEOUT_MS).contains(&ms)) {
                     return Err(format!(
-                        "{INVALID_PARAMS}{name} timeout_ms must be a non-negative integer \
-                         (max {MAX_WAIT_TIMEOUT_MS}) (got {v})"
-                    ))
+                        "{INVALID_PARAMS}{name} timeout_ms must be an integer from 1 to {MAX_WAIT_TIMEOUT_MS} (got {v})"
+                    ));
                 }
-            },
+            }
         }
     }
     Ok(out)
@@ -4100,7 +4097,7 @@ fn lean_tools_schema() -> Value {
               "window": { "type": "string", "description": "Window scope (for=idle|element|value|navigate); omit to use the anchor" },
               "settle_ms": { "type": "integer", "default": 250, "description": "for=navigate: pause after the title change so the page can paint (0 = return immediately)" },
               "stable_frames": { "type": "integer", "default": 3, "description": "for=idle" },
-              "timeout_ms": { "type": "integer", "default": 5000, "description": "Give up after this long (default 5000, max 600000; larger values are capped). Running out answers ok:false with timed_out:true for every for=" },
+              "timeout_ms": { "type": "integer", "default": 5000, "minimum": 1, "maximum": 600000, "description": "Give up after this long: an integer from 1 to 600000 (default 5000); anything else is invalid params. Running out answers ok:false with timed_out:true for every for=" },
               "name": { "type": "string", "description": "Element name (for=element|value)" },
               "role": { "type": "string", "description": "Element role (for=element|value)" },
               "predicate": { "type": "string", "enum": ["equals","contains","changes"], "description": "for=value: how to compare the element's value to text (default equals)" },
@@ -4390,7 +4387,7 @@ fn legacy_tools_schema_full() -> Value {
           "description": "Poll a JSONLogic condition against session state until true or timeout. State: {cache_seq, last_error}.",
           "inputSchema": { "type": "object", "required": ["condition"], "properties": {
               "condition": { "type": "object", "description": "JSONLogic expression" },
-              "timeout_ms": { "type": "integer", "default": 5000 },
+              "timeout_ms": { "type": "integer", "default": 5000, "minimum": 1, "maximum": 600000 },
               "poll_ms": { "type": "integer", "default": 50 }
           }}},
         { "name": "ghost_wait_for_idle",
@@ -4398,14 +4395,14 @@ fn legacy_tools_schema_full() -> Value {
           "inputSchema": { "type": "object", "properties": {
               "window": { "type": "string" },
               "stable_frames": { "type": "integer", "default": 3 },
-              "timeout_ms": { "type": "integer", "default": 5000 }
+              "timeout_ms": { "type": "integer", "default": 5000, "minimum": 1, "maximum": 600000 }
           }}},
         { "name": "ghost_navigate_and_wait",
           "description": "Load a URL in a browser window. Under the default background policy the address bar is set over UIA and Enter is posted, and the call returns when the window title changes (title_before/title_after/title_changed/ms); only a foreground policy focuses the window and types. window= or the anchor. Same as ghost_wait for=navigate.",
           "inputSchema": { "type": "object", "required": ["url"], "properties": {
               "window": { "type": "string", "description": "Title substring; omit to use the anchor" },
               "url": { "type": "string" },
-              "timeout_ms": { "type": "integer", "default": 10000 },
+              "timeout_ms": { "type": "integer", "default": 10000, "minimum": 1, "maximum": 600000 },
               "settle_ms": { "type": "integer", "default": 250 }
           }}},
         { "name": "ghost_click_and_wait_for_text",
@@ -4414,7 +4411,7 @@ fn legacy_tools_schema_full() -> Value {
               "name": { "type": "string" }, "role": { "type": "string" },
               "text": { "type": "string" },
               "appears": { "type": "boolean", "default": true },
-              "timeout_ms": { "type": "integer", "default": 5000 }
+              "timeout_ms": { "type": "integer", "default": 5000, "minimum": 1, "maximum": 600000 }
           }}},
         { "name": "ghost_fill_form",
           "description": "Fill a series of form fields and optionally submit.",
@@ -4488,7 +4485,7 @@ fn legacy_tools_schema_full() -> Value {
           "description": "Wait for the next system event (foreground/window change) or timeout. Event-driven, no polling: wakes within ~5ms of the event firing. Replaces sleep-based waits in agent loops.",
           "inputSchema": { "type": "object", "properties": {
               "since_seq": { "type": "integer", "description": "Last seen event seq (from ghost_event_seq); waits for any seq > this" },
-              "timeout_ms": { "type": "integer", "default": 5000 }
+              "timeout_ms": { "type": "integer", "default": 5000, "minimum": 1, "maximum": 600000 }
           }}},
         { "name": "ghost_act",
           "description": "Atomic find → ensure foreground → perform action. Eliminates the cross-call focus race compared to separate ghost_focus_window + ghost_click calls. Returns {ok, source, confidence, dispatch_mode, center}. At least one of 'name' or 'role' must be supplied to identify the target element. Supports three dispatch modes via 'mode' param.",

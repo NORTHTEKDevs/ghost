@@ -141,7 +141,7 @@ Unified wait - use it instead of sleeping. for=element: an element (name/role) a
 | `since_seq` | integer |  | for=event |
 | `stable_frames` | integer |  | for=idle |
 | `text` | string |  | Text to wait for (for=text) or expected value (for=value) |
-| `timeout_ms` | integer |  | Give up after this long (default 5000, max 600000; larger values are capped). Running out answers ok:false with timed_out:true for every for= |
+| `timeout_ms` | integer, 1 to 600000 |  | Give up after this long: an integer from 1 to 600000 (default 5000); anything else is invalid params. Running out answers ok:false with timed_out:true for every for= |
 | `url` | string |  | URL to navigate to (for=navigate) |
 | `window` | string |  | Window scope (for=idle\|element\|value\|navigate); omit to use the anchor |
 
