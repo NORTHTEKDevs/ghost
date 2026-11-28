@@ -1,4 +1,4 @@
-<img src="assets/banner.png" width="100%" alt="Ghost: AI agents use the apps on your computer, in the background. Every action verified.">
+<img src="assets/banner.png" width="520" alt="Ghost: AI agents use the apps on your computer, in the background. Every action verified.">
 
 [![CI](https://github.com/NORTHTEKDevs/ghost/actions/workflows/ci.yml/badge.svg)](https://github.com/NORTHTEKDevs/ghost/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/NORTHTEKDevs/ghost?color=blue)](https://github.com/NORTHTEKDevs/ghost/releases/latest)
@@ -6,15 +6,16 @@
 
 <a href="#quick-start"><img src="assets/quick-start.png" width="160" alt="Quick start"></a>
 
-Jump to: [Install](#1-install) · [Connect](#2-connect-your-client) · [Try it](#3-try-it) · [Safety](#safety-model) · [Docs](docs/README.md)
+[Connect](#2-connect-your-client) · [Try it](#3-try-it) · [Safety](#safety-model) · [Docs](docs/README.md)
 
 <p>
-  <a href="assets/demo.gif"><img src="assets/demo-stacked-title.gif" width="100%" alt="The run's result first: an agent's second click on a button returns verified: true, verified_by: title, focus_preserved: true and cursor_preserved: true, Ghost's screenshot shows the window title counting the click (repeated at twice its size under the window), and the user's foreground window recorded 0 changes. Then the run from the start: Ghost launches the app on its hidden desktop, types into a field and clicks a button, each call verified."></a>
+  <a href="assets/demo.gif"><img src="assets/demo-stacked-title.gif" width="520" alt="The run's result first: an agent's second click on a button returns verified: true, verified_by: title, focus_preserved: true and cursor_preserved: true, Ghost's screenshot shows the window title counting the click (repeated at twice its size under the window), and the user's foreground window recorded 0 changes. Then the run from the start: Ghost launches the app on its hidden desktop, types into a field and clicks a button, each call verified."></a>
 </p>
 
 An agent drives an app on Ghost's hidden desktop, never on your screen; the
-strip under each window is its title bar at twice the size. Click the recording
-for the wide version. Recorded, not drawn: [recording script](scripts/demo-capture.mjs).
+strip under each window is its title bar at twice the size. Recorded, not
+drawn: [recording script](scripts/demo-capture.mjs) ·
+[full-width recording](assets/demo.gif).
 
 Ghost is an [MCP](https://modelcontextprotocol.io) server, a CLI and a local
 REST API. It gives an agent the operating system's own control surface: the
@@ -37,7 +38,7 @@ screen and returns <code>verified:&nbsp;true</code> only when the change really 
 call it cannot complete fails with an error that says why.
 
 <p>
-  <img src="assets/proof.png" width="100%" alt="Measured: 1 in about 2,950 keystrokes a person typed during six agent runs left their window. 0 focus losses in a 160-action soak, with 0 unverified results. 14 of 14 benchmark tasks passed when scored by re-observing the app.">
+  <img src="assets/proof.png" width="520" alt="Measured: 1 in about 2,950 keystrokes a person typed during six agent runs left their window. 0 focus losses in a 160-action soak, with 0 unverified results. 14 of 14 benchmark tasks passed when scored by re-observing the app.">
 </p>
 
 How these were measured: [background mode](docs/background-mode.md#when-an-app-takes-the-foreground-itself)
@@ -273,7 +274,7 @@ ghost verify
 ## How an agent uses it
 
 <p>
-  <img src="assets/loop.png" width="100%" alt="The loop: look with ghost_see, act with ghost_act, confirm with verified: true.">
+  <img src="assets/loop.png" width="520" alt="The loop: look with ghost_see, act with ghost_act, confirm with verified: true.">
 </p>
 
 The loop is look, act, confirm:

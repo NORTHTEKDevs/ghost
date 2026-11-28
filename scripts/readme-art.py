@@ -78,22 +78,6 @@ def corner_mark(d, w):
     window_mark(d, w - PAD - 96, 22, 96, 64, width=2)
 
 
-OFFSET = 28  # how far the window behind each panel shows, at 1200px
-
-
-def stacked(panel):
-    """The panel as a window with a second window behind it, offset down and
-    right: the hidden desktop under the one you see. Transparent around the
-    two windows, so the page shows through."""
-    w, h = panel.size
-    out = Image.new("RGBA", (w + OFFSET, h + OFFSET), (0, 0, 0, 0))
-    d = ImageDraw.Draw(out)
-    d.rectangle((OFFSET, OFFSET, w + OFFSET - 1, h + OFFSET - 1), fill="#161b22", outline=BORDER, width=2)
-    out.paste(panel.convert("RGBA"), (0, 0))
-    d.rectangle((0, 0, w - 1, h - 1), outline=BORDER, width=2)
-    return out
-
-
 def glyph(size):
     """The ghost from assets/icon.png, in white, without its square tile."""
     icon = Image.open(ROOT / "assets/icon.png").convert("RGBA").resize((size, size), Image.LANCZOS)
@@ -137,14 +121,14 @@ def banner():
         d.text((PAD, y), line, font=f, fill=TEXT)
         y += 76
     d.text((PAD, y + 8), "Every action verified.", font=display(66), fill=GREEN)
-    stacked(im).save(ROOT / "assets/banner.png", optimize=True)
+    im.save(ROOT / "assets/banner.png", optimize=True)
 
 
 def proof():
     rows = [
+        ("1 in ~2,950", ["keystrokes a person typed during six agent", "runs left their window"]),
         ("0", ["focus losses in a 160-action soak,", "and 0 unverified results"]),
         ("14 of 14", ["benchmark tasks passed, scored by", "re-observing the app"]),
-        ("2,949 of ~2,950", ["keystrokes a person typed during six", "agent runs stayed in their window"]),
     ]
     NUM, LINE, GAP = 118, 64, 56
     probe = ImageDraw.Draw(Image.new("RGB", (1, 1)))
@@ -166,7 +150,7 @@ def proof():
             d.text((PAD, y), line, font=lf, fill=TEXT, anchor="la")
             y += LINE
         top += row_h + GAP
-    stacked(im).save(ROOT / "assets/proof.png", optimize=True)
+    im.save(ROOT / "assets/proof.png", optimize=True)
 
 
 def title_inset():
@@ -250,29 +234,9 @@ def title_inset():
             for xx in range(w):
                 if o[xx, yy] == bg:
                     o[xx, yy] = g[xx, yy]
-        big = out.resize((out.width * 2, out.height * 2), Image.NEAREST)
-        frames.append(stacked(big))
-    # GIF has one transparent palette entry: mark the see-through corners with
-    # a colour no frame uses, then make that entry transparent.
-    # One palette for every frame, so that entry has the same index in each.
-    KEY = (255, 0, 255)
-    flats = []
-    for fr in frames:
-        flat = Image.new("RGB", fr.size, KEY)
-        flat.paste(fr, (0, 0), fr)
-        flats.append(flat)
-    sheet = Image.new("RGB", (flats[0].width, sum(f.height for f in flats)))
-    y = 0
-    for flat in flats:
-        sheet.paste(flat, (0, y))
-        y += flat.height
-    palette = sheet.quantize(colors=255, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)
-    pal = palette.getpalette()[:768]
-    key_index = min(range(len(pal) // 3), key=lambda i: sum(abs(pal[i * 3 + k] - KEY[k]) for k in range(3)))
-    assert tuple(pal[key_index * 3:key_index * 3 + 3]) == KEY, "transparency key lost in the palette"
-    paletted = [f.quantize(palette=palette, dither=Image.Dither.NONE) for f in flats]
-    paletted[0].save(ROOT / "assets/demo-stacked-title.gif", save_all=True, append_images=paletted[1:],
-                     duration=durations, loop=0, disposal=2, transparency=key_index, optimize=False)
+        frames.append(out)
+    frames[0].save(ROOT / "assets/demo-stacked-title.gif", save_all=True, append_images=frames[1:],
+                   duration=durations, loop=0, optimize=True)
 
 
 def cta():
@@ -286,26 +250,26 @@ def cta():
 
 
 def loop():
-    """The look, act, confirm loop from "How an agent uses it": three
-    stations on one line, in the same panel language."""
+    """The look, act, confirm loop from "How an agent uses it", as three
+    steps in the same panel language."""
     steps = [("look", "ghost_see"), ("act", "ghost_act"), ("confirm", "verified: true")]
-    H = 340
+    H = 300
     im = textured(W, H)
     d = ImageDraw.Draw(im)
-    corner_mark(d, W)
+    gap = 56
+    box_w = (W - 2 * PAD - 2 * gap) // 3
     word, code = display(58), mono(38)
-    line_y = 200
-    xs = [PAD + 150 + i * (W - 2 * PAD - 300) // 2 for i in range(3)]
-    d.line((xs[0], line_y, xs[2], line_y), fill=BORDER, width=4)
+    corner_mark(d, W)
     for i, (label, call) in enumerate(steps):
-        x = xs[i]
+        x = PAD + i * (box_w + gap)
+        d.rounded_rectangle((x, 60, x + box_w, H - 60), radius=18, outline=BORDER, width=3)
+        d.text((x + box_w // 2, 125), label, font=word, fill=TEXT, anchor="mm")
+        d.text((x + box_w // 2, 192), call, font=code, fill=GREEN if i == 2 else "#b1bac4", anchor="mm")
         if i < 2:
-            mid = (xs[i] + xs[i + 1]) // 2
-            d.polygon([(mid - 14, line_y - 14), (mid + 12, line_y), (mid - 14, line_y + 14)], fill=GREEN)
-        d.ellipse((x - 14, line_y - 14, x + 14, line_y + 14), fill=GREEN if i == 2 else TEXT)
-        d.text((x, line_y - 56), label, font=word, fill=TEXT, anchor="mm")
-        d.text((x, line_y + 62), call, font=code, fill=GREEN if i == 2 else "#b1bac4", anchor="mm")
-    stacked(im).save(ROOT / "assets/loop.png", optimize=True)
+            ax = x + box_w + 10
+            d.line((ax, H // 2, ax + gap - 22, H // 2), fill=GREEN, width=5)
+            d.polygon([(ax + gap - 20, H // 2 - 12), (ax + gap - 4, H // 2), (ax + gap - 20, H // 2 + 12)], fill=GREEN)
+    im.save(ROOT / "assets/loop.png", optimize=True)
 
 
 if __name__ == "__main__":
