@@ -5,7 +5,12 @@ dash, what that release was about. Versions follow [Semantic
 Versioning](https://semver.org/); Ghost is pre-1.0, so a minor version can
 change behaviour.
 
-## [Unreleased]
+## [0.24.6] - one timeout rule, current dependencies
+
+Every wait tool now takes `timeout_ms` the same way, and the two dependency
+majors 0.24.5 left behind (the `windows` crate and tokio-tungstenite) are
+ported. Nothing else about how Ghost acts changes; the ports are type-level
+and the full suite ran green on Windows and Linux.
 
 ### Changed
 
@@ -20,6 +25,19 @@ change behaviour.
   instead of `1e16`, which is what serde_json, Ghost's fallback encoder,
   already printed. Strings, escaping, key order and integers are byte-identical
   (compared on about 2.6 million values).
+- The `windows` crate moved from 0.58 to 0.62 and tokio-tungstenite from
+  0.24 to 0.30. Both were ported by hand (the bare Dependabot bumps did not
+  compile); behaviour is unchanged, and a new test round-trips non-ASCII text
+  through both text and binary CDP frames. CDP replies are now parsed in
+  place instead of being copied first.
+
+### Fixed
+
+- `scripts/demo-capture.mjs` (the README demo recorder) ends the testbed it
+  started when the launch does not land on the hidden desktop, closing it
+  through its anchor or, failing that, by its pid.
+- A Windows unit test that raced a 5 ms timeout against a 20 ms sleep, and
+  failed on slow CI runners, now drops the future after one poll.
 
 ## [0.24.5] - a Linux install that works from the archive
 
