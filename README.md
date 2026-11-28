@@ -4,7 +4,9 @@
 [![Release](https://img.shields.io/github/v/release/NORTHTEKDevs/ghost?color=blue)](https://github.com/NORTHTEKDevs/ghost/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**[Quick start](#quick-start)** · [Connect](#2-connect-your-client) · [Try it](#3-try-it) · [Safety](#safety-model) · [Docs](docs/README.md)
+<a href="#quick-start"><img src="assets/quick-start.png" width="160" alt="Quick start"></a>
+
+[Connect](#2-connect-your-client) · [Try it](#3-try-it) · [Safety](#safety-model) · [Docs](docs/README.md)
 
 <p>
   <a href="assets/demo.gif"><img src="assets/demo-stacked-title.gif" width="520" alt="The run's result first: an agent's second click on a button returns verified: true, verified_by: title, focus_preserved: true and cursor_preserved: true, Ghost's screenshot shows the window title counting the click (repeated at twice its size under the window), and the user's foreground window recorded 0 changes. Then the run from the start: Ghost launches the app on its hidden desktop, types into a field and clicks a button, each call verified."></a>
@@ -36,7 +38,7 @@ screen and returns <code>verified:&nbsp;true</code> only when the change really 
 call it cannot complete fails with an error that says why.
 
 <p>
-  <img src="assets/proof.png" width="520" alt="Measured: 2,949 of about 2,950 keystrokes a person typed during six agent runs stayed in their window. 0 focus losses in a 160-action soak, with 0 unverified results. 14 of 14 benchmark tasks passed when scored by re-observing the app.">
+  <img src="assets/proof.png" width="520" alt="Measured: 1 in about 2,950 keystrokes a person typed during six agent runs left their window. 0 focus losses in a 160-action soak, with 0 unverified results. 14 of 14 benchmark tasks passed when scored by re-observing the app.">
 </p>
 
 How these were measured: [background mode](docs/background-mode.md#when-an-app-takes-the-foreground-itself)

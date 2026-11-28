@@ -14,7 +14,9 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 ROOT = Path(__file__).resolve().parent.parent
 BG, BORDER = "#0d1117", "#30363d"
-TEXT, MUTED, GREEN = "#e6edf3", "#8b949e", "#3fb950"
+TEXT, MUTED = "#e6edf3", "#8b949e"
+GREEN = "#5ce6c0"  # Ghost mint: "verified" in every panel
+PRIMER_GREEN = (0x3f, 0xb9, 0x50)  # what demo-gif.py drew the verified lines in
 W, PAD = 1200, 48  # 48 of 1200 is ~21px at 520, the demo frame's inset
 
 
@@ -124,7 +126,7 @@ def banner():
 
 def proof():
     rows = [
-        ("2,949 of ~2,950", ["keystrokes typed during six agent runs", "stayed in the person's window"]),
+        ("1 in ~2,950", ["keystrokes a person typed during six agent", "runs left their window"]),
         ("0", ["focus losses in a 160-action soak,", "and 0 unverified results"]),
         ("14 of 14", ["benchmark tasks passed, scored by", "re-observing the app"]),
     ]
@@ -213,6 +215,18 @@ def title_inset():
         d = ImageDraw.Draw(out)
         d.rectangle((left - 1, y - 1, left + CROP_W * SCALE, y + CROP_H * SCALE), outline=BORDER)
         out.paste(f.crop((0, bottom + 1, w, h)), (0, bottom + 1 + BAND))
+        bgc = tuple(int(BG[i:i + 2], 16) for i in (1, 3, 5))
+        mint = tuple(int(GREEN[i:i + 2], 16) for i in (1, 3, 5))
+        px = out.load()
+        for yy in range(out.height):
+            for xx in range(w):
+                r, g, b = px[xx, yy]
+                t = (g - bgc[1]) / (PRIMER_GREEN[1] - bgc[1])
+                if t <= 0.05 or t > 1.05:
+                    continue
+                expect = [bgc[k] + t * (PRIMER_GREEN[k] - bgc[k]) for k in range(3)]
+                if all(abs(c - e) <= 10 for c, e in zip((r, g, b), expect)):
+                    px[xx, yy] = tuple(round(bgc[k] + t * (mint[k] - bgc[k])) for k in range(3))
         # The same dot grid wherever the frame shows bare panel ground.
         bg = tuple(int(BG[i:i + 2], 16) for i in (1, 3, 5))
         o, g = out.load(), grid.load()
@@ -223,6 +237,16 @@ def title_inset():
         frames.append(out)
     frames[0].save(ROOT / "assets/demo-stacked-title.gif", save_all=True, append_images=frames[1:],
                    duration=durations, loop=0, optimize=True)
+
+
+def cta():
+    """The one call to action: a Quick start button in the art palette."""
+    w, h = 360, 96
+    im = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    d.rounded_rectangle((0, 0, w - 1, h - 1), radius=18, fill=GREEN)
+    d.text((w // 2, h // 2 + 2), "Quick start  >", font=display(44), fill=BG, anchor="mm")
+    im.save(ROOT / "assets/quick-start.png", optimize=True)
 
 
 def loop():
@@ -253,4 +277,5 @@ if __name__ == "__main__":
     proof()
     title_inset()
     loop()
+    cta()
     print("wrote assets/banner.png, assets/proof.png, assets/demo-stacked-title.gif, assets/loop.png")
