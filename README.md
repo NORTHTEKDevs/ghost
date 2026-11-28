@@ -6,51 +6,50 @@
 
 **Lets AI agents use the apps on your computer, in the background, and proves every action worked.**
 
+<sub>2,949 of ~2,950 keystrokes stayed in your window across six agent runs · 14 of 14 benchmark tasks verified by re-reading the app</sub>
+
 [![CI](https://github.com/NORTHTEKDevs/ghost/actions/workflows/ci.yml/badge.svg)](https://github.com/NORTHTEKDevs/ghost/actions/workflows/ci.yml)
 [![Linux](https://github.com/NORTHTEKDevs/ghost/actions/workflows/linux.yml/badge.svg)](https://github.com/NORTHTEKDevs/ghost/actions/workflows/linux.yml)
 [![Release](https://img.shields.io/github/v/release/NORTHTEKDevs/ghost)](https://github.com/NORTHTEKDevs/ghost/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![MCP registry](https://img.shields.io/badge/MCP_registry-io.github.NORTHTEKDevs%2Fghost-6e40c9)](https://registry.modelcontextprotocol.io/v0/servers?search=io.github.NORTHTEKDevs/ghost)
+[![MCP registry](https://img.shields.io/badge/MCP_registry-listed-6e40c9)](https://registry.modelcontextprotocol.io/v0/servers?search=io.github.NORTHTEKDevs/ghost)
 
-[Quick start](#quick-start) · [Safety](#safety-model) · [Troubleshooting](#troubleshooting) · [Docs](docs/README.md) · [Tool reference](docs/tools.md) · [Changelog](CHANGELOG.md)
+**[Quick start](#quick-start)** · [Safety](#safety-model) · [Troubleshooting](#troubleshooting) · [Docs](docs/README.md) · [Tool reference](docs/tools.md) · [Changelog](CHANGELOG.md)
 
 </div>
 
 <p align="center">
-  <img src="assets/demo.gif" width="860" alt="An agent launches an app with Ghost, types into a field and clicks two buttons. Each call returns verified: true, focus_preserved: true and cursor_preserved: true, and the screenshots Ghost takes show the text typed, the status label changed and the window title counting the click. The app runs on Ghost's hidden desktop, and the run records zero changes to the user's foreground window.">
+  <a href="assets/demo.gif"><img src="assets/demo.gif" width="860" alt="An agent launches an app with Ghost, types into a field and clicks two buttons. Each call returns verified: true, focus_preserved: true and cursor_preserved: true, and the screenshots Ghost takes show the text typed, the status label changed and the window title counting the click. The app runs on Ghost's hidden desktop, and the run records zero changes to the user's foreground window."></a>
+  <br>
+  <sub>Click for full size. Recorded on Ghost's hidden desktop by <a href="scripts/demo-capture.mjs">demo-capture.mjs</a>, not drawn.</sub>
 </p>
 
 Ghost is an [MCP](https://modelcontextprotocol.io) server, a CLI and a local
-REST API that give an agent (Claude Code, Claude Desktop, Cursor, Codex, VS
-Code, or your own script) the operating system's own control surface: the
+REST API. It gives an agent the operating system's own control surface: the
 windows and controls of any app, including the ones with no API, plus the
-shell and the browser you are already signed into. It works through the OS
-accessibility layer (UI Automation on Windows, AT-SPI2 on Linux), so the agent
-gets real buttons and fields with names, not pixels to guess at.
+shell and the browser you are already signed into.
 
-The demo above is recorded, not drawn: [`scripts/demo-capture.mjs`](scripts/demo-capture.mjs)
-makes those calls against a test app on Ghost's hidden desktop and
-[`scripts/demo-gif.py`](scripts/demo-gif.py) lays out what came back.
+It reads apps through the OS accessibility layer (UI Automation on Windows,
+AT-SPI2 on Linux), so the agent gets real buttons and fields with names, not
+pixels to guess at.
 
-## Why Ghost
-
-Two promises, and how they were measured:
+## Two promises, measured
 
 **It does not take your screen.** Agents click, type and scroll inside apps
 while you keep working in another window. Apps Ghost starts run on a hidden
 desktop you never see, and the focus policy is locked so an agent cannot
 decide to take your mouse; only you can unlock it, in the server's config.
-*Measured:* a person typed into another window while an agent worked; 1 of
-about 2,950 keystrokes over six runs landed in the agent's window
-([how](docs/background-mode.md#when-an-app-takes-the-foreground-itself)). A
-160-action soak lost focus 0 times.
 
 **Every action is verified.** After acting, Ghost re-reads the control or the
 screen and returns `verified: true` only when the change really happened; a
-call it cannot complete fails with an error that says why. *Measured:* 14 of 14
-benchmark tasks passed when scored by re-observing the app, never by trusting
-the return value, and 0 unverified results in the soak
-([benchmarks](docs/benchmarks.md)).
+call it cannot complete fails with an error that says why.
+
+- **Measured, typing:** 2,949 of about 2,950 keystrokes a person typed during
+  six agent runs stayed in their window, and a 160-action soak lost focus 0
+  times ([how, and the one that strayed](docs/background-mode.md#when-an-app-takes-the-foreground-itself)).
+- **Measured, verification:** 14 of 14 benchmark tasks passed when scored by
+  re-observing the app, and the soak had 0 unverified results
+  ([benchmarks](docs/benchmarks.md)).
 
 Check both on your own hardware with `ghost verify`, which exits non-zero if a
 claim does not hold. And you stay in charge: see the [safety model](#safety-model).
@@ -82,8 +81,7 @@ if ($path -notlike "*$dir*") {
 & "$dir\ghost.exe" doctor
 ```
 
-Open a new terminal afterwards so `ghost` is on your PATH. To update later,
-quit your MCP client and run the same block again.
+Open a new terminal afterwards so `ghost` is on your PATH.
 
 **Linux** (x86_64):
 
@@ -99,9 +97,6 @@ turns on the accessibility setting, registers the server with Claude Code if
 the `claude` CLI is installed (`--no-register` skips that) and runs
 `ghost doctor`. It never uses sudo.
 
-If `ghost` is not found afterwards, add `~/.local/bin` to your PATH
-(`export PATH="$HOME/.local/bin:$PATH"` in your shell's rc file).
-
 `ghost doctor` reports PASS, WARN or FAIL for everything Ghost needs. On
 Wayland, run it and read [platform support](#platform-support) first.
 Checksums, provenance, SmartScreen, building from source:
@@ -112,13 +107,13 @@ Checksums, provenance, SmartScreen, building from source:
 <details open>
 <summary><b>Claude Code</b></summary>
 
-Windows (PowerShell):
+**Windows** (PowerShell):
 
 ```powershell
 claude mcp add ghost --scope user -- "$env:LOCALAPPDATA\Programs\ghost\ghost-mcp.exe"
 ```
 
-Linux:
+**Linux**:
 
 ```bash
 claude mcp add ghost --scope user -- "$HOME/.local/bin/ghost-mcp"
@@ -126,9 +121,8 @@ claude mcp add ghost --scope user -- "$HOME/.local/bin/ghost-mcp"
 
 </details>
 
-The other clients take a JSON or TOML file, which cannot expand variables, so
-replace `YOU` with your user name. The Windows path is shown; on Linux use
-`/home/YOU/.local/bin/ghost-mcp`.
+The other clients take the full path to `ghost-mcp` in a JSON or TOML file;
+replace `YOU` in the example, or print the exact path with the last item.
 
 <details>
 <summary><b>Claude Desktop</b> (without the bundle)</summary>
@@ -196,13 +190,26 @@ this shape:
 ```json
 {
   "mcpServers": {
-    "ghost": { "command": "/home/YOU/.local/bin/ghost-mcp" }
+    "ghost": { "command": "C:/Users/YOU/AppData/Local/Programs/ghost/ghost-mcp.exe" }
   }
 }
 ```
 
 Registry-aware clients can also install `io.github.NORTHTEKDevs/ghost` from
 the [MCP registry](https://registry.modelcontextprotocol.io).
+
+</details>
+
+<details>
+<summary><b>Print the path to paste</b></summary>
+
+Windows (PowerShell):
+
+```powershell
+(Resolve-Path "$env:LOCALAPPDATA\Programs\ghost\ghost-mcp.exe").Path.Replace('\', '/')
+```
+
+Linux: `readlink -f ~/.local/bin/ghost-mcp`
 
 </details>
 
@@ -244,12 +251,14 @@ Not using an agent? The same engine is a CLI and a local REST API:
 ```bash
 ghost list-windows
 ghost click --name "Save"
-ghost-http --addr 127.0.0.1:7878   # then: curl http://127.0.0.1:7878/list-windows
+ghost-http --addr 127.0.0.1:7878
+curl http://127.0.0.1:7878/list-windows
 ```
 
 Window anchoring, what every response promises, intents (JSON flows with
 retries and conditions), the HTTP API and the Rust SDK:
 [docs/usage.md](docs/usage.md). Runnable scripts: [`examples/`](examples).
+
 
 ## Safety model
 
@@ -305,7 +314,7 @@ need a Chromium-family browser (Chrome, Edge, Brave or Comet). Full matrix:
 yet. Choose *More info -> Run anyway*, or
 [verify the download](docs/install.md#check-where-a-download-came-from) first.
 
-**`ghost: command not found`.** Open a new terminal after installing. On Linux,
+**"ghost: command not found".** Open a new terminal after installing. On Linux,
 add `export PATH="$HOME/.local/bin:$PATH"` to your shell's rc file.
 
 **The Ghost tools do not appear in the client.** Use an absolute path to
@@ -349,22 +358,15 @@ second Ghost process runs alongside the first without contending for the mouse.
 **How do I update?** Quit your MCP client, then re-run the install block from
 step 1. To remove Ghost, see [uninstall](docs/install.md#uninstall).
 
-## Documentation
+## More
 
 [Install](docs/install.md) · [Using Ghost](docs/usage.md) · [Configuration](docs/configuration.md) ·
 [Security model](docs/security-model.md) · [Background mode](docs/background-mode.md) ·
-[Tool reference](docs/tools.md) · [Benchmarks](docs/benchmarks.md) ·
-[Linux](docs/linux-fedora.md) · [All docs](docs/README.md)
+[Benchmarks](docs/benchmarks.md) · [All docs](docs/README.md)
 
-## Contributing and security
-
-Contributions are welcome: read [CONTRIBUTING.md](CONTRIBUTING.md) and the
-[code of conduct](CODE_OF_CONDUCT.md). To report a vulnerability, follow
-[SECURITY.md](SECURITY.md) rather than opening a public issue.
-
-## License
-
-[MIT](LICENSE). Copyright 2026 Northtek.
+Pull requests: [CONTRIBUTING.md](CONTRIBUTING.md). Vulnerabilities go through
+[SECURITY.md](SECURITY.md), not public issues. [MIT](LICENSE), copyright 2026
+Northtek.
 
 Ghost is a general-purpose automation tool. Use it on systems you own or are
 authorized to automate, and within the terms of the software you drive.
