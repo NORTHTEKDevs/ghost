@@ -211,8 +211,11 @@ mod event_wait {
 }
 
 mod wait_timeout {
-    //! L3: a wait's timeout_ms is capped at the documented maximum.
-    use crate::{validate_args, MAX_WAIT_TIMEOUT_MS};
+    //! One rule for every wait tool: timeout_ms is an integer from 1 to
+    //! 600000, anything else is invalid params. Before 0.24.6 these waits
+    //! accepted 0 (an instant timeout) and silently capped larger values,
+    //! while the ghost_tab_* waits rejected both.
+    use crate::{tools_schema, validate_args, MAX_WAIT_TIMEOUT_MS};
     use serde_json::json;
 
     const WAITS: [&str; 8] = [
@@ -227,19 +230,48 @@ mod wait_timeout {
     }
 
     #[test]
-    fn a_huge_timeout_is_capped_on_every_wait() {
+    fn out_of_range_timeouts_are_invalid_params_on_every_wait() {
         for name in WAITS {
-            let args = json!({ "for": "element", "name": "x", "timeout_ms": 1u64 << 62 });
-            let out = validate_args(name, &args).unwrap().expect("rewritten");
-            assert_eq!(out["timeout_ms"], json!(MAX_WAIT_TIMEOUT_MS), "{name}");
+            for bad in [json!(0), json!(600_001), json!(1u64 << 62)] {
+                let args = json!({ "for": "element", "name": "x", "timeout_ms": bad });
+                let e = validate_args(name, &args).expect_err(&format!("{name} {bad}"));
+                assert!(
+                    e.starts_with(&format!("invalid params: {name} timeout_ms must be an integer from 1 to 600000")),
+                    "{e}"
+                );
+            }
         }
     }
 
     #[test]
-    fn a_timeout_within_the_cap_is_untouched() {
-        let args = json!({ "for": "value", "timeout_ms": 600_000 });
-        assert!(validate_args("ghost_wait", &args).unwrap().is_none());
+    fn in_range_timeouts_pass_untouched() {
+        for ms in [1, 5000, 600_000] {
+            let args = json!({ "for": "value", "timeout_ms": ms });
+            assert!(validate_args("ghost_wait", &args).unwrap().is_none(), "{ms}");
+        }
         assert!(validate_args("ghost_wait", &json!({ "for": "element" })).unwrap().is_none());
+    }
+
+    /// Every advertised wait tool states the range in its schema, so a client
+    /// can see the rule before it calls.
+    #[test]
+    fn every_wait_schema_states_the_range() {
+        // The legacy wait verbs in WAITS are still callable but not listed;
+        // validate_args holds them to the same rule.
+        let tools = tools_schema();
+        let mut seen = Vec::new();
+        for t in tools.as_array().unwrap() {
+            let name = t["name"].as_str().unwrap();
+            if !(WAITS.contains(&name) || name == "ghost_tab_wait_for" || name == "ghost_desktop_wait_for_window") {
+                continue;
+            }
+            seen.push(name);
+            let spec = &t["inputSchema"]["properties"]["timeout_ms"];
+            assert_eq!(spec["minimum"], json!(1), "{name}");
+            assert_eq!(spec["maximum"], json!(600_000), "{name}");
+        }
+        seen.sort_unstable();
+        assert_eq!(seen, ["ghost_desktop_wait_for_window", "ghost_tab_wait_for", "ghost_wait"]);
     }
 
     #[test]

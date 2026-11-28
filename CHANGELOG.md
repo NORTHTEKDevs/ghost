@@ -9,6 +9,12 @@ change behaviour.
 
 ### Changed
 
+- **One `timeout_ms` rule for every wait tool:** an integer from 1 to 600000;
+  anything else is invalid params naming the tool and the range. `ghost_wait`
+  and the legacy wait verbs used to accept 0 (an immediate timeout) and
+  silently cap larger values, while the `ghost_tab_*` waits rejected both. A
+  caller that relied on the silent cap now gets an error saying what to send.
+  The schemas state the range.
 - sonic-rs 0.3 -> 0.5 for MCP response encoding. One visible difference: a
   float printed with an exponent (magnitude 1e16 and up) now reads `1e+16`
   instead of `1e16`, which is what serde_json, Ghost's fallback encoder,
