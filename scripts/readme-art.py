@@ -1,6 +1,8 @@
 """Draws the README banner and the measured-claims card in the demo GIF's
-palette (GitHub dark, Segoe UI Semibold + Consolas), sized so their text stays
-readable when GitHub shrinks them to a 400px phone column.
+palette (GitHub dark, the green that means "verified"), with one type pairing
+of their own: Bahnschrift Bold for the name and the numbers, Segoe UI Light
+for the words. Both are drawn at 1200px and shown at 520px, the demo's width,
+so their text stays readable when GitHub shrinks them to a 400px phone column.
 
     python scripts/readme-art.py        # writes assets/banner.png, assets/proof.png
 
@@ -11,11 +13,12 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parent.parent
-BG, PANEL, BORDER = "#0d1117", "#161b22", "#30363d"
-TEXT, MUTED, BLUE, GREEN = "#e6edf3", "#8b949e", "#58a6ff", "#3fb950"
+BG, BORDER = "#0d1117", "#30363d"
+TEXT, MUTED, GREEN = "#e6edf3", "#8b949e", "#3fb950"
+W, PAD = 1200, 72
 
 
-def font(names, size):
+def first_font(names, size):
     for name in names:
         for base in ("C:/Windows/Fonts/", "/usr/share/fonts/truetype/dejavu/", ""):
             try:
@@ -25,81 +28,71 @@ def font(names, size):
     raise SystemExit(f"none of {names} found")
 
 
-def sans_b(size):
-    return font(["seguisb.ttf", "DejaVuSans-Bold.ttf"], size)
+def display(size):
+    f = first_font(["bahnschrift.ttf", "DejaVuSansCondensed-Bold.ttf"], size)
+    try:
+        f.set_variation_by_name("Bold")
+    except (OSError, ValueError, AttributeError):
+        pass  # not a variable font: already bold
+    return f
 
 
-def sans(size):
-    return font(["segoeui.ttf", "DejaVuSans.ttf"], size)
+def light(size):
+    return first_font(["segoeuil.ttf", "DejaVuSans-ExtraLight.ttf", "DejaVuSans.ttf"], size)
 
 
-def mono(size):
-    return font(["consola.ttf", "DejaVuSansMono.ttf"], size)
+def fit(draw, text, maker, size, width):
+    """The largest font from `maker` at or below `size` that fits `width`."""
+    while size > 10:
+        f = maker(size)
+        if draw.textlength(text, font=f) <= width:
+            return f
+        size -= 2
+    return maker(size)
 
 
 def banner():
-    W, H, PAD = 1200, 500, 64
+    H = 560
     im = Image.new("RGB", (W, H), BG)
     d = ImageDraw.Draw(im)
-    icon = Image.open(ROOT / "assets/icon.png").convert("RGBA").resize((112, 112), Image.LANCZOS)
-    im.paste(icon, (PAD, PAD), icon)
-    d.text((PAD + 140, PAD + 56), "Ghost", font=sans_b(96), fill=TEXT, anchor="lm")
-    tag = sans(46)
-    d.text((PAD, 228), "AI agents use the apps on your computer,", font=tag, fill=TEXT)
-    d.text((PAD, 284), "in the background. Every action verified.", font=tag, fill=TEXT)
-    # The receipt every ghost_act call returns, as in the demo.
-    y, box_h = 372, 76
-    d.rounded_rectangle((PAD, y, W - PAD, y + box_h), radius=14, fill=PANEL, outline=BORDER, width=2)
-    m = mono(40)
-    x = PAD + 28
-    for key, value in (("verified", "true"), ("your foreground", "0 changes")):
-        d.text((x, y + box_h // 2), f"{key}: ", font=m, fill=TEXT, anchor="lm")
-        x += d.textlength(f"{key}: ", font=m)
-        d.text((x, y + box_h // 2), value, font=m, fill=GREEN, anchor="lm")
-        x += d.textlength(value, font=m) + 44
+    icon = Image.open(ROOT / "assets/icon.png").convert("RGBA").resize((136, 136), Image.LANCZOS)
+    im.paste(icon, (PAD - 12, PAD - 4), icon)
+    d.text((PAD + 150, PAD + 64), "Ghost", font=display(150), fill=TEXT, anchor="lm")
+    lines = ["AI agents use the apps on your computer,", "in the background."]
+    f = fit(d, lines[0], light, 62, W - 2 * PAD)
+    y = 268
+    for line in lines:
+        d.text((PAD, y), line, font=f, fill=TEXT)
+        y += 76
+    d.text((PAD, y + 8), "Every action verified.", font=display(66), fill=GREEN)
     im.save(ROOT / "assets/banner.png", optimize=True)
 
 
 def proof():
     rows = [
-        ("2,949", "of about 2,950 keystrokes a person typed during six agent runs stayed in their window"),
-        ("0", "focus losses in a 160-action soak, with 0 unverified results"),
-        ("14/14", "benchmark tasks passed when scored by re-observing the app"),
+        ("2,949 of ~2,950", ["keystrokes typed during six agent runs", "stayed in the person's window"]),
+        ("0", ["focus losses in a 160-action soak,", "and 0 unverified results"]),
+        ("14 of 14", ["benchmark tasks passed, scored by", "re-observing the app"]),
     ]
-    W, PAD, NUM_W = 1200, 56, 280
-    big, label = sans_b(84), sans(40)
-    text_x = PAD + NUM_W
-    text_w = W - PAD - text_x
+    NUM, LINE, GAP = 118, 64, 56
     probe = ImageDraw.Draw(Image.new("RGB", (1, 1)))
-
-    def wrap(text):
-        lines, line = [], ""
-        for word in text.split():
-            trial = f"{line} {word}".strip()
-            if probe.textlength(trial, font=label) <= text_w:
-                line = trial
-            else:
-                lines.append(line)
-                line = word
-        return lines + [line]
-
-    wrapped = [wrap(t) for _, t in rows]
-    LINE, GAP = 52, 44
-    heights = [max(len(w) * LINE, 100) for w in wrapped]
-    H = PAD * 2 + sum(heights) + GAP * (len(rows) - 1)
+    words = min(fit(probe, l, light, 54, W - 2 * PAD).size for _, ls in rows for l in ls)
+    lf = light(words)
+    row_h = NUM + 20 + LINE * 2
+    H = PAD * 2 + row_h * len(rows) + GAP * (len(rows) - 1)
     im = Image.new("RGB", (W, H), BG)
     d = ImageDraw.Draw(im)
+    big = display(NUM)
     top = PAD
-    for i, ((num, _), lines, h) in enumerate(zip(rows, wrapped, heights)):
+    for i, (num, lines) in enumerate(rows):
         if i:
             d.line((PAD, top - GAP // 2, W - PAD, top - GAP // 2), fill=BORDER, width=2)
-        mid = top + h // 2
-        d.text((PAD, mid), num, font=big, fill=GREEN, anchor="lm")
-        y = mid - (len(lines) * LINE) // 2 + LINE // 2
+        d.text((PAD, top), num, font=big, fill=GREEN, anchor="la")
+        y = top + NUM + 20
         for line in lines:
-            d.text((text_x, y), line, font=label, fill=TEXT, anchor="lm")
+            d.text((PAD, y), line, font=lf, fill=TEXT, anchor="la")
             y += LINE
-        top += h + GAP
+        top += row_h + GAP
     im.save(ROOT / "assets/proof.png", optimize=True)
 
 

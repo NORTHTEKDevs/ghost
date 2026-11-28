@@ -1,22 +1,22 @@
 <div align="center">
 
-<img src="assets/banner.png" width="880" alt="Ghost. AI agents use the apps on your computer, in the background. Every action verified. Below, the receipt every action returns: verified: true, your foreground: 0 changes.">
+<img src="assets/banner.png" width="520" alt="Ghost: AI agents use the apps on your computer, in the background. Every action verified.">
 
 [![CI](https://github.com/NORTHTEKDevs/ghost/actions/workflows/ci.yml/badge.svg)](https://github.com/NORTHTEKDevs/ghost/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/NORTHTEKDevs/ghost?color=blue)](https://github.com/NORTHTEKDevs/ghost/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**[Quick start](#quick-start)** · [Connect](#2-connect-your-client) · [Try it](#3-try-it) · [Safety](#safety-model) · [Troubleshooting](#troubleshooting) · [Docs](docs/README.md)
+**[Quick start](#quick-start)** · [Connect](#2-connect-your-client) · [Try it](#3-try-it) · [Safety](#safety-model) · [Docs](docs/README.md)
 
 </div>
 
 <p align="center">
   <a href="assets/demo.gif"><img src="assets/demo-stacked.gif" width="520" alt="The run's result first: an agent's second click on a button returns verified: true, verified_by: title, focus_preserved: true and cursor_preserved: true, Ghost's screenshot shows the window title counting the click, and the user's foreground window recorded 0 changes. Then the run from the start: Ghost launches the app on its hidden desktop, types into a field and clicks a button, each call verified."></a>
-  <br>
-  An agent drives an app on Ghost's hidden desktop, never on your screen.
-  Recorded, not drawn: <a href="scripts/demo-capture.mjs">the recording script</a>,
-  <a href="assets/demo.gif">full-width recording</a>.
 </p>
+
+An agent drives an app on Ghost's hidden desktop, never on your screen. Recorded,
+not drawn: [recording script](scripts/demo-capture.mjs) ·
+[full-width recording](assets/demo.gif).
 
 Ghost is an [MCP](https://modelcontextprotocol.io) server, a CLI and a local
 REST API. It gives an agent the operating system's own control surface: the
@@ -39,7 +39,7 @@ screen and returns <code>verified:&nbsp;true</code> only when the change really 
 call it cannot complete fails with an error that says why.
 
 <p align="center">
-  <img src="assets/proof.png" width="880" alt="Measured: 2,949 of about 2,950 keystrokes a person typed during six agent runs stayed in their window. 0 focus losses in a 160-action soak, with 0 unverified results. 14 of 14 benchmark tasks passed when scored by re-observing the app.">
+  <img src="assets/proof.png" width="520" alt="Measured: 2,949 of about 2,950 keystrokes a person typed during six agent runs stayed in their window. 0 focus losses in a 160-action soak, with 0 unverified results. 14 of 14 benchmark tasks passed when scored by re-observing the app.">
 </p>
 
 How these were measured: [background mode](docs/background-mode.md#when-an-app-takes-the-foreground-itself)
@@ -335,7 +335,7 @@ need a Chromium-family browser (Chrome, Edge, Brave or Comet). Full matrix:
 ## Troubleshooting
 
 <details>
-<summary><code>Windows protected your PC</code> on first run</summary>
+<summary>Windows shows <code>Windows protected your PC</code></summary>
 
 The binaries are not code-signed yet. Choose *More info*, then *Run anyway*, or
 [verify the download](docs/install.md#check-where-a-download-came-from) first.
@@ -343,7 +343,7 @@ The binaries are not code-signed yet. Choose *More info*, then *Run anyway*, or
 </details>
 
 <details>
-<summary><code>ghost: command not found</code></summary>
+<summary>The shell says <code>ghost: command not found</code></summary>
 
 Open a new terminal after installing. On Linux, add `~/.local/bin` to your
 `PATH`; the installer prints the line to add.
@@ -351,7 +351,7 @@ Open a new terminal after installing. On Linux, add `~/.local/bin` to your
 </details>
 
 <details>
-<summary>The <code>ghost_*</code> tools do not appear in the client</summary>
+<summary>No <code>ghost_*</code> tools appear in the client</summary>
 
 Use an absolute path to `ghost-mcp` and restart the client. To check the
 binary itself:
@@ -363,7 +363,7 @@ ghost-mcp --version
 </details>
 
 <details>
-<summary><code>element not found</code></summary>
+<summary>A call fails with <code>element not found</code></summary>
 
 The error lists the closest names in that window. `ghost_see` with
 `window=` set shows every control and its name.
@@ -371,7 +371,7 @@ The error lists the closest names in that window. `ghost_see` with
 </details>
 
 <details>
-<summary><code>focus policy is locked</code></summary>
+<summary>A call fails with <code>focus policy is locked</code></summary>
 
 By design: that action would take your screen. Let Ghost start the app
 (`ghost_window op=launch`) or the browser (`ghost_browser_launch`) and drive
@@ -380,7 +380,7 @@ it there.
 </details>
 
 <details>
-<summary><code>the human stopped Ghost</code></summary>
+<summary>A call fails with <code>the human stopped Ghost</code></summary>
 
 Someone pressed the emergency stop. Resume with
 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd>, or in a terminal:
@@ -392,7 +392,7 @@ ghost reset
 </details>
 
 <details>
-<summary>Linux: windows have no elements</summary>
+<summary>Linux windows show no elements</summary>
 
 Turn on the accessibility bus (step 1) and restart the apps. `ghost doctor`
 checks this.
@@ -431,9 +431,9 @@ again. To remove Ghost, see [uninstall](docs/install.md#uninstall).
 
 ## More
 
-[Install](docs/install.md) · [Using Ghost](docs/usage.md) · [Configuration](docs/configuration.md) ·
-[Security model](docs/security-model.md) · [Background mode](docs/background-mode.md) ·
-[Benchmarks](docs/benchmarks.md) · [Tool reference](docs/tools.md) · [Changelog](CHANGELOG.md) · [All docs](docs/README.md)
+- Guides: [install](docs/install.md), [using Ghost](docs/usage.md), [configuration](docs/configuration.md)
+- Proof and safety: [security model](docs/security-model.md), [background mode](docs/background-mode.md), [benchmarks](docs/benchmarks.md)
+- Reference: [tools](docs/tools.md), [changelog](CHANGELOG.md), [all docs](docs/README.md)
 
 Pull requests: [CONTRIBUTING.md](CONTRIBUTING.md). Vulnerabilities go through
 [SECURITY.md](SECURITY.md), not public issues. [MIT](LICENSE), copyright 2026
