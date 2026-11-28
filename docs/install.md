@@ -2,9 +2,9 @@
 
 Three ways in, all free: the MCP Bundle (one click, the server only), the
 release archives (server, CLI and HTTP server), or building from source.
-Then register the server with your client: the
-[README quick start](../README.md#quick-start) has a copy-paste config for each
-client.
+Then register the server with your client:
+[connect another client](../README.md#connect-another-client) in the README
+covers each one.
 
 Requirements: Windows 10 build 19041 or later, or Linux with `at-spi2-core` and
 a desktop session (X11 or Wayland). A Chromium-family browser (Chrome, Comet,
@@ -21,6 +21,21 @@ checkboxes. The bundle holds `ghost-mcp` only.
 
 Ghost is also in the [MCP registry](https://registry.modelcontextprotocol.io)
 as `io.github.NORTHTEKDevs/ghost` for clients that install from there.
+
+## Windows installer
+
+```powershell
+irm https://raw.githubusercontent.com/NORTHTEKDevs/ghost/main/scripts/install-windows.ps1 | iex
+```
+
+[`scripts/install-windows.ps1`](../scripts/install-windows.ps1) downloads the
+latest release zip, stops if it does not match the release's `.sha256` file,
+installs `ghost.exe`, `ghost-mcp.exe` and `ghost-http.exe` to
+`%LOCALAPPDATA%\Programs\ghost`, adds that folder to your user PATH, registers
+the server with Claude Code when the `claude` CLI is present and runs
+`ghost doctor`. A `ghost-mcp.exe` held open by a running client is renamed
+aside, not overwritten. To pass options, save the script and run it:
+`powershell -File install-windows.ps1 -Dir <path> -NoPath -NoRegister -NoDoctor`.
 
 ## Windows archive
 
