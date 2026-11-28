@@ -546,6 +546,51 @@ mod guard_tests {
         assert_eq!(status(fake_router(7878), req(Some("application/json"))).await, StatusCode::OK);
     }
 
+    async fn call(method: &str, uri: &str, body: Option<&str>) -> (StatusCode, Value) {
+        let mut b = Request::builder().method(method).uri(uri).header(header::HOST, "127.0.0.1:7878");
+        if body.is_some() { b = b.header(header::CONTENT_TYPE, "application/json"); }
+        let req = b.body(body.map_or_else(Body::empty, |t| Body::from(t.to_owned()))).unwrap();
+        let resp = fake_router(7878).oneshot(req).await.unwrap();
+        let code = resp.status();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        (code, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    }
+
+    /// `/tools` is how a client discovers the API, so every endpoint it lists
+    /// must be routed with that method. An empty JSON body is enough to tell
+    /// "routed" (400/422/500 from the fake session) from 404/405. GET
+    /// /clipboard is left out: it would ask the session for the clipboard,
+    /// and its POST twin already proves the path is routed.
+    #[tokio::test]
+    async fn every_endpoint_tools_lists_is_routed() {
+        let (code, tools) = call("GET", "/tools", None).await;
+        assert_eq!(code, StatusCode::OK);
+        let endpoints = tools["endpoints"].as_array().expect("endpoints array");
+        assert!(endpoints.len() >= 15, "{tools}");
+        for e in endpoints {
+            let (path, method) = (e["path"].as_str().unwrap(), e["method"].as_str().unwrap());
+            if path == "/clipboard" && method == "GET" { continue; }
+            let body = (method == "POST").then_some("{}");
+            let (code, _) = call(method, path, body).await;
+            assert!(code != StatusCode::NOT_FOUND && code != StatusCode::METHOD_NOT_ALLOWED, "{method} {path} -> {code}");
+        }
+    }
+
+    #[tokio::test]
+    async fn click_without_name_or_role_is_400() {
+        let (code, body) = call("POST", "/click", Some("{}")).await;
+        assert_eq!(code, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error"], "must include name or role");
+    }
+
+    #[tokio::test]
+    async fn health_reports_the_crate_version() {
+        let (code, body) = call("GET", "/health", None).await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(body["status"], "ok");
+        assert_eq!(body["version"], env!("CARGO_PKG_VERSION"));
+    }
+
     #[test]
     fn addr_must_be_loopback() {
         for ok in ["127.0.0.1:7878", "[::1]:7878", "localhost:7878", "127.0.0.2:80"] {
