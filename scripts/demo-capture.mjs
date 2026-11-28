@@ -11,6 +11,7 @@
 import { spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { launchHidden } from './demo-launch.mjs';
 
 const [exe, testbed, out] = process.argv.slice(2);
 if (!exe || !testbed || !out) {
@@ -73,9 +74,9 @@ const steps = [];
 const TITLE = 'Invoice Editor';
 let launched = false;
 async function step(label, name, args) {
-  const { body } = await call(name, args);
+  // A launch that misses the hidden desktop closes its own testbed and throws.
+  const body = name === 'ghost_window' ? await launchHidden(call, args) : (await call(name, args)).body;
   if (name === 'ghost_window') {
-    if (body?.surface !== 'hidden') throw new Error(`testbed did not start on a hidden desktop: ${JSON.stringify(body)}`);
     launched = true;
     await call('ghost_wait', { for: 'element', name: 'Field', role: 'edit', timeout_ms: 10000 });
   }

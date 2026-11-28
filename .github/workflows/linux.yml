@@ -53,6 +53,9 @@ jobs:
           GHOST_REQUIRE_BROWSER: "1"
         run: cargo test --workspace
 
+      - name: Script tests
+        run: node --test scripts/*.test.mjs
+
       # The new crate is held to the strictest bar. The rest of the workspace is
       # checked at the same scope the existing Windows job uses, so this PR does
       # not turn pre-existing lint debt in unrelated crates into a build failure.
