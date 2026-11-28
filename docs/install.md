@@ -3,7 +3,7 @@
 Three ways in, all free: the MCP Bundle (one click, the server only), the
 release archives (server, CLI and HTTP server), or building from source.
 Then register the server with your client:
-[connect another client](../README.md#connect-another-client) in the README
+[Connect your client](../README.md#2-connect-your-client) in the README
 covers each one.
 
 Requirements: Windows 10 build 19041 or later, or Linux with `at-spi2-core` and

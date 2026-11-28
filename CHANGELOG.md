@@ -5,6 +5,18 @@ dash, what that release was about. Versions follow [Semantic
 Versioning](https://semver.org/); Ghost is pre-1.0, so a minor version can
 change behaviour.
 
+## [Unreleased]
+
+### Fixed
+
+- `ghost_shell op=run` keeps only the tail of a command's output while it
+  runs, instead of reading the whole output into memory before cutting the
+  reply to its last 24000 characters. The reply is unchanged, and the
+  truncation note still counts every dropped byte.
+- The UIA worker pool's orphaned-job count no longer wraps to a huge number
+  when a caller is cancelled (an MCP cancel, an outer timeout) rather than
+  timed out by the pool itself.
+
 ## [0.24.6] - one timeout rule, current dependencies
 
 Every wait tool now takes `timeout_ms` the same way, and the two dependency
