@@ -32,7 +32,7 @@ Windows and Linux. Look, act, wait, assert, manage windows, run commands.
 
 ### `ghost_see`
 
-Describe a window's UI as elements {name, role, rect}. Target = window= (title substring; becomes the session anchor) or the current anchor; with neither, the human's foreground window and the response says so (target.source). Never focuses or raises anything. mode=full (default whenever a window is targeted: scoped walk, works on covered windows and hidden-desktop apps), mode=fast (foreground-only quick path, used only when nothing is targeted), mode=text (READ the visible text - the cheapest way to read content), mode=delta (changed elements since since_seq), mode=marks (DEBUG Set-of-Marks image of the target window), mode=selection (selected text of a name/role element in the target window). Any other mode is an invalid-params error. Elements capped at 150 (limit); text at 20000 chars.
+Describe a window's UI as elements {name, role, rect}. Target = window= (title substring; becomes the session anchor) or the current anchor; with neither, the human's foreground window and the response says so (target.source). Never focuses or raises anything. mode=full (default whenever a window is targeted: scoped walk, works on covered windows and hidden-desktop apps), mode=fast (foreground-only quick path, used only when nothing is targeted), mode=text (READ the visible text - the cheapest way to read content), mode=delta (changed elements since since_seq), mode=marks (DEBUG Set-of-Marks image of the target window), mode=selection (selected text of a name/role element in the target window). Any other mode is an invalid-params error. Elements capped at 150 (limit); text at 20000 chars. Use it to read what a window contains; use ghost_snapshot for stable element ids to plan several actions, ghost_find to locate one element, and ghost_screenshot only when pixels matter.
 
 **See a window's controls or text**: read-only, idempotent.
 
@@ -47,7 +47,7 @@ Describe a window's UI as elements {name, role, rect}. Target = window= (title s
 
 ### `ghost_find`
 
-Locate an element (name|role|description|text) and return center (always), rect (has_rect=true for UIA/cache hits), source, confidence, name, escalated (true = a network VLM call was paid). Target window = window= (anchored) or the session anchor; else the foreground. Under the default background policy nothing is focused or raised: the lookup is scoped to the window's own UIA subtree, so it works while the window is covered or lives on a hidden desktop.
+Locate an element (name|role|description|text) and return center (always), rect (has_rect=true for UIA/cache hits), source, confidence, name, escalated (true = a network VLM call was paid). Target window = window= (anchored) or the session anchor; else the foreground. Under the default background policy nothing is focused or raised: the lookup is scoped to the window's own UIA subtree, so it works while the window is covered or lives on a hidden desktop. Use it to see where an element is or how many match before acting; ghost_act already finds and acts in one call.
 
 **Find an element**: read-only, idempotent.
 
@@ -94,7 +94,7 @@ Send a key to a window WITHOUT focusing it. Target = window= (anchored) or the s
 
 ### `ghost_snapshot`
 
-Structured, agent-planning view of a window's UI: every element with a stable id, name, role, rect, center, enabled flag, actionable flag, and the actions it accepts (click/type). `actionable` = interactable role AND currently enabled - so a greyed-out button reads actionable:false. Far cheaper than a screenshot to reason over; plan here, then ghost_act by name/role. Params: window? (title substring; omitted = foreground), actionable_only? (only enabled interactable elements), limit?.
+Structured, agent-planning view of a window's UI: every element with a stable id, name, role, rect, center, enabled flag, actionable flag, and the actions it accepts (click/type). `actionable` = interactable role AND currently enabled - so a greyed-out button reads actionable:false. Far cheaper than a screenshot to reason over; plan here, then ghost_act by name/role. Params: window? (title substring; omitted = foreground), actionable_only? (only enabled interactable elements), limit?. Use it instead of ghost_see when planning several actions against stable ids; for a quick read of a window, ghost_see is enough.
 
 **Snapshot a window with element ids**: read-only, idempotent.
 
@@ -163,7 +163,7 @@ Unified wait - use it instead of sleeping. for=element: an element (name/role) a
 
 ### `ghost_query`
 
-Extract structured data from the screen. Strategy: UIA name-matching first, then a single batched VLM call for any fields still unmatched. Returns extracted object, unmatched list, and vlm_attempted flag.
+Extract structured data from the screen. Strategy: UIA name-matching first, then a single batched VLM call for any fields still unmatched. Returns extracted object, unmatched list, and vlm_attempted flag. Use it to pull a few named fields' values into one object; use ghost_see to read a whole window.
 
 **Query a window's elements**: read-only, idempotent.
 
@@ -175,7 +175,7 @@ Extract structured data from the screen. Strategy: UIA name-matching first, then
 
 ### `ghost_assert`
 
-Assert a predicate about screen state. Fails (error) if not satisfied. text-present/text-absent: OCR text check. element-exists: element found. value-equals/value-contains: the element's actual value (ValuePattern) equals/contains 'text' - the fill-then-verify check.
+Assert a predicate about screen state. Fails (error) if not satisfied. text-present/text-absent: OCR text check. element-exists: element found. value-equals/value-contains: the element's actual value (ValuePattern) equals/contains 'text' - the fill-then-verify check. Use it to turn 'did it work' into a pass or fail after acting; use ghost_wait when the condition may take time to appear.
 
 **Assert a condition**: read-only, idempotent.
 
@@ -204,7 +204,7 @@ Execute a declarative step-by-step flow in one round-trip. Each step: {op, ...pa
 
 ### `ghost_screenshot`
 
-Capture a screenshot of the window the agent is working in. Target = window= or the session anchor: that window is captured BY HANDLE (works while covered, on a hidden desktop, or via CDP for a routed browser) at max 768px JPEG q=75 (~20-100KB). Only with no anchor does it fall back to the foreground window. Pass name/role to crop to ONE element inside the target, or rect=[l,t,r,b] (great for VLM-in-the-loop checks). full=true: the whole screen at max 1280px JPEG (max_dim=0 = native-res lossless PNG). Always includes size_bytes.
+Capture a screenshot of the window the agent is working in. Target = window= or the session anchor: that window is captured BY HANDLE (works while covered, on a hidden desktop, or via CDP for a routed browser) at max 768px JPEG q=75 (~20-100KB). Only with no anchor does it fall back to the foreground window. Pass name/role to crop to ONE element inside the target, or rect=[l,t,r,b] (great for VLM-in-the-loop checks). full=true: the whole screen at max 1280px JPEG (max_dim=0 = native-res lossless PNG). Always includes size_bytes. Use it when pixels matter (charts, canvas, images); for controls and text, ghost_see is cheaper.
 
 **Take a screenshot**: read-only, idempotent.
 
