@@ -4606,6 +4606,34 @@ fn base64_encode(data: &[u8]) -> String {
 /// run the same argument validation itself (an empty name, an unknown mode or
 /// an oversized timeout_ms would otherwise go through). Read from the source.
 #[cfg(test)]
+mod input_helper_tests {
+    use super::{panic_message, parse_index};
+    use serde_json::json;
+
+    /// `index` picks among several matches. Anything that is not a
+    /// non-negative integer must be an error: read as "no index", it would
+    /// act on match 0, the wrong element.
+    #[test]
+    fn parse_index_takes_only_a_non_negative_integer() {
+        assert_eq!(parse_index(&json!({})), Ok(None));
+        assert_eq!(parse_index(&json!({"index": null})), Ok(None));
+        assert_eq!(parse_index(&json!({"index": 0})), Ok(Some(0)));
+        assert_eq!(parse_index(&json!({"index": 3})), Ok(Some(3)));
+        for bad in [json!(-1), json!("1"), json!(1.5), json!(1.0), json!([1]), json!({"i": 1}), json!(true)] {
+            let e = parse_index(&json!({ "index": bad })).expect_err(&bad.to_string());
+            assert!(e.starts_with("index must be a non-negative integer"), "{e}");
+        }
+    }
+
+    #[test]
+    fn panic_message_reads_both_string_payloads() {
+        assert_eq!(panic_message(Box::new("static text")), "static text");
+        assert_eq!(panic_message(Box::new(String::from("owned text"))), "owned text");
+        assert_eq!(panic_message(Box::new(7u8)), "non-string panic payload");
+    }
+}
+
+#[cfg(test)]
 mod batch_validation_wiring {
     #[test]
     fn a_batch_op_validates_its_arguments_before_dispatch() {
