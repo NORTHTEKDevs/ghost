@@ -457,7 +457,11 @@ fn shell_off_value(value: Option<&str>) -> bool {
 /// `GHOST_SHELL_WARM=off` disables the pre-spawned spare (one idle PowerShell
 /// per ghost process, roughly 40 MB).
 fn warm_disabled() -> bool {
-    matches!(std::env::var("GHOST_SHELL_WARM"), Ok(v) if v.trim().eq_ignore_ascii_case("off"))
+    warm_off_value(std::env::var("GHOST_SHELL_WARM").ok().as_deref())
+}
+
+fn warm_off_value(value: Option<&str>) -> bool {
+    value.is_some_and(|v| v.trim().eq_ignore_ascii_case("off"))
 }
 
 /// Prefix that moves a driver-run command into `cwd`. Single quotes are the
@@ -2103,14 +2107,38 @@ mod tests {
         assert!(launch_allowed_with_shell_off("  ", None, &no_resolve).is_err());
     }
 
+    /// Unit tests run in parallel threads of one process, and `GHOST_SHELL`
+    /// is read on every launch (`ensure_launch_allowed`): a test that sets it
+    /// turns the launch gate on for whatever test runs beside it. Flags are
+    /// tested through their pure `*_value` functions instead.
     #[test]
-    fn shell_disabled_reads_env() {
-        std::env::set_var("GHOST_SHELL", "off");
-        assert!(shell_disabled());
-        std::env::set_var("GHOST_SHELL", "OFF");
-        assert!(shell_disabled());
-        std::env::remove_var("GHOST_SHELL");
-        assert!(!shell_disabled());
+    fn no_unit_test_in_this_crate_changes_the_process_environment() {
+        let sources = [
+            ("shell.rs", include_str!("shell.rs")),
+            ("session.rs", include_str!("session.rs")),
+            ("hidden.rs", include_str!("hidden.rs")),
+            ("registries.rs", include_str!("registries.rs")),
+            ("target.rs", include_str!("target.rs")),
+        ];
+        let set = ["std::env::", "set_var("].concat();
+        let remove = ["std::env::", "remove_var("].concat();
+        for (name, src) in sources {
+            for (i, line) in src.lines().enumerate() {
+                assert!(
+                    !line.contains(&set) && !line.contains(&remove),
+                    "{name}:{} changes the process environment: {}",
+                    i + 1,
+                    line.trim()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn shell_off_is_case_insensitive_and_unset_means_on() {
+        assert!(shell_off_value(Some("off")));
+        assert!(shell_off_value(Some("OFF")));
+        assert!(!shell_off_value(None));
     }
 }
 
@@ -2368,11 +2396,11 @@ mod warm_tests {
     }
 
     #[test]
-    fn warm_flag_reads_env() {
-        std::env::set_var("GHOST_SHELL_WARM", "off");
-        assert!(warm_disabled());
-        std::env::remove_var("GHOST_SHELL_WARM");
-        assert!(!warm_disabled());
+    fn warm_flag_is_off_only_for_off() {
+        assert!(warm_off_value(Some("off")));
+        assert!(warm_off_value(Some(" OFF ")));
+        assert!(!warm_off_value(Some("on")));
+        assert!(!warm_off_value(None));
     }
 
     /// The mechanism the warm path relies on: a driver process accepts one
