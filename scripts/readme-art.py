@@ -10,7 +10,7 @@ The numbers on the proof card come from docs/background-mode.md and
 docs/benchmarks.md; change them there first.
 """
 from pathlib import Path
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 ROOT = Path(__file__).resolve().parent.parent
 BG, BORDER = "#0d1117", "#30363d"
@@ -45,6 +45,35 @@ def mono(size):
     return first_font(["consola.ttf", "DejaVuSansMono.ttf"], size)
 
 
+GRID, DOT = 24, "#1c232d"
+
+
+def textured(w, h):
+    """The panel ground: GitHub dark with a faint dot grid, the texture every
+    piece of README art shares."""
+    im = Image.new("RGB", (w, h), BG)
+    d = ImageDraw.Draw(im)
+    for y in range(GRID // 2, h, GRID):
+        for x in range(GRID // 2, w, GRID):
+            d.rectangle((x, y, x + 1, y + 1), fill=DOT)
+    return im
+
+
+def glyph(size):
+    """The ghost from assets/icon.png, in white, without its square tile."""
+    icon = Image.open(ROOT / "assets/icon.png").convert("RGBA").resize((size, size), Image.LANCZOS)
+    mask = Image.new("L", icon.size, 0)
+    px, mp = icon.load(), mask.load()
+    for y in range(size):
+        for x in range(size):
+            r, g, b, a = px[x, y]
+            # The glyph is the blue part; the tile is near-black.
+            mp[x, y] = a if b > 120 and b > r + 40 else 0
+    white = Image.new("RGBA", icon.size, TEXT)
+    white.putalpha(mask)
+    return white.crop(mask.getbbox())
+
+
 def fit(draw, text, maker, size, width):
     """The largest font from `maker` at or below `size` that fits `width`."""
     while size > 10:
@@ -57,11 +86,19 @@ def fit(draw, text, maker, size, width):
 
 def banner():
     H = 560
-    im = Image.new("RGB", (W, H), BG)
+    im = textured(W, H)
     d = ImageDraw.Draw(im)
-    icon = Image.open(ROOT / "assets/icon.png").convert("RGBA").resize((136, 136), Image.LANCZOS)
-    im.paste(icon, (PAD - 12, PAD - 4), icon)
-    d.text((PAD + 150, PAD + 64), "Ghost", font=display(150), fill=TEXT, anchor="lm")
+    # The hidden desktop: a second window outline behind everything, offset
+    # and faint, where Ghost runs the apps it starts.
+    for dx, col in ((0, "#232b36"), (28, "#1a212b")):
+        x0, y0 = 690 + dx, 40 + dx
+        d.rounded_rectangle((x0, y0, x0 + 440, y0 + 300), radius=14, outline=col, width=3)
+        d.line((x0, y0 + 44, x0 + 440, y0 + 44), fill=col, width=3)
+        for k in range(3):
+            d.ellipse((x0 + 380 - 26 * k, y0 + 16, x0 + 392 - 26 * k, y0 + 28), outline=col, width=3)
+    mark = glyph(190)
+    im.paste(mark, (PAD, PAD + 70 - mark.height // 2), mark)
+    d.text((PAD + mark.width + 26, PAD + 64), "Ghost", font=display(150), fill=TEXT, anchor="lm")
     lines = ["AI agents use the apps on your computer,", "in the background."]
     f = fit(d, lines[0], light, 62, W - 2 * PAD)
     y = 268
@@ -84,7 +121,7 @@ def proof():
     lf = light(words)
     row_h = NUM + 20 + LINE * 2
     H = PAD * 2 + row_h * len(rows) + GAP * (len(rows) - 1)
-    im = Image.new("RGB", (W, H), BG)
+    im = textured(W, H)
     d = ImageDraw.Draw(im)
     big = display(NUM)
     top = PAD
@@ -128,15 +165,24 @@ def title_inset():
         while bottom + 1 < h and sum(f.getpixel((left + 3, bottom + 1))) < 60 and \
                 sum(f.getpixel((left + 3, bottom + 1))) != sum(f.getpixel((2, bottom + 1))):
             bottom += 1
-        crop = f.crop((left + 2, top, left + 2 + CROP_W, top + CROP_H))
+        # Contrast-stretched so the proof reads; the pixels are the capture's.
+        crop = ImageOps.autocontrast(f.crop((left + 2, top, left + 2 + CROP_W, top + CROP_H)), cutoff=1)
         zoom = crop.resize((CROP_W * SCALE, CROP_H * SCALE), Image.NEAREST)
         out = Image.new("RGB", (w, h + BAND), BG)
+        grid = textured(w, h + BAND)
         out.paste(f.crop((0, 0, w, bottom + 1)), (0, 0))
         y = bottom + 1 + (BAND - CROP_H * SCALE) // 2
         out.paste(zoom, (left, y))
         d = ImageDraw.Draw(out)
         d.rectangle((left - 1, y - 1, left + CROP_W * SCALE, y + CROP_H * SCALE), outline=BORDER)
         out.paste(f.crop((0, bottom + 1, w, h)), (0, bottom + 1 + BAND))
+        # The same dot grid wherever the frame shows bare panel ground.
+        bg = tuple(int(BG[i:i + 2], 16) for i in (1, 3, 5))
+        o, g = out.load(), grid.load()
+        for yy in range(out.height):
+            for xx in range(w):
+                if o[xx, yy] == bg:
+                    o[xx, yy] = g[xx, yy]
         frames.append(out)
     frames[0].save(ROOT / "assets/demo-stacked-title.gif", save_all=True, append_images=frames[1:],
                    duration=durations, loop=0, optimize=True)
@@ -147,16 +193,16 @@ def loop():
     steps in the same panel language."""
     steps = [("look", "ghost_see"), ("act", "ghost_act"), ("confirm", "verified: true")]
     H = 300
-    im = Image.new("RGB", (W, H), BG)
+    im = textured(W, H)
     d = ImageDraw.Draw(im)
     gap = 56
     box_w = (W - 2 * PAD - 2 * gap) // 3
-    word, code = display(58), mono(34)
+    word, code = display(58), mono(38)
     for i, (label, call) in enumerate(steps):
         x = PAD + i * (box_w + gap)
         d.rounded_rectangle((x, 60, x + box_w, H - 60), radius=18, outline=BORDER, width=3)
         d.text((x + box_w // 2, 125), label, font=word, fill=TEXT, anchor="mm")
-        d.text((x + box_w // 2, 190), call, font=code, fill=GREEN if i == 2 else MUTED, anchor="mm")
+        d.text((x + box_w // 2, 192), call, font=code, fill=GREEN if i == 2 else "#b1bac4", anchor="mm")
         if i < 2:
             ax = x + box_w + 10
             d.line((ax, H // 2, ax + gap - 22, H // 2), fill=GREEN, width=5)

@@ -157,7 +157,8 @@ claude mcp add ghost -s user \
   -- "$HOME/.local/bin/ghost-mcp"
 ```
 
-The other clients take the full path to `ghost-mcp` in a JSON or TOML file.
+Below: Claude Desktop, Cursor, VS Code, Codex CLI, and Windsurf, Cline or any
+other stdio client. They take the full path to `ghost-mcp` in a JSON or TOML file.
 The examples use the Windows path; on Linux it is
 `/home/YOU/.local/bin/ghost-mcp`. Replace `YOU`, or print the exact path with
 the last item.
