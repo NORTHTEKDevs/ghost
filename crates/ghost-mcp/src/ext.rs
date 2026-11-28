@@ -645,6 +645,40 @@ mod tests {
     use super::*;
 
     #[test]
+    fn required_and_tab_arguments_name_what_is_missing() {
+        assert_eq!(req_str(&json!({"url": "https://a"}), "url"), Ok("https://a".to_string()));
+        for p in [json!({}), json!({"url": 5}), json!({"url": null})] {
+            assert_eq!(req_str(&p, "url"), Err("missing param: url".to_string()), "{p}");
+        }
+        assert_eq!(browser_tab(&json!({"tab": "t1"})), Ok(("default".to_string(), "t1".to_string())));
+        assert_eq!(browser_tab(&json!({"browser": "b2", "tab": "t1"})), Ok(("b2".to_string(), "t1".to_string())));
+        for p in [json!({}), json!({"tab": ""}), json!({"tab": 7})] {
+            let e = browser_tab(&p).expect_err(&p.to_string());
+            assert!(e.starts_with("missing param: tab"), "{e}");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn desktop_window_requires_a_nonzero_hwnd() {
+        assert_eq!(desktop_window(&json!({"hwnd": 42})), Ok(("default".to_string(), 42)));
+        assert_eq!(desktop_window(&json!({"desktop": "d1", "hwnd": 42})), Ok(("d1".to_string(), 42)));
+        for p in [json!({}), json!({"hwnd": 0}), json!({"hwnd": "42"})] {
+            let e = desktop_window(&p).expect_err(&p.to_string());
+            assert!(e.starts_with("missing param: hwnd"), "{e}");
+        }
+    }
+
+    #[test]
+    fn str_array_accepts_an_array_or_a_bare_string() {
+        assert_eq!(str_array(&json!({"k": ["a", "b"]}), "k"), ["a", "b"]);
+        assert_eq!(str_array(&json!({"k": "a"}), "k"), ["a"]);
+        assert_eq!(str_array(&json!({"k": ["a", 1, null, "b"]}), "k"), ["a", "b"]);
+        assert!(str_array(&json!({}), "k").is_empty());
+        assert!(str_array(&json!({"k": 3}), "k").is_empty());
+    }
+
+    #[test]
     fn ownership_covers_every_advertised_tool() {
         // A tool advertised in schemas() but not claimed by owns() would be
         // routed to the legacy table and answered "unknown method".

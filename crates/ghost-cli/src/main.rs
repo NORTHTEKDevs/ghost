@@ -703,6 +703,20 @@ fn base64_encode(data: &[u8]) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn base64_encode_matches_the_rfc_vectors() {
+        // RFC 4648 section 10 test vectors.
+        for (raw, want) in [
+            ("", ""), ("f", "Zg=="), ("fo", "Zm8="), ("foo", "Zm9v"),
+            ("foob", "Zm9vYg=="), ("fooba", "Zm9vYmE="), ("foobar", "Zm9vYmFy"),
+        ] {
+            assert_eq!(base64_encode(raw.as_bytes()), want, "{raw:?}");
+        }
+        // Every 6-bit value, including the two non-alphanumeric ones.
+        assert_eq!(base64_encode(&[0xfb, 0xff, 0xbf]), "+/+/");
+        assert_eq!(base64_encode(&[0, 0, 0]), "AAAA");
+    }
+
     fn parse(args: &[&str]) -> Result<Cli, clap::Error> {
         Cli::try_parse_from(std::iter::once("ghost").chain(args.iter().copied()))
     }
