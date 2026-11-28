@@ -45,7 +45,7 @@ def mono(size):
     return first_font(["consola.ttf", "DejaVuSansMono.ttf"], size)
 
 
-GRID, DOT = 24, "#1c232d"
+GRID, DOT = 24, "#222a35"
 
 
 def textured(w, h):
@@ -57,6 +57,23 @@ def textured(w, h):
         for x in range(GRID // 2, w, GRID):
             d.rectangle((x, y, x + 1, y + 1), fill=DOT)
     return im
+
+
+def window_mark(d, x0, y0, w, h, col="#2a3340", width=3):
+    """A window outline with three title-bar dots: the hidden desktop, Ghost's
+    signature mark on every panel."""
+    d.rounded_rectangle((x0, y0, x0 + w, y0 + h), radius=max(6, w // 30), outline=col, width=width)
+    bar = max(10, h // 7)
+    d.line((x0, y0 + bar, x0 + w, y0 + bar), fill=col, width=width)
+    r = max(3, bar // 5)
+    for k in range(3):
+        cx = x0 + w - bar * (k + 1) * 3 // 4 - r
+        d.ellipse((cx - r, y0 + bar // 2 - r, cx + r, y0 + bar // 2 + r), outline=col, width=width)
+
+
+def corner_mark(d, w):
+    """The window mark, small, in a panel's top-right corner."""
+    window_mark(d, w - PAD - 96, 22, 96, 64, width=2)
 
 
 def glyph(size):
@@ -88,14 +105,10 @@ def banner():
     H = 560
     im = textured(W, H)
     d = ImageDraw.Draw(im)
-    # The hidden desktop: a second window outline behind everything, offset
-    # and faint, where Ghost runs the apps it starts.
-    for dx, col in ((0, "#232b36"), (28, "#1a212b")):
-        x0, y0 = 690 + dx, 40 + dx
-        d.rounded_rectangle((x0, y0, x0 + 440, y0 + 300), radius=14, outline=col, width=3)
-        d.line((x0, y0 + 44, x0 + 440, y0 + 44), fill=col, width=3)
-        for k in range(3):
-            d.ellipse((x0 + 380 - 26 * k, y0 + 16, x0 + 392 - 26 * k, y0 + 28), outline=col, width=3)
+    # The hidden desktop: two offset window outlines in the gutter beside the
+    # wordmark, clear of the tagline, where Ghost runs the apps it starts.
+    window_mark(d, 820, 34, 300, 168, col="#1d242e")
+    window_mark(d, 790, 58, 300, 168, col="#2a3340")
     mark = glyph(190)
     im.paste(mark, (PAD, PAD + 70 - mark.height // 2), mark)
     d.text((PAD + mark.width + 26, PAD + 64), "Ghost", font=display(150), fill=TEXT, anchor="lm")
@@ -123,6 +136,7 @@ def proof():
     H = PAD * 2 + row_h * len(rows) + GAP * (len(rows) - 1)
     im = textured(W, H)
     d = ImageDraw.Draw(im)
+    corner_mark(d, W)
     big = display(NUM)
     top = PAD
     for i, (num, lines) in enumerate(rows):
@@ -144,11 +158,17 @@ def title_inset():
     step, and at phone width the original is about 7px tall."""
     src = Image.open(ROOT / "assets/demo-stacked.gif")
     frames, durations = [], []
+    # The step captions demo-gif.py drew into each frame, in frame order
+    # (result first). Re-set here in the art's display face.
+    captions = ["Click again. The window title proves it.",
+                "Launch an app. Ghost starts it on a hidden desktop.",
+                "Type into a field, in the background.",
+                "Click a button. Ghost checks it took effect."]
     BAND, SCALE, CROP_W, CROP_H = 84, 2, 262, 26
     for i in range(src.n_frames):
         src.seek(i)
         durations.append(src.info.get("duration", 2600))
-        f = src.convert("RGB")
+        f = src.convert("RGB").copy()
         w, h = f.size
         # The window is the only thing light across the whole middle of the
         # frame (the headline is light text on dark, with gaps).
@@ -165,6 +185,23 @@ def title_inset():
         while bottom + 1 < h and sum(f.getpixel((left + 3, bottom + 1))) < 60 and \
                 sum(f.getpixel((left + 3, bottom + 1))) != sum(f.getpixel((2, bottom + 1))):
             bottom += 1
+        head = Image.new("RGB", (w, top - 4), BG)
+        hd = ImageDraw.Draw(head)
+        words, lines, line = captions[i].split(), [], ""
+        hf = display(27)
+        for word in words:
+            trial = f"{line} {word}".strip()
+            if hd.textlength(trial, font=hf) <= w - 2 * left:
+                line = trial
+            else:
+                lines.append(line)
+                line = word
+        lines.append(line)
+        ly = (top - 4 - 34 * len(lines)) // 2 + 4
+        for text in lines:
+            hd.text((left, ly), text, font=hf, fill=TEXT)
+            ly += 34
+        f.paste(head, (0, 0))
         # Contrast-stretched so the proof reads; the pixels are the capture's.
         crop = ImageOps.autocontrast(f.crop((left + 2, top, left + 2 + CROP_W, top + CROP_H)), cutoff=1)
         zoom = crop.resize((CROP_W * SCALE, CROP_H * SCALE), Image.NEAREST)
@@ -198,6 +235,7 @@ def loop():
     gap = 56
     box_w = (W - 2 * PAD - 2 * gap) // 3
     word, code = display(58), mono(38)
+    corner_mark(d, W)
     for i, (label, call) in enumerate(steps):
         x = PAD + i * (box_w + gap)
         d.rounded_rectangle((x, 60, x + box_w, H - 60), radius=18, outline=BORDER, width=3)

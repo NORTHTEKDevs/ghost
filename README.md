@@ -1,5 +1,3 @@
-<div align="center">
-
 <img src="assets/banner.png" width="520" alt="Ghost: AI agents use the apps on your computer, in the background. Every action verified.">
 
 [![CI](https://github.com/NORTHTEKDevs/ghost/actions/workflows/ci.yml/badge.svg)](https://github.com/NORTHTEKDevs/ghost/actions/workflows/ci.yml)
@@ -8,9 +6,7 @@
 
 **[Quick start](#quick-start)** · [Connect](#2-connect-your-client) · [Try it](#3-try-it) · [Safety](#safety-model) · [Docs](docs/README.md)
 
-</div>
-
-<p align="center">
+<p>
   <a href="assets/demo.gif"><img src="assets/demo-stacked-title.gif" width="520" alt="The run's result first: an agent's second click on a button returns verified: true, verified_by: title, focus_preserved: true and cursor_preserved: true, Ghost's screenshot shows the window title counting the click (repeated at twice its size under the window), and the user's foreground window recorded 0 changes. Then the run from the start: Ghost launches the app on its hidden desktop, types into a field and clicks a button, each call verified."></a>
 </p>
 
@@ -39,7 +35,7 @@ decide to take your mouse; only you can unlock it, in the server's config.
 screen and returns <code>verified:&nbsp;true</code> only when the change really happened; a
 call it cannot complete fails with an error that says why.
 
-<p align="center">
+<p>
   <img src="assets/proof.png" width="520" alt="Measured: 2,949 of about 2,950 keystrokes a person typed during six agent runs stayed in their window. 0 focus losses in a 160-action soak, with 0 unverified results. 14 of 14 benchmark tasks passed when scored by re-observing the app.">
 </p>
 
@@ -157,8 +153,10 @@ claude mcp add ghost -s user \
   -- "$HOME/.local/bin/ghost-mcp"
 ```
 
-Below: Claude Desktop, Cursor, VS Code, Codex CLI, and Windsurf, Cline or any
-other stdio client. They take the full path to `ghost-mcp` in a JSON or TOML file.
+<details>
+<summary><b>Other clients</b>: Claude Desktop, Cursor, VS Code, Codex CLI, Windsurf, Cline</summary>
+
+They take the full path to `ghost-mcp` in a JSON or TOML file.
 The examples use the Windows path; on Linux it is
 `/home/YOU/.local/bin/ghost-mcp`. Replace `YOU`, or print the exact path with
 the last item.
@@ -254,6 +252,8 @@ Linux: `readlink -f ~/.local/bin/ghost-mcp`
 
 </details>
 
+</details>
+
 ### 3. Try it
 
 Restart your client so it picks up the server. Its tool list should now show
@@ -271,7 +271,7 @@ ghost verify
 
 ## How an agent uses it
 
-<p align="center">
+<p>
   <img src="assets/loop.png" width="520" alt="The loop: look with ghost_see, act with ghost_act, confirm with verified: true.">
 </p>
 
