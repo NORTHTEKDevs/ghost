@@ -4510,7 +4510,7 @@ async fn run_batch_op(
     // Batch ops go straight to handle_tool, past dispatch_tool_inner's gate:
     // check each one, so a stop raised mid-batch holds the rest back.
     stop_gate(method, params, ghost_session::error::is_stopped()).map_err(|e| with_stop_reason(method, e))?;
-    // ...and the same argument checks, which also clamp timeout_ms.
+    // ...and the same argument checks (timeout_ms range included).
     let validated = validate_args(method, params)?;
     let args: &Value = validated.as_ref().unwrap_or(params);
     Box::pin(handle_tool(session, method, args)).await
