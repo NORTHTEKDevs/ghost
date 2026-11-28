@@ -202,7 +202,7 @@ fn pump_thread(_bus: &'static EventBus) {
 
         let mut msg = MSG::default();
         loop {
-            let r = GetMessageW(&mut msg, HWND(std::ptr::null_mut()), 0, 0);
+            let r = GetMessageW(&mut msg, None, 0, 0);
             if !r.as_bool() {
                 break;
             }

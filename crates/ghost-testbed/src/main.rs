@@ -89,7 +89,7 @@ mod bed {
                     ID_NOTE => {
                         let n = NOTES.fetch_add(1, Ordering::SeqCst) + 1;
                         let text = wide(&format!("Status: noted {n}"));
-                        if let Ok(status) = GetDlgItem(hwnd, ID_STATUS) {
+                        if let Ok(status) = GetDlgItem(Some(hwnd), ID_STATUS) {
                             let _ = SetWindowTextW(status, PCWSTR(text.as_ptr()));
                         }
                     }
@@ -99,7 +99,7 @@ mod bed {
                     ID_COUNT => {
                         let n = COUNTS.fetch_add(1, Ordering::SeqCst) + 1;
                         let text = wide(&format!("Count {n}"));
-                        if let Ok(b) = GetDlgItem(hwnd, ID_COUNT) {
+                        if let Ok(b) = GetDlgItem(Some(hwnd), ID_COUNT) {
                             let _ = SetWindowTextW(b, PCWSTR(text.as_ptr()));
                         }
                     }
@@ -107,7 +107,7 @@ mod bed {
                         // PostMessage, not DestroyWindow: BM_CLICK arrives as a
                         // SendMessage from the automating thread, and destroying
                         // the window inside that nested send is refused. Queue it.
-                        let _ = PostMessageW(hwnd, WM_CLOSE, WPARAM(0), LPARAM(0));
+                        let _ = PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0));
                     }
                     _ => {}
                 }
@@ -174,9 +174,9 @@ mod bed {
             r.top + 120,
             220,
             70,
-            owner,
+            Some(owner),
             None,
-            hinst,
+            Some(hinst),
             None,
         ) else {
             return;
@@ -190,9 +190,9 @@ mod bed {
             15,
             180,
             40,
-            popup,
-            HMENU(ID_PING as isize as *mut _),
-            hinst,
+            Some(popup),
+            Some(HMENU(ID_PING as isize as *mut _)),
+            Some(hinst),
             None,
         );
         let _ = ShowWindow(popup, SW_SHOWNOACTIVATE);
@@ -251,7 +251,7 @@ mod bed {
                 260,
                 None,
                 None,
-                hinst,
+                Some(hinst),
                 None,
             )
             .expect("create window");
@@ -266,9 +266,9 @@ mod bed {
                         y,
                         w,
                         h,
-                        hwnd,
-                        HMENU(id as isize as *mut _),
-                        hinst,
+                        Some(hwnd),
+                        Some(HMENU(id as isize as *mut _)),
+                        Some(hinst),
                         None,
                     )
                     .expect("create child")

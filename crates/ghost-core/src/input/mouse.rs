@@ -30,7 +30,8 @@ pub(crate) fn off_monitor_error(pt: (i32, i32), monitors: &[MonitorRect]) -> Cor
 /// The rectangles of every attached monitor. Falls back to the virtual screen
 /// if the enumeration yields nothing, so a failed query never blocks input.
 pub fn monitor_rects() -> Vec<MonitorRect> {
-    use windows::Win32::Foundation::{BOOL, LPARAM, RECT};
+    use windows::Win32::Foundation::{LPARAM, RECT};
+    use windows::core::BOOL;
     use windows::Win32::Graphics::Gdi::{EnumDisplayMonitors, HDC, HMONITOR};
     unsafe extern "system" fn collect(_: HMONITOR, _: HDC, rc: *mut RECT, data: LPARAM) -> BOOL {
         let out = &mut *(data.0 as *mut Vec<MonitorRect>);

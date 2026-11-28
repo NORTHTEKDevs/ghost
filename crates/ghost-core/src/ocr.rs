@@ -10,7 +10,7 @@
 use crate::error::CoreError;
 use crate::capture::screen::{capture_screen_full_rgba, rgba_to_bgra_in_place};
 use crate::uia::element::BoundingRect;
-use windows::Foundation::IAsyncOperation;
+use windows_future::IAsyncOperation;
 use windows::Globalization::Language;
 use windows::Graphics::Imaging::{BitmapPixelFormat, SoftwareBitmap};
 use windows::Media::Ocr::OcrEngine;
@@ -263,6 +263,6 @@ fn block_on_async<T>(op: IAsyncOperation<T>) -> Result<T, CoreError>
 where
     T: windows::core::RuntimeType + 'static,
 {
-    op.get()
+    op.join()
         .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "IAsyncOperation::get" })
 }

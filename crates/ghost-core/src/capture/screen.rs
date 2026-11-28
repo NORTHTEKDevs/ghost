@@ -21,9 +21,8 @@ struct ScreenDcGuard(windows::Win32::Graphics::Gdi::HDC);
 impl Drop for ScreenDcGuard {
     fn drop(&mut self) {
         unsafe {
-            use windows::Win32::Foundation::HWND;
             use windows::Win32::Graphics::Gdi::ReleaseDC;
-            let _ = ReleaseDC(HWND(std::ptr::null_mut()), self.0);
+            let _ = ReleaseDC(None, self.0);
         }
     }
 }
@@ -146,7 +145,6 @@ fn capture_rect_gdi(
     height: usize,
 ) -> Result<(Vec<u8>, usize, usize), CoreError> {
     unsafe {
-        use windows::Win32::Foundation::HWND;
         use windows::Win32::Graphics::Gdi::{
             BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, GetDIBits, SelectObject,
             BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HGDIOBJ, SRCCOPY,
@@ -159,7 +157,7 @@ fn capture_rect_gdi(
             });
         }
 
-        let raw_screen_dc = windows::Win32::Graphics::Gdi::GetDC(HWND(std::ptr::null_mut()));
+        let raw_screen_dc = windows::Win32::Graphics::Gdi::GetDC(None);
         if raw_screen_dc.is_invalid() {
             return Err(CoreError::Win32 {
                 code: 0,
@@ -169,7 +167,7 @@ fn capture_rect_gdi(
         // RAII: screen DC is released on all paths from here.
         let screen_dc = ScreenDcGuard(raw_screen_dc);
 
-        let raw_mem_dc = CreateCompatibleDC(screen_dc.0);
+        let raw_mem_dc = CreateCompatibleDC(Some(screen_dc.0));
         if raw_mem_dc.is_invalid() {
             return Err(CoreError::Win32 {
                 code: 0,
@@ -206,7 +204,7 @@ fn capture_rect_gdi(
             0,
             width as i32,
             height as i32,
-            screen_dc.0,
+            Some(screen_dc.0),
             src_x,
             src_y,
             SRCCOPY,
@@ -306,7 +304,7 @@ pub fn capture_window_printwindow(hwnd_raw: isize) -> Result<(Vec<u8>, usize, us
             });
         }
 
-        let raw_screen_dc = windows::Win32::Graphics::Gdi::GetDC(HWND(std::ptr::null_mut()));
+        let raw_screen_dc = windows::Win32::Graphics::Gdi::GetDC(None);
         if raw_screen_dc.is_invalid() {
             return Err(CoreError::Win32 {
                 code: 0,
@@ -315,7 +313,7 @@ pub fn capture_window_printwindow(hwnd_raw: isize) -> Result<(Vec<u8>, usize, us
         }
         let screen_dc = ScreenDcGuard(raw_screen_dc);
 
-        let raw_mem_dc = CreateCompatibleDC(screen_dc.0);
+        let raw_mem_dc = CreateCompatibleDC(Some(screen_dc.0));
         if raw_mem_dc.is_invalid() {
             return Err(CoreError::Win32 {
                 code: 0,
@@ -667,7 +665,7 @@ fn init_capture_state() -> Result<CaptureContext, CoreError> {
         D3D11CreateDevice(
             None,
             D3D_DRIVER_TYPE_HARDWARE,
-            None,
+            windows::Win32::Foundation::HMODULE::default(),
             D3D11_CREATE_DEVICE_FLAG(0),
             None,
             D3D11_SDK_VERSION,

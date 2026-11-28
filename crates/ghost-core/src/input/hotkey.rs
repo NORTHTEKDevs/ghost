@@ -260,7 +260,7 @@ fn event_security(grant_user: bool) -> Option<EventSecurity> {
         for kind in well_known {
             let mut len = SECURITY_MAX_SID_SIZE;
             let mut sid = vec![0u64; (len as usize).div_ceil(8)];
-            CreateWellKnownSid(kind, None, PSID(sid.as_mut_ptr().cast()), &mut len).ok()?;
+            CreateWellKnownSid(kind, None, Some(PSID(sid.as_mut_ptr().cast())), &mut len).ok()?;
             sids.push(sid);
         }
         // The current user, from the process token.
@@ -362,7 +362,7 @@ pub fn register_emergency_stop() -> Result<(), CoreError> {
             };
             register(&mut owned);
             let module = windows::Win32::System::LibraryLoader::GetModuleHandleW(None).unwrap_or_default();
-            if SetWindowsHookExW(WH_KEYBOARD_LL, Some(resume_hook), module, 0).is_err() {
+            if SetWindowsHookExW(WH_KEYBOARD_LL, Some(resume_hook), Some(module.into()), 0).is_err() {
                 tracing::warn!(
                     "the resume key is unavailable here (keyboard hook refused)"
                 );

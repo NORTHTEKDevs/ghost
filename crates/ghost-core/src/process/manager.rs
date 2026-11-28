@@ -167,7 +167,7 @@ fn launch_raw(exe: &str) -> Result<u32, CoreError> {
 
         CreateProcessW(
             None,
-            windows::core::PWSTR(cmd.as_mut_ptr()),
+            Some(windows::core::PWSTR(cmd.as_mut_ptr())),
             None,
             None,
             false,

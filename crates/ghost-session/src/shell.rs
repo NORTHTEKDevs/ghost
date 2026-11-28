@@ -698,7 +698,8 @@ mod platform {
     /// desktop is normally not - so a forged or stale line naming one of
     /// those is not acted on.
     fn in_a_job(pid: u32) -> bool {
-        use windows::Win32::Foundation::{CloseHandle, BOOL};
+        use windows::Win32::Foundation::CloseHandle;
+        use windows::core::BOOL;
         use windows::Win32::System::JobObjects::IsProcessInJob;
         use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
         unsafe {

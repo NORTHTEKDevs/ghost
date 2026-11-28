@@ -41,7 +41,8 @@ use crate::focus;
 use crossbeam_channel::{unbounded, Sender};
 use std::sync::atomic::{AtomicU64, Ordering};
 use windows::core::{HSTRING, PWSTR};
-use windows::Win32::Foundation::{BOOL, HWND, LPARAM, TRUE};
+use windows::Win32::Foundation::{HWND, LPARAM, TRUE};
+use windows::core::BOOL;
 use windows::Win32::System::StationsAndDesktops::{
     CloseDesktop, CreateDesktopW, EnumDesktopWindows, SetThreadDesktop, DESKTOP_CONTROL_FLAGS,
     HDESK,
@@ -563,7 +564,7 @@ fn launch_on_desktop(command: &str, desktop: &str) -> Result<u32, CoreError> {
             .collect();
         CreateProcessW(
             None,
-            PWSTR(cmd.as_mut_ptr()),
+            Some(PWSTR(cmd.as_mut_ptr())),
             None,
             None,
             false,
@@ -618,7 +619,7 @@ fn enum_desktop_windows() -> Result<Vec<DesktopWindow>, CoreError> {
         // any window vanishes mid-enumeration, but the windows collected so far are
         // still valid.
         let _ = EnumDesktopWindows(
-            hdesk,
+            Some(hdesk),
             Some(enum_proc),
             LPARAM(&mut list as *mut Vec<DesktopWindow> as isize),
         );
@@ -642,7 +643,7 @@ pub fn scroll_window(hwnd: isize, notches: i32, horizontal: bool) -> Result<(), 
     const WHEEL_DELTA: i32 = 120;
     let h = as_hwnd(hwnd);
     unsafe {
-        if !IsWindow(h).as_bool() {
+        if !IsWindow(Some(h)).as_bool() {
             return Err(CoreError::WindowGone);
         }
         let delta = WHEEL_DELTA * notches;
@@ -652,7 +653,7 @@ pub fn scroll_window(hwnd: isize, notches: i32, horizontal: bool) -> Result<(), 
         } else {
             WM_MOUSEWHEEL
         };
-        PostMessageW(h, msg, wparam, LPARAM(0)).map_err(|e| CoreError::Win32 {
+        PostMessageW(Some(h), msg, wparam, LPARAM(0)).map_err(|e| CoreError::Win32 {
             code: e.code().0 as u32,
             context: "PostMessage wheel",
         })

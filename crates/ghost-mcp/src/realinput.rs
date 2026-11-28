@@ -101,7 +101,7 @@ pub fn start() {
 
 #[cfg(windows)]
 unsafe extern "system" fn keyboard(code: i32, w: windows::Win32::Foundation::WPARAM, l: windows::Win32::Foundation::LPARAM) -> windows::Win32::Foundation::LRESULT {
-    use windows::Win32::UI::WindowsAndMessaging::{CallNextHookEx, KBDLLHOOKSTRUCT, HHOOK, LLKHF_INJECTED, WM_KEYDOWN, WM_SYSKEYDOWN};
+    use windows::Win32::UI::WindowsAndMessaging::{CallNextHookEx, KBDLLHOOKSTRUCT, LLKHF_INJECTED, WM_KEYDOWN, WM_SYSKEYDOWN};
     if code >= 0 {
         let msg = w.0 as u32;
         if msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN {
@@ -116,13 +116,13 @@ unsafe extern "system" fn keyboard(code: i32, w: windows::Win32::Foundation::WPA
             }
         }
     }
-    CallNextHookEx(HHOOK(std::ptr::null_mut()), code, w, l)
+    CallNextHookEx(None, code, w, l)
 }
 
 #[cfg(windows)]
 unsafe extern "system" fn mouse(code: i32, w: windows::Win32::Foundation::WPARAM, l: windows::Win32::Foundation::LPARAM) -> windows::Win32::Foundation::LRESULT {
     use windows::Win32::UI::WindowsAndMessaging::{
-        CallNextHookEx, HHOOK, LLMHF_INJECTED, MSLLHOOKSTRUCT, WM_LBUTTONDOWN, WM_MBUTTONDOWN,
+        CallNextHookEx, LLMHF_INJECTED, MSLLHOOKSTRUCT, WM_LBUTTONDOWN, WM_MBUTTONDOWN,
         WM_NCLBUTTONDOWN, WM_RBUTTONDOWN,
     };
     if code >= 0 {
@@ -134,12 +134,11 @@ unsafe extern "system" fn mouse(code: i32, w: windows::Win32::Foundation::WPARAM
             }
         }
     }
-    CallNextHookEx(HHOOK(std::ptr::null_mut()), code, w, l)
+    CallNextHookEx(None, code, w, l)
 }
 
 #[cfg(windows)]
 fn pump() {
-    use windows::Win32::Foundation::HWND;
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::UI::WindowsAndMessaging::{
         DispatchMessageW, GetMessageW, SetWindowsHookExW, TranslateMessage, MSG, WH_KEYBOARD_LL,
@@ -147,8 +146,8 @@ fn pump() {
     };
     unsafe {
         let module = GetModuleHandleW(None).unwrap_or_default();
-        let kb = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard), module, 0);
-        let ms = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse), module, 0);
+        let kb = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard), Some(module.into()), 0);
+        let ms = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse), Some(module.into()), 0);
         if kb.is_err() || ms.is_err() {
             tracing::warn!("real-input hooks could not be installed; the foreground sentinel will not act");
             INSTALLED.store(0, Ordering::SeqCst);
@@ -156,7 +155,7 @@ fn pump() {
         }
         INSTALLED.store(1, Ordering::SeqCst);
         let mut msg = MSG::default();
-        while GetMessageW(&mut msg, HWND(std::ptr::null_mut()), 0, 0).as_bool() {
+        while GetMessageW(&mut msg, None, 0, 0).as_bool() {
             let _ = TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }

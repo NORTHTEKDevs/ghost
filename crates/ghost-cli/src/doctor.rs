@@ -90,7 +90,6 @@ pub fn render(checks: &[Check]) -> String {
 
 #[cfg(windows)]
 pub fn run_checks() -> Vec<Check> {
-    use windows::Win32::Foundation::HWND;
     use windows::Win32::Graphics::Gdi::{GetDC, GetDeviceCaps, ReleaseDC, LOGPIXELSX};
     use windows::Win32::System::RemoteDesktop::WTSGetActiveConsoleSessionId;
     use windows::Win32::UI::HiDpi::{GetAwarenessFromDpiAwarenessContext, GetThreadDpiAwarenessContext, DPI_AWARENESS_UNAWARE};
@@ -135,9 +134,9 @@ pub fn run_checks() -> Vec<Check> {
 
     // --- DPI awareness ---
     let dpi = unsafe {
-        let hdc = GetDC(HWND(std::ptr::null_mut()));
-        let d = if hdc.is_invalid() { 96 } else { GetDeviceCaps(hdc, LOGPIXELSX) };
-        if !hdc.is_invalid() { ReleaseDC(HWND(std::ptr::null_mut()), hdc); }
+        let hdc = GetDC(None);
+        let d = if hdc.is_invalid() { 96 } else { GetDeviceCaps(Some(hdc), LOGPIXELSX) };
+        if !hdc.is_invalid() { ReleaseDC(None, hdc); }
         d
     };
     let scale = ((dpi as f32 / 96.0) * 100.0).round() as u32;
