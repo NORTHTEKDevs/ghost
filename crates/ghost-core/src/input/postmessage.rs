@@ -82,14 +82,14 @@ impl BackgroundClicker {
         crate::stop::ensure_not_stopped()?;
         let hwnd = hwnd_of(hwnd_raw);
         unsafe {
-            if !IsWindow(hwnd).as_bool() {
+            if !IsWindow(Some(hwnd)).as_bool() {
                 return Err(CoreError::WindowGone);
             }
             let (x, y) = client_xy;
             let lparam = LPARAM(((y & 0xFFFF) << 16 | (x & 0xFFFF)) as isize);
-            PostMessageW(hwnd, WM_LBUTTONDOWN, WPARAM(0x0001), lparam)
+            PostMessageW(Some(hwnd), WM_LBUTTONDOWN, WPARAM(0x0001), lparam)
                 .map_err(|e| CoreError::ComInit(format!("PostMessage down: {e}")))?;
-            PostMessageW(hwnd, WM_LBUTTONUP, WPARAM(0x0000), lparam)
+            PostMessageW(Some(hwnd), WM_LBUTTONUP, WPARAM(0x0000), lparam)
                 .map_err(|e| CoreError::ComInit(format!("PostMessage up: {e}")))?;
             Ok(())
         }
@@ -105,7 +105,7 @@ impl BackgroundClicker {
         crate::stop::ensure_not_stopped()?;
         let hwnd = hwnd_of(hwnd_raw);
         unsafe {
-            if !IsWindow(hwnd).as_bool() {
+            if !IsWindow(Some(hwnd)).as_bool() {
                 return Err(CoreError::WindowGone);
             }
             let mut pt = POINT { x: screen_x, y: screen_y };
@@ -117,7 +117,7 @@ impl BackgroundClicker {
     /// Screen point -> client coords for `hwnd` (returns WindowGone if invalid).
     fn client_pt(hwnd: HWND, screen_x: i32, screen_y: i32) -> Result<POINT, CoreError> {
         unsafe {
-            if !IsWindow(hwnd).as_bool() {
+            if !IsWindow(Some(hwnd)).as_bool() {
                 return Err(CoreError::WindowGone);
             }
             let mut pt = POINT { x: screen_x, y: screen_y };
@@ -134,7 +134,7 @@ impl BackgroundClicker {
         let pt = Self::client_pt(hwnd, screen_x, screen_y)?;
         let lp = mouse_lparam(pt.x, pt.y);
         unsafe {
-            let post = |msg: u32, wp: usize| PostMessageW(hwnd, msg, WPARAM(wp), lp)
+            let post = |msg: u32, wp: usize| PostMessageW(Some(hwnd), msg, WPARAM(wp), lp)
                 .map_err(|e| CoreError::ComInit(format!("PostMessage {msg:#x}: {e}")));
             post(WM_LBUTTONDOWN, MK_LBUTTON)?;
             post(WM_LBUTTONUP, 0)?;
@@ -152,9 +152,9 @@ impl BackgroundClicker {
         let pt = Self::client_pt(hwnd, screen_x, screen_y)?;
         let lp = mouse_lparam(pt.x, pt.y);
         unsafe {
-            PostMessageW(hwnd, WM_RBUTTONDOWN, WPARAM(MK_RBUTTON), lp)
+            PostMessageW(Some(hwnd), WM_RBUTTONDOWN, WPARAM(MK_RBUTTON), lp)
                 .map_err(|e| CoreError::ComInit(format!("PostMessage RBUTTONDOWN: {e}")))?;
-            PostMessageW(hwnd, WM_RBUTTONUP, WPARAM(0), lp)
+            PostMessageW(Some(hwnd), WM_RBUTTONUP, WPARAM(0), lp)
                 .map_err(|e| CoreError::ComInit(format!("PostMessage RBUTTONUP: {e}")))?;
         }
         Ok(())
@@ -169,7 +169,7 @@ impl BackgroundClicker {
         let hwnd = hwnd_of(hwnd_raw);
         let pt = Self::client_pt(hwnd, screen_x, screen_y)?;
         unsafe {
-            PostMessageW(hwnd, WM_MOUSEMOVE, WPARAM(0), mouse_lparam(pt.x, pt.y))
+            PostMessageW(Some(hwnd), WM_MOUSEMOVE, WPARAM(0), mouse_lparam(pt.x, pt.y))
                 .map_err(|e| CoreError::ComInit(format!("PostMessage MOUSEMOVE: {e}")))?;
         }
         Ok(())
@@ -186,10 +186,10 @@ impl BackgroundClicker {
         crate::stop::ensure_not_stopped()?;
         let hwnd = hwnd_of(hwnd_raw);
         unsafe {
-            if !IsWindow(hwnd).as_bool() {
+            if !IsWindow(Some(hwnd)).as_bool() {
                 return Err(CoreError::WindowGone);
             }
-            PostMessageW(hwnd, BM_CLICK, WPARAM(0), LPARAM(0))
+            PostMessageW(Some(hwnd), BM_CLICK, WPARAM(0), LPARAM(0))
                 .map_err(|e| CoreError::ComInit(format!("PostMessage BM_CLICK: {e}")))?;
         }
         Ok(())
@@ -212,7 +212,7 @@ impl BackgroundClicker {
             EditCommand::SelectAll => (EM_SETSEL, WPARAM(0), LPARAM(-1)),
         };
         unsafe {
-            if !IsWindow(hwnd).as_bool() {
+            if !IsWindow(Some(hwnd)).as_bool() {
                 return Err(CoreError::WindowGone);
             }
             let mut result: usize = 0;
@@ -265,7 +265,7 @@ impl BackgroundClicker {
         TEXT_CLASS_PREFIXES.iter().any(|p| class.starts_with(p))
     }
 
-    unsafe extern "system" fn collect_text_control(hwnd: HWND, lparam: LPARAM) -> windows::Win32::Foundation::BOOL {
+    unsafe extern "system" fn collect_text_control(hwnd: HWND, lparam: LPARAM) -> windows::core::BOOL {
         let found = &mut *(lparam.0 as *mut Option<isize>);
         if found.is_none() && IsWindowVisible(hwnd).as_bool() && Self::is_text_control(hwnd) {
             *found = Some(hwnd.0 as isize);
@@ -278,7 +278,7 @@ impl BackgroundClicker {
     /// edit messages, if any.
     pub fn first_text_control(root_raw: isize) -> Option<isize> {
         let root = hwnd_of(root_raw);
-        if !unsafe { IsWindow(root) }.as_bool() {
+        if !unsafe { IsWindow(Some(root)) }.as_bool() {
             return None;
         }
         if Self::is_text_control(root) {
@@ -287,7 +287,7 @@ impl BackgroundClicker {
         let mut found: Option<isize> = None;
         unsafe {
             let _ = EnumChildWindows(
-                root,
+                Some(root),
                 Some(Self::collect_text_control),
                 LPARAM(&mut found as *mut Option<isize> as isize),
             );
@@ -313,7 +313,7 @@ impl BackgroundClicker {
     pub fn text_target(window_hwnd_raw: isize) -> Option<isize> {
         let focused = Self::focused_control(window_hwnd_raw);
         let focused_is_real =
-            focused != window_hwnd_raw && unsafe { IsWindow(hwnd_of(focused)) }.as_bool();
+            focused != window_hwnd_raw && unsafe { IsWindow(Some(hwnd_of(focused))) }.as_bool();
         if focused_is_real && Self::is_text_control(hwnd_of(focused)) {
             return Some(focused);
         }
@@ -325,7 +325,7 @@ impl BackgroundClicker {
     /// posted keystroke into a proven one.
     pub fn read_text(hwnd_raw: isize) -> Option<String> {
         let hwnd = hwnd_of(hwnd_raw);
-        if !unsafe { IsWindow(hwnd) }.as_bool() {
+        if !unsafe { IsWindow(Some(hwnd)) }.as_bool() {
             return None;
         }
         unsafe {
@@ -379,7 +379,7 @@ impl BackgroundClicker {
         crate::stop::ensure_not_stopped()?;
         let hwnd = hwnd_of(hwnd_raw);
         unsafe {
-            if !IsWindow(hwnd).as_bool() {
+            if !IsWindow(Some(hwnd)).as_bool() {
                 return Err(CoreError::WindowGone);
             }
             let scan = (MapVirtualKeyW(vk as u32, MAPVK_VK_TO_VSC) & 0xFF) as isize;
@@ -390,7 +390,7 @@ impl BackgroundClicker {
             let base = (scan << 16) | 1 | (ext << 24);
             let down = LPARAM(base);
             let up = LPARAM(base | (1 << 30) | (1 << 31));
-            PostMessageW(hwnd, WM_KEYDOWN, WPARAM(vk as usize), down)
+            PostMessageW(Some(hwnd), WM_KEYDOWN, WPARAM(vk as usize), down)
                 .map_err(|e| CoreError::ComInit(format!("PostMessage KEYDOWN: {e}")))?;
             // We post directly (no message pump to run TranslateMessage), so EDIT
             // controls won't insert \r/\t or delete-on-backspace from WM_KEYDOWN
@@ -402,10 +402,10 @@ impl BackgroundClicker {
                 _ => None,
             };
             if let Some(c) = ch {
-                PostMessageW(hwnd, WM_CHAR, WPARAM(c as usize), LPARAM(1))
+                PostMessageW(Some(hwnd), WM_CHAR, WPARAM(c as usize), LPARAM(1))
                     .map_err(|e| CoreError::ComInit(format!("PostMessage CHAR (key): {e}")))?;
             }
-            PostMessageW(hwnd, WM_KEYUP, WPARAM(vk as usize), up)
+            PostMessageW(Some(hwnd), WM_KEYUP, WPARAM(vk as usize), up)
                 .map_err(|e| CoreError::ComInit(format!("PostMessage KEYUP: {e}")))?;
         }
         Ok(())
@@ -417,12 +417,12 @@ impl BackgroundClicker {
         crate::stop::ensure_not_stopped()?;
         let hwnd = hwnd_of(hwnd_raw);
         unsafe {
-            if !IsWindow(hwnd).as_bool() {
+            if !IsWindow(Some(hwnd)).as_bool() {
                 return Err(CoreError::WindowGone);
             }
             let mut buf = [0u16; 2];
             for unit in ch.encode_utf16(&mut buf).iter() {
-                PostMessageW(hwnd, WM_CHAR, WPARAM(*unit as usize), LPARAM(1))
+                PostMessageW(Some(hwnd), WM_CHAR, WPARAM(*unit as usize), LPARAM(1))
                     .map_err(|e| CoreError::ComInit(format!("PostMessage CHAR: {e}")))?;
             }
         }
@@ -437,7 +437,7 @@ impl BackgroundClicker {
         crate::stop::ensure_not_stopped()?;
         let hwnd = hwnd_of(hwnd_raw);
         unsafe {
-            if !IsWindow(hwnd).as_bool() {
+            if !IsWindow(Some(hwnd)).as_bool() {
                 return Err(CoreError::WindowGone);
             }
             let mut wide: Vec<u16> = text.encode_utf16().collect();
@@ -558,7 +558,7 @@ mod tests {
             RegisterClassW(&wc);
             let h = CreateWindowExW(
                 WINDOW_EX_STYLE(0), class, w!(""), WINDOW_STYLE(0), 0, 0, 0, 0,
-                HWND_MESSAGE, None, inst, None,
+                Some(HWND_MESSAGE), None, Some(inst.into()), None,
             )
             .expect("message-only window");
             tx.send(h.0 as isize).unwrap();
@@ -577,7 +577,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(20));
         }
         unsafe {
-            let _ = PostMessageW(hwnd_of(h), WM_CLOSE, WPARAM(0), LPARAM(0));
+            let _ = PostMessageW(Some(hwnd_of(h)), WM_CLOSE, WPARAM(0), LPARAM(0));
         }
         worker.join().unwrap();
 

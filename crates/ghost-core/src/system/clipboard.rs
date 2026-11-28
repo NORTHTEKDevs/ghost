@@ -1,4 +1,4 @@
-use windows::Win32::Foundation::{GlobalFree, HWND, HGLOBAL};
+use windows::Win32::Foundation::{GlobalFree, HGLOBAL};
 use windows::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, GetClipboardData, OpenClipboard, SetClipboardData,
 };
@@ -11,7 +11,7 @@ const CF_UNICODETEXT: u32 = 13;
 /// Returns empty string if clipboard is empty or does not contain text.
 pub fn get_clipboard() -> Result<String, CoreError> {
     unsafe {
-        OpenClipboard(HWND::default())
+        OpenClipboard(None)
             .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "OpenClipboard" })?;
         let result = match GetClipboardData(CF_UNICODETEXT) {
             Ok(handle) => {
@@ -73,7 +73,7 @@ fn write_clipboard(text: &str) -> Result<(), CoreError> {
     let wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0u16)).collect();
     let byte_len = wide.len() * 2;
     unsafe {
-        OpenClipboard(HWND::default())
+        OpenClipboard(None)
             .map_err(|e| CoreError::Win32 { code: e.code().0 as u32, context: "OpenClipboard" })?;
         EmptyClipboard().map_err(|e| {
             let _ = CloseClipboard();
@@ -85,14 +85,14 @@ fn write_clipboard(text: &str) -> Result<(), CoreError> {
         })?;
         let ptr = GlobalLock(hmem) as *mut u16;
         if ptr.is_null() {
-            let _ = GlobalFree(hmem);
+            let _ = GlobalFree(Some(hmem));
             let _ = CloseClipboard();
             return Err(CoreError::Win32 { code: 0, context: "GlobalLock" });
         }
         std::ptr::copy_nonoverlapping(wide.as_ptr(), ptr, wide.len());
         let _ = GlobalUnlock(hmem);
-        SetClipboardData(CF_UNICODETEXT, windows::Win32::Foundation::HANDLE(hmem.0)).map_err(|e| {
-            let _ = GlobalFree(hmem);
+        SetClipboardData(CF_UNICODETEXT, Some(windows::Win32::Foundation::HANDLE(hmem.0))).map_err(|e| {
+            let _ = GlobalFree(Some(hmem));
             let _ = CloseClipboard();
             CoreError::Win32 { code: e.code().0 as u32, context: "SetClipboardData" }
         })?;

@@ -606,7 +606,6 @@ unsafe extern "system" fn on_foreground(
 /// millisecond after the change instead.
 #[cfg(windows)]
 fn foreground_hook() {
-    use windows::Win32::Foundation::HWND;
     use windows::Win32::UI::Accessibility::SetWinEventHook;
     use windows::Win32::UI::WindowsAndMessaging::{
         DispatchMessageW, GetMessageW, TranslateMessage, EVENT_SYSTEM_FOREGROUND, MSG,
@@ -641,7 +640,7 @@ fn foreground_hook() {
             return;
         }
         let mut msg = MSG::default();
-        while GetMessageW(&mut msg, HWND(std::ptr::null_mut()), 0, 0).as_bool() {
+        while GetMessageW(&mut msg, None, 0, 0).as_bool() {
             let _ = TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }

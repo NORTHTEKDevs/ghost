@@ -364,7 +364,7 @@ pub mod job {
             unsafe {
                 let list = buf.as_mut_ptr() as *mut JOBOBJECT_BASIC_PROCESS_ID_LIST;
                 let ok = QueryInformationJobObject(
-                    self.0,
+                    Some(self.0),
                     JobObjectBasicProcessIdList,
                     list as *mut core::ffi::c_void,
                     (buf.len() * 8) as u32,
@@ -398,8 +398,8 @@ pub mod job {
         let Some(Some(job)) = SERVER_JOB.get() else { return false };
         unsafe {
             let Ok(p) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else { return false };
-            let mut inside = windows::Win32::Foundation::BOOL(0);
-            let ok = IsProcessInJob(p, job.0, &mut inside).is_ok();
+            let mut inside = windows::core::BOOL(0);
+            let ok = IsProcessInJob(p, Some(job.0), &mut inside).is_ok();
             let _ = CloseHandle(p);
             ok && inside.as_bool()
         }
@@ -708,7 +708,7 @@ fn spawn_on_desktop(exe: &Path, args: &[String], desktop: &str) -> Result<(u32, 
         // open (see the plain spawn above for why that matters).
         CreateProcessW(
             None,
-            PWSTR(cmd_w.as_mut_ptr()),
+            Some(PWSTR(cmd_w.as_mut_ptr())),
             None,
             None,
             false,
@@ -815,7 +815,8 @@ pub async fn attach(port: u16) -> Result<LaunchedBrowser> {
 /// raise the window above what the user is looking at.
 #[cfg(windows)]
 fn move_browser_offscreen(pid: u32) {
-    use windows::Win32::Foundation::{BOOL, HWND, LPARAM, TRUE};
+    use windows::Win32::Foundation::{HWND, LPARAM, TRUE};
+    use windows::core::BOOL;
     use windows::Win32::UI::WindowsAndMessaging::{
         EnumWindows, GetWindowThreadProcessId, IsWindowVisible, SetWindowPos, HWND_BOTTOM,
         SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER,
@@ -829,7 +830,7 @@ fn move_browser_offscreen(pid: u32) {
         if pid == want_pid && IsWindowVisible(hwnd).as_bool() {
             let _ = SetWindowPos(
                 hwnd,
-                HWND_BOTTOM,
+                Some(HWND_BOTTOM),
                 -32000,
                 -32000,
                 0,

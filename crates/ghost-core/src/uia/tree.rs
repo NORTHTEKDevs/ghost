@@ -2,7 +2,8 @@ use super::element::{role_id_to_name, ElementDescriptor, UiaElement, INTERACTIVE
 use crate::error::CoreError;
 use crate::focus;
 use windows::Win32::Foundation::POINT;
-use windows::Win32::Foundation::{BOOL, FALSE, HWND, LPARAM, RECT, TRUE, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, RECT, TRUE, WPARAM};
+use windows::core::BOOL;
 use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
 use windows::Win32::UI::Accessibility::*;
 use windows::Win32::UI::WindowsAndMessaging::WindowFromPoint;
@@ -919,10 +920,10 @@ pub fn ensure_foreground(hwnd_raw: isize, timeout_ms: u64) -> Result<bool, CoreE
         let attached_tgt = tgt_tid != cur_tid && tgt_tid != 0 && tgt_tid != fg_tid;
 
         if attached_fg {
-            let _ = AttachThreadInput(cur_tid, fg_tid, TRUE);
+            let _ = AttachThreadInput(cur_tid, fg_tid, true);
         }
         if attached_tgt {
-            let _ = AttachThreadInput(cur_tid, tgt_tid, TRUE);
+            let _ = AttachThreadInput(cur_tid, tgt_tid, true);
         }
 
         // A minimized window can't receive foreground - restore it first.
@@ -935,10 +936,10 @@ pub fn ensure_foreground(hwnd_raw: isize, timeout_ms: u64) -> Result<bool, CoreE
 
         // Detach only threads we attached.
         if attached_fg {
-            let _ = AttachThreadInput(cur_tid, fg_tid, FALSE);
+            let _ = AttachThreadInput(cur_tid, fg_tid, false);
         }
         if attached_tgt {
-            let _ = AttachThreadInput(cur_tid, tgt_tid, FALSE);
+            let _ = AttachThreadInput(cur_tid, tgt_tid, false);
         }
 
         let start = std::time::Instant::now();
@@ -1045,7 +1046,7 @@ pub fn send_to_back(hwnd_raw: isize) -> bool {
     unsafe {
         SetWindowPos(
             hwnd,
-            HWND_BOTTOM,
+            Some(HWND_BOTTOM),
             0,
             0,
             0,
@@ -1127,7 +1128,7 @@ fn apply_window_state(hwnd: HWND, state: WindowState, vanished: bool) {
         let fg_before = GetForegroundWindow();
         match state {
             WindowState::Close => {
-                let _ = PostMessageW(hwnd, WM_CLOSE, WPARAM(0), LPARAM(0));
+                let _ = PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0));
             }
             WindowState::Restore if vanished => {
                 let _ = ShowWindow(hwnd, SW_SHOWNA);

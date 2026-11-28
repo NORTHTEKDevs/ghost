@@ -36,4 +36,5 @@ harness = false
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true }
-windows-core = "0.58"
+windows-core = "0.62"
+windows-future = "0.3"
