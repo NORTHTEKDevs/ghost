@@ -1,10 +1,6 @@
 <div align="center">
 
-<img src="assets/icon.png" alt="" width="88" height="88">
-
-# Ghost
-
-**Lets AI agents use the apps on your computer, in the background, and proves every action worked.**
+<img src="assets/banner.png" width="880" alt="Ghost. AI agents use the apps on your computer, in the background. Every action verified. Below, the receipt every action returns: verified: true, your foreground: 0 changes.">
 
 [![CI](https://github.com/NORTHTEKDevs/ghost/actions/workflows/ci.yml/badge.svg)](https://github.com/NORTHTEKDevs/ghost/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/NORTHTEKDevs/ghost?color=blue)](https://github.com/NORTHTEKDevs/ghost/releases/latest)
@@ -17,11 +13,10 @@
 <p align="center">
   <a href="assets/demo.gif"><img src="assets/demo-stacked.gif" width="520" alt="The run's result first: an agent's second click on a button returns verified: true, verified_by: title, focus_preserved: true and cursor_preserved: true, Ghost's screenshot shows the window title counting the click, and the user's foreground window recorded 0 changes. Then the run from the start: Ghost launches the app on its hidden desktop, types into a field and clicks a button, each call verified."></a>
   <br>
-  <sub>Recorded on Ghost's hidden desktop, not drawn: <a href="scripts/demo-capture.mjs">script</a> · <a href="assets/demo.gif">wide version</a></sub>
+  An agent drives an app on Ghost's hidden desktop, never on your screen.
+  Recorded, not drawn: <a href="scripts/demo-capture.mjs">the recording script</a>,
+  <a href="assets/demo.gif">full-width recording</a>.
 </p>
-
-An agent drives an app that never appears on your screen. Every call comes back
-`verified: true`, and your foreground window records 0 changes.
 
 Ghost is an [MCP](https://modelcontextprotocol.io) server, a CLI and a local
 REST API. It gives an agent the operating system's own control surface: the
@@ -40,18 +35,18 @@ desktop you never see, and the focus policy is locked so an agent cannot
 decide to take your mouse; only you can unlock it, in the server's config.
 
 **Every action is verified.** After acting, Ghost re-reads the control or the
-screen and returns `verified: true` only when the change really happened; a
+screen and returns <code>verified:&nbsp;true</code> only when the change really happened; a
 call it cannot complete fails with an error that says why.
 
-- **Measured, typing:** 2,949 of about 2,950 keystrokes a person typed during
-  six agent runs stayed in their window, and a 160-action soak lost focus 0
-  times ([how, and the one that strayed](docs/background-mode.md#when-an-app-takes-the-foreground-itself)).
-- **Measured, verification:** 14 of 14 benchmark tasks passed when scored by
-  re-observing the app, and the soak had 0 unverified results
-  ([benchmarks](docs/benchmarks.md)).
+<p align="center">
+  <img src="assets/proof.png" width="880" alt="Measured: 2,949 of about 2,950 keystrokes a person typed during six agent runs stayed in their window. 0 focus losses in a 160-action soak, with 0 unverified results. 14 of 14 benchmark tasks passed when scored by re-observing the app.">
+</p>
 
-Check both on your own hardware with `ghost verify`, which exits non-zero if a
-claim does not hold. And you stay in charge: see the [safety model](#safety-model).
+How these were measured: [background mode](docs/background-mode.md#when-an-app-takes-the-foreground-itself)
+(including the one keystroke that strayed) and [benchmarks](docs/benchmarks.md).
+To check both claims on your own hardware, run the `ghost verify` command from
+step 3; it exits non-zero if a claim does not hold. And you stay in charge: see
+the [safety model](#safety-model).
 
 ## Quick start
 
@@ -70,19 +65,22 @@ Install from file*. Done; skip to step 3.
 - Windows: `ghost-windows-x64.mcpb`
 - Linux: `ghost-linux-x86_64.mcpb`
 
-**Windows** (PowerShell), one line:
+**Windows** (PowerShell):
 
 ```powershell
-irm https://raw.githubusercontent.com/NORTHTEKDevs/ghost/main/scripts/install-windows.ps1 | iex
+$raw = "https://raw.githubusercontent.com" +
+  "/NORTHTEKDevs/ghost/main/scripts"
+irm "$raw/install-windows.ps1" | iex
 ```
 
 **Linux** (x86_64):
 
 ```bash
-url=https://github.com/NORTHTEKDevs/ghost/releases/latest/download
-mkdir -p ghost-download
-curl -L "$url/ghost-linux-x86_64.tar.gz" | tar -xz -C ghost-download
-./ghost-download/install.sh
+repo=https://github.com/NORTHTEKDevs/ghost
+dl=$repo/releases/latest/download
+mkdir -p ghost && cd ghost
+curl -L $dl/ghost-linux-x86_64.tar.gz |
+  tar -xz && ./install.sh
 ```
 
 Both installers, with no administrator rights:
@@ -106,33 +104,42 @@ the Claude Code registration:
 
 ```powershell
 $dir = "$env:LOCALAPPDATA\Programs\ghost"
-$url = "https://github.com/NORTHTEKDevs/ghost/releases/latest/download"
-Invoke-WebRequest "$url/ghost-windows-x64.zip" -OutFile ghost.zip
-Expand-Archive ghost.zip -DestinationPath $dir -Force
+$dl = "https://github.com/NORTHTEKDevs" +
+  "/ghost/releases/latest/download"
+iwr "$dl/ghost-windows-x64.zip" `
+  -OutFile ghost.zip
+Expand-Archive ghost.zip $dir -Force
 Get-ChildItem $dir | Unblock-File
 & "$dir\ghost.exe" doctor
 ```
 
 Then add `$dir` to your user PATH. Checksums, provenance, SmartScreen and
-building from source: [docs/install.md](docs/install.md).
+building from source: [install guide](docs/install.md).
 
 </details>
 
 ### 2. Connect your client
 
 **Claude Code** is already connected if the `claude` CLI was installed when
-you ran the installer; `claude mcp list` shows `ghost`. To add it yourself:
+you ran the installer. To check, or to add it yourself:
+
+```bash
+claude mcp list
+```
 
 **Windows** (PowerShell):
 
 ```powershell
-claude mcp add ghost --scope user -- "$env:LOCALAPPDATA\Programs\ghost\ghost-mcp.exe"
+$exe = "$env:LOCALAPPDATA\Programs" +
+  "\ghost\ghost-mcp.exe"
+claude mcp add ghost -s user -- $exe
 ```
 
 **Linux**:
 
 ```bash
-claude mcp add ghost --scope user -- "$HOME/.local/bin/ghost-mcp"
+claude mcp add ghost -s user \
+  -- "$HOME/.local/bin/ghost-mcp"
 ```
 
 The other clients take the full path to `ghost-mcp` in a JSON or TOML file.
@@ -222,7 +229,9 @@ the [MCP registry](https://registry.modelcontextprotocol.io).
 Windows (PowerShell):
 
 ```powershell
-(Resolve-Path "$env:LOCALAPPDATA\Programs\ghost\ghost-mcp.exe").Path.Replace('\', '/')
+$exe = "$env:LOCALAPPDATA\Programs" +
+  "\ghost\ghost-mcp.exe"
+$exe.Replace('\', '/')
 ```
 
 Linux: `readlink -f ~/.local/bin/ghost-mcp`
@@ -252,7 +261,7 @@ The loop is look, act, confirm:
    its name, role, state and position. `mode=text` returns the readable text
    instead, about ten times cheaper than an image.
 2. `ghost_act name="Save" action="click"` drives the control in the background
-   and returns `verified: true` only when the change shows.
+   and returns <code>verified:&nbsp;true</code> only when the change shows.
 3. `ghost_screenshot` returns pixels when a chart or canvas needs the model's
    own eyes.
 
@@ -260,7 +269,7 @@ Around that loop: `ghost_window` launches, lists and closes windows (on the
 hidden desktop by default), `ghost_wait` and `ghost_assert` turn "did it work"
 into a check, `ghost_shell` runs builds, git and scripts, and the
 `ghost_browser_*` / `ghost_tab_*` tools drive browser tabs over the DevTools
-protocol. All 54 tools with every parameter: [docs/tools.md](docs/tools.md).
+protocol. All 54 tools with every parameter: [tool reference](docs/tools.md).
 
 Not using an agent? The same engine is a CLI and a local REST API:
 
@@ -273,7 +282,7 @@ curl http://127.0.0.1:7878/list-windows
 
 Window anchoring, what every response promises, intents (JSON flows with
 retries and conditions), the HTTP API and the Rust SDK:
-[docs/usage.md](docs/usage.md). Runnable scripts: [`examples/`](examples).
+[using Ghost](docs/usage.md). Runnable scripts: [examples](examples).
 
 
 ## Safety model
@@ -285,13 +294,13 @@ control back.
 - **Emergency stop.** <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>G</kbd> halts every
   acting call in every Ghost process, releases held keys and ends programs
   Ghost's shells started. Read-only calls keep answering.
-- **Human-only resume.** A stop you raised can only be lifted by you:
+- **Human-only resume.** Only you can lift a stop you raised: type
+  `ghost reset` in a terminal, or press
   <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> on the real
-  keyboard, or `ghost reset` typed in a terminal. An agent's `ghost_reset` is
-  refused.
+  keyboard. An agent's `ghost_reset` is refused.
 - **Background lock.** The focus policy is locked to `background`, so an agent
   cannot take your mouse, keyboard or foreground window. Only the operator
-  unlocks it (`GHOST_FOCUS_LOCK=off`).
+  unlocks it, with `GHOST_FOCUS_LOCK=off`.
 - **Shell switch.** `ghost_shell` is on by default and has your account's
   rights. `GHOST_SHELL=off` refuses it and blocks launching shells and script
   hosts; `GHOST_LAUNCH_ALLOW` turns launching into an allowlist.
@@ -306,9 +315,8 @@ control back.
   agent's own model reads what Ghost returns. The only outbound traffic is the
   optional vision tier, to an endpoint you configure.
 
-Details and limits: [docs/security-model.md](docs/security-model.md). How
-background control works and what was measured:
-[docs/background-mode.md](docs/background-mode.md).
+Details and limits: [security model](docs/security-model.md). How background
+control works and what was measured: [background mode](docs/background-mode.md).
 
 ## Platform support
 
@@ -321,39 +329,86 @@ background control works and what was measured:
 
 The focus policy and hidden desktops are Windows features. The browser tools
 need a Chromium-family browser (Chrome, Edge, Brave or Comet). Full matrix:
-[docs/cross-platform.md](docs/cross-platform.md); Linux setup:
-[docs/linux-fedora.md](docs/linux-fedora.md).
+[cross-platform](docs/cross-platform.md); Linux setup:
+[Fedora and other distros](docs/linux-fedora.md).
 
 ## Troubleshooting
 
-**"Windows protected your PC" on first run.** The binaries are not code-signed
-yet. Choose *More info*, then *Run anyway*, or
+<details>
+<summary><code>Windows protected your PC</code> on first run</summary>
+
+The binaries are not code-signed yet. Choose *More info*, then *Run anyway*, or
 [verify the download](docs/install.md#check-where-a-download-came-from) first.
 
-**"ghost: command not found".** Open a new terminal after installing. On Linux,
-add `~/.local/bin` to your `PATH` (the installer prints the line to add).
+</details>
 
-**The Ghost tools do not appear in the client.** Use an absolute path to
-`ghost-mcp`, restart the client, and check that `ghost-mcp --version` prints a
-version.
+<details>
+<summary><code>ghost: command not found</code></summary>
 
-**"element not found".** The error lists the closest names in that window;
-`ghost_see window="..."` shows every control and its name.
+Open a new terminal after installing. On Linux, add `~/.local/bin` to your
+`PATH`; the installer prints the line to add.
 
-**"focus policy is locked".** By design: that action would take your screen.
-Let Ghost start the app (`ghost_window op=launch`) or the browser
-(`ghost_browser_launch`) and drive it there.
+</details>
 
-**"the human stopped Ghost".** Someone pressed the emergency stop. Resume with
-<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> or `ghost reset`.
+<details>
+<summary>The <code>ghost_*</code> tools do not appear in the client</summary>
 
-**Linux: windows have no elements.** Turn on the accessibility bus (step 1) and
-restart the apps; `ghost doctor` checks this.
+Use an absolute path to `ghost-mcp` and restart the client. To check the
+binary itself:
 
-**An antivirus quarantined Ghost.** See [docs/antivirus.md](docs/antivirus.md).
+```bash
+ghost-mcp --version
+```
 
-Still stuck? [Open an issue](https://github.com/NORTHTEKDevs/ghost/issues/new/choose)
-with the output of `ghost doctor`.
+</details>
+
+<details>
+<summary><code>element not found</code></summary>
+
+The error lists the closest names in that window. `ghost_see` with
+`window=` set shows every control and its name.
+
+</details>
+
+<details>
+<summary><code>focus policy is locked</code></summary>
+
+By design: that action would take your screen. Let Ghost start the app
+(`ghost_window op=launch`) or the browser (`ghost_browser_launch`) and drive
+it there.
+
+</details>
+
+<details>
+<summary><code>the human stopped Ghost</code></summary>
+
+Someone pressed the emergency stop. Resume with
+<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd>, or in a terminal:
+
+```bash
+ghost reset
+```
+
+</details>
+
+<details>
+<summary>Linux: windows have no elements</summary>
+
+Turn on the accessibility bus (step 1) and restart the apps. `ghost doctor`
+checks this.
+
+</details>
+
+<details>
+<summary>An antivirus quarantined Ghost</summary>
+
+See the [antivirus notes](docs/antivirus.md).
+
+</details>
+
+Still stuck? Run `ghost doctor` and
+[open an issue](https://github.com/NORTHTEKDevs/ghost/issues/new/choose) with
+its output.
 
 ## FAQ
 
@@ -365,8 +420,8 @@ there.
 **How is this different from Playwright or Computer Use?** Playwright drives
 web pages; Ghost drives the desktop (and tabs too). Screenshot-based computer
 use guesses coordinates from pixels and takes your screen; Ghost acts on named
-controls in the background and verifies each action. See
-[docs/comparison.md](docs/comparison.md).
+controls in the background and verifies each action. See the
+[comparison](docs/comparison.md).
 
 **Can several agents use it at once?** Yes. Calls run in parallel, and a
 second Ghost process runs alongside the first without contending for the mouse.
