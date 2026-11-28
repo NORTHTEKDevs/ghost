@@ -3821,9 +3821,16 @@ mod abort_cleanup_tests {
     #[tokio::test]
     async fn an_abort_mid_paste_still_restores_the_clipboard() {
         let log: Log = Arc::default();
-        // Dropped during the 20 ms settle after the clipboard was set.
-        let r = tokio::time::timeout(Duration::from_millis(5), fake_paste(&log, Some("human text"))).await;
-        assert!(r.is_err(), "the fake paste should still have been parked");
+        // Poll once, so the future parks in the 20 ms settle after the
+        // clipboard was set, then drop it. A 5 ms `timeout` raced the settle:
+        // on a slow Windows runner the thread overslept both deadlines, the
+        // inner future ran on to ctrl+v before the timeout fired, and the
+        // test failed although the code was right.
+        use std::future::Future;
+        let mut paste = Box::pin(fake_paste(&log, Some("human text")));
+        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(paste.as_mut().poll(&mut cx).is_pending(), "the fake paste should park in the settle");
+        drop(paste);
         assert_eq!(*log.lock().unwrap(), ["get", "set automation text", "restore human text"]);
     }
 
