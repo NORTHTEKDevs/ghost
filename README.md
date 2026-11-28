@@ -62,7 +62,7 @@ Three steps: install, connect your client, try it.
 Runs on Windows 10 (build 19041+) and 11, and Linux x86_64 (X11 verified,
 Wayland not yet). No macOS yet: see [platform support](#platform-support).
 
-**Claude Desktop, one click:** from the
+**Claude Desktop**, one click: from the
 [latest release](https://github.com/NORTHTEKDevs/ghost/releases/latest),
 download the bundle for your system and open it in *Settings > Extensions >
 Install from file*. Done; skip to step 3.
@@ -282,16 +282,29 @@ Anything that can reach a Ghost server can control the desktop as you, so
 Ghost is built around who can reach it, what an agent may do, and how you take
 control back.
 
-| Guard | What it does |
-| :--- | :--- |
-| **Emergency stop** | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>G</kbd> halts every acting call in every Ghost process, releases held keys and ends programs Ghost's shells started. Read-only calls keep answering. |
-| **Human-only resume** | Only you lift a stop you raised: <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> on the real keyboard, or `ghost reset` typed in a terminal. An agent's `ghost_reset` is refused. |
-| **Background lock** | The focus policy is locked to `background`, so an agent cannot take your mouse, keyboard or foreground window. Only the operator unlocks it (`GHOST_FOCUS_LOCK=off`). |
-| **Shell switch** | `ghost_shell` is on by default and has your account's rights. `GHOST_SHELL=off` refuses it and blocks launching shells and script hosts; `GHOST_LAUNCH_ALLOW` turns launching into an allowlist. |
-| **SSRF guard** | `ghost_http_get` and `ghost_http_post` resolve the host first, refuse loopback, private, link-local and reserved addresses, and ignore proxy settings. Browser tabs accept http(s) only. |
-| **Stop scopes** | `ghost_stop scope=process` stops one server; `everywhere` (the default) stops them all. An unknown scope is rejected. |
-| **Local transports** | `ghost-mcp` speaks stdio and opens no port. `ghost-http` binds loopback only and refuses requests from web pages. |
-| **No telemetry** | No vision API key either: your agent's own model reads what Ghost returns. The only outbound traffic is the optional vision tier, to an endpoint you configure. |
+- **Emergency stop.** <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>G</kbd> halts every
+  acting call in every Ghost process, releases held keys and ends programs
+  Ghost's shells started. Read-only calls keep answering.
+- **Human-only resume.** A stop you raised can only be lifted by you:
+  <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> on the real
+  keyboard, or `ghost reset` typed in a terminal. An agent's `ghost_reset` is
+  refused.
+- **Background lock.** The focus policy is locked to `background`, so an agent
+  cannot take your mouse, keyboard or foreground window. Only the operator
+  unlocks it (`GHOST_FOCUS_LOCK=off`).
+- **Shell switch.** `ghost_shell` is on by default and has your account's
+  rights. `GHOST_SHELL=off` refuses it and blocks launching shells and script
+  hosts; `GHOST_LAUNCH_ALLOW` turns launching into an allowlist.
+- **SSRF guard.** `ghost_http_get` and `ghost_http_post` resolve the host first,
+  refuse loopback, private, link-local and reserved addresses, and ignore proxy
+  settings. Browser tabs accept http(s) only.
+- **Stop scopes.** `ghost_stop scope=process` stops one server; `everywhere`
+  (the default) stops them all. An unknown scope is rejected.
+- **Local transports only.** `ghost-mcp` speaks stdio and opens no port.
+  `ghost-http` binds loopback only and refuses requests from web pages.
+- **Nothing leaves your machine.** No telemetry and no vision API key: your
+  agent's own model reads what Ghost returns. The only outbound traffic is the
+  optional vision tier, to an endpoint you configure.
 
 Details and limits: [docs/security-model.md](docs/security-model.md). How
 background control works and what was measured:
@@ -301,9 +314,9 @@ background control works and what was measured:
 
 | Platform | Status |
 | :--- | :--- |
-| **Windows 10, 11** | Full and verified (Windows 10 build 19041 or later). UI Automation, posted window messages, hidden desktops, DXGI/GDI capture. |
-| **Linux, X11** | Functional, verified by live CI tests against a real GTK app. AT-SPI2, XTEST, X11 capture. |
-| **Linux, Wayland** | Implemented, not yet verified on hardware. Same AT-SPI2 layer; input and capture through portals or uinput. Run `ghost doctor` first and please file what you find. |
+| **Windows** | Full and verified on 10 (build 19041+) and 11. UI Automation, posted window messages, hidden desktops, DXGI/GDI capture. |
+| **Linux&nbsp;X11** | Functional, verified by live CI tests against a real GTK app. AT-SPI2, XTEST, X11 capture. |
+| **Linux&nbsp;Wayland** | Implemented, not yet verified on hardware. Same AT-SPI2 layer; input and capture through portals or uinput. Run `ghost doctor` first and please file what you find. |
 | **macOS** | Not yet. A compiling scaffold with an implementation map. |
 
 The focus policy and hidden desktops are Windows features. The browser tools
