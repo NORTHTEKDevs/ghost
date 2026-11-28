@@ -1296,9 +1296,13 @@ async fn dispatch_cdp(
                     tab.type_text(&e.selector, value, clear).await.map_err(|x| x.to_string())?;
                     // Read back through the DOM: the value the page holds is the
                     // only honest verification of a type.
-                    let got = tab.value_of(&e.selector).await.unwrap_or_default();
-                    let ok = got.contains(value);
-                    (Some(ok), if ok { None } else { Some(format!("read-back {:?} does not contain the typed text; the field may be controlled by a framework that rewrites it", got.chars().take(80).collect::<String>())) })
+                    match tab.value_of(&e.selector).await {
+                        Ok(got) => {
+                            let ok = got.contains(value);
+                            (Some(ok), if ok { None } else { Some(format!("read-back {:?} does not contain the typed text; the field may be controlled by a framework that rewrites it", got.chars().take(80).collect::<String>())) })
+                        }
+                        Err(x) => (Some(false), Some(format!("could not read the field back to verify the typed text: {x}"))),
+                    }
                 }
                 other => return Err(format!("ghost_act: unknown action '{other}' (use click|type|double_click|right_click|hover)")),
             };
@@ -1384,13 +1388,8 @@ async fn dispatch_cdp(
                     let expected = p["text"].as_str().ok_or("ghost_assert: value-equals/value-contains requires 'text'")?;
                     let by = parse_by(p)?;
                     let (e, _) = session.cdp_find(r, &by, None).await.map_err(|e| format!("assert failed: element not found - {e}"))?;
-                    let actual = r.tab.value_of(&e.selector).await.unwrap_or_default();
-                    let passed = if predicate == "value-equals" { actual == expected } else { actual.contains(expected) };
-                    if passed {
-                        Ok(json!({ "ok": true, "predicate": predicate, "passed": true, "value": actual }))
-                    } else {
-                        Err(format!("assert failed: predicate={predicate}, expected={expected:?}, actual={actual:?}"))
-                    }
+                    let read = r.tab.value_of(&e.selector).await.map_err(|x| x.to_string());
+                    assert_value(predicate, expected, read)
                 }
                 "text-present" | "text-absent" => {
                     let needle = p["text"].as_str().ok_or("ghost_assert: text-present/text-absent requires 'text'")?;
@@ -4798,6 +4797,46 @@ mod stop_gate_tests {
         assert_eq!(code, -32004);
         let hint = hint.unwrap();
         assert!(!hint.contains("ghost_reset"), "{hint}");
+    }
+}
+
+/// ghost_assert value-equals/value-contains on a value read from the page. A
+/// failed read is an assertion error, never an empty value: `""` would make
+/// `value-equals text=""` pass on a dead tab.
+fn assert_value(predicate: &str, expected: &str, read: Result<String, String>) -> Result<Value, String> {
+    let actual = read.map_err(|e| format!("assert failed: could not read the value ({predicate}) - {e}"))?;
+    let passed = if predicate == "value-equals" { actual == expected } else { actual.contains(expected) };
+    if passed {
+        Ok(json!({ "ok": true, "predicate": predicate, "passed": true, "value": actual }))
+    } else {
+        Err(format!("assert failed: predicate={predicate}, expected={expected:?}, actual={actual:?}"))
+    }
+}
+
+#[cfg(test)]
+mod assert_value_tests {
+    use super::assert_value;
+
+    /// A value that cannot be read (the tab died, CDP timed out, the element
+    /// went away between find and read) is not an empty value: an assertion
+    /// that the field is empty must not pass on it.
+    #[test]
+    fn a_failed_read_never_passes() {
+        for predicate in ["value-equals", "value-contains"] {
+            let e = assert_value(predicate, "", Err("cdp timeout".into())).expect_err(predicate);
+            assert!(e.starts_with("assert failed: could not read the value"), "{e}");
+            assert!(e.contains("cdp timeout"), "{e}");
+        }
+    }
+
+    #[test]
+    fn a_read_value_is_compared() {
+        assert!(assert_value("value-equals", "", Ok(String::new())).is_ok());
+        assert!(assert_value("value-equals", "abc", Ok("abc".into())).is_ok());
+        assert!(assert_value("value-contains", "b", Ok("abc".into())).is_ok());
+        let e = assert_value("value-equals", "abc", Ok("abd".into())).unwrap_err();
+        assert!(e.contains("expected=\"abc\"") && e.contains("actual=\"abd\""), "{e}");
+        assert!(assert_value("value-contains", "x", Ok("abc".into())).is_err());
     }
 }
 
