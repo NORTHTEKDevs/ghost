@@ -47,7 +47,6 @@ run; the rest are listed with what blocks them.
 |------|-------------------------|----------|
 | MCP tool annotations (`readOnlyHint`, `destructiveHint`, `openWorldHint`), `title`, `outputSchema`/`structuredContent`, protocol version 2024-11-05 | Changes `tools/list`; some clients auto-approve on `readOnlyHint`, so the labels are a security call. The Observe/Act/Control table at `main.rs:926` is a ready source for `readOnlyHint`. Glama scores "Disambiguation 3/5" partly on this | `crates/ghost-mcp/src/main.rs:2011,4210`; no `annotations` anywhere in `crates/` |
 | Mark untrusted screen/page/clipboard text and add server `instructions` saying it is data | Changes result shapes; highest-impact prompt-injection defence while `ghost_shell` is on by default | `crates/ghost-mcp/src/ext.rs:203-220`; `main.rs:2013` |
-| ghost-http authentication (per-start token file or named pipe with a DACL) | Changes how every HTTP client connects; today any local process that sends `Host: 127.0.0.1` drives the desktop | `crates/ghost-http/src/main.rs:389-406` |
 | Human stop event is `EVENT_ALL_ACCESS` for the user, so a process outside the shell job (`ghost_window op=launch`, WMI) can reset it | Needs a design: hotkey owner keeps the stop in memory and re-raises on tamper | `crates/ghost-core/src/hotkey.rs:168-179,256-286`; `crates/ghost-session/src/hidden.rs:324-326`; `docs/security-model.md:80` |
 | Tab navigation to link-local/private hosts (e.g. 169.254.169.254) | Blocking it changes what tabs may load (local dev servers are a real use) | `crates/ghost-browser/src/policy.rs:3-25` |
 | Page scripts keep running after a stop | Needs a stop hook into Ghost-owned tabs (`Runtime.terminateExecution` / about:blank) and a stance on attached browsers | `crates/ghost-browser/src/tab.rs:171-174` |
@@ -79,6 +78,13 @@ Follow-up found while doing item 6: the `ghost_shell op=open/read` session
 reader also accumulates a command's whole output until its sentinel line.
 
 ## Notes
+
+- Decided 2026-11-27 (Kristian): ghost-http stays unauthenticated; no token
+  or named-pipe auth will be added. It remains loopback-only with the
+  Host/Origin checks described in docs/security-model.md.
+- CI flake seen on PR #33: `ghost-browser/tests/tab_wait.rs:41` failed with
+  `DevToolsTimeout { ms: 20000 }` (the runner's headless browser never opened
+  DevTools); unrelated to the change, passed on re-run.
 
 - Sound on inspection, not re-reported: ghost-http binds loopback only and
   checks Host/Origin; every tool passes the stop gate (`main.rs:1028`); an
