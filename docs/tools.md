@@ -34,6 +34,8 @@ Windows and Linux. Look, act, wait, assert, manage windows, run commands.
 
 Describe a window's UI as elements {name, role, rect}. Target = window= (title substring; becomes the session anchor) or the current anchor; with neither, the human's foreground window and the response says so (target.source). Never focuses or raises anything. mode=full (default whenever a window is targeted: scoped walk, works on covered windows and hidden-desktop apps), mode=fast (foreground-only quick path, used only when nothing is targeted), mode=text (READ the visible text - the cheapest way to read content), mode=delta (changed elements since since_seq), mode=marks (DEBUG Set-of-Marks image of the target window), mode=selection (selected text of a name/role element in the target window). Any other mode is an invalid-params error. Elements capped at 150 (limit); text at 20000 chars.
 
+**See a window's controls or text**: read-only, idempotent.
+
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `limit` | integer |  | Max elements (default 150) or chars for mode=text (default 20000); 0 = unlimited elements |
@@ -46,6 +48,8 @@ Describe a window's UI as elements {name, role, rect}. Target = window= (title s
 ### `ghost_find`
 
 Locate an element (name|role|description|text) and return center (always), rect (has_rect=true for UIA/cache hits), source, confidence, name, escalated (true = a network VLM call was paid). Target window = window= (anchored) or the session anchor; else the foreground. Under the default background policy nothing is focused or raised: the lookup is scoped to the window's own UIA subtree, so it works while the window is covered or lives on a hidden desktop.
+
+**Find an element**: read-only, idempotent.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -60,6 +64,8 @@ Locate an element (name|role|description|text) and return center (always), rect 
 ### `ghost_act`
 
 Find an element and act on it in one call. Target window = window= (anchored) or the session anchor. Under the default background policy the window is NEVER raised and the cursor never moves: click = UIA Invoke or a posted click, type = ValuePattern / WM_SETTEXT with read-back, and the response reports {verified, focus_preserved, cursor_preserved}. Works on covered windows, Chromium/Electron pages and hidden-desktop apps. If a windowless control's own provider activates its window anyway (Chromium does on SetValue), the foreground is handed straight back to the window the human had and the response carries focus_guard. Identify the element by name|role (description needs vision and a screen-facing window). verified=false = dispatched but nothing visibly changed: ghost_see before retrying. background=true is accepted for compatibility; it is already the default behaviour.
+
+**Click or type on an element**: may change or remove data.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -78,6 +84,8 @@ Find an element and act on it in one call. Target window = window= (anchored) or
 
 Send a key to a window WITHOUT focusing it. Target = window= (anchored) or the session anchor. Under the default background policy the key is POSTED to the window's focused control: single keys (Enter, Tab, F5, arrows, any character) and the editing shortcuts Ctrl+C/X/V/A/Z (sent as semantic messages). Other modifier combos have no background path and error naming the alternative. For text prefer ghost_act action=type (read-back verified). Hold/release keys='down:Shift' / 'up:Shift' exist only under a foreground policy.
 
+**Press keys**: may change or remove data.
+
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `background` | boolean |  | Compatibility flag: background posting is already the default. |
@@ -88,6 +96,8 @@ Send a key to a window WITHOUT focusing it. Target = window= (anchored) or the s
 
 Structured, agent-planning view of a window's UI: every element with a stable id, name, role, rect, center, enabled flag, actionable flag, and the actions it accepts (click/type). `actionable` = interactable role AND currently enabled - so a greyed-out button reads actionable:false. Far cheaper than a screenshot to reason over; plan here, then ghost_act by name/role. Params: window? (title substring; omitted = foreground), actionable_only? (only enabled interactable elements), limit?.
 
+**Snapshot a window with element ids**: read-only, idempotent.
+
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `actionable_only` | boolean |  | Return only interactable elements (buttons/edits/links/...) - cuts noise for planning |
@@ -97,6 +107,8 @@ Structured, agent-planning view of a window's UI: every element with a stable id
 ### `ghost_scroll`
 
 Scroll. direction: up/down/left/right, amount = notches (default 3). Target = window= (anchored) or the session anchor: under the default background policy the wheel is POSTED to that window (pointer never moves, window never raised; works on covered and hidden-desktop windows). 'Until' mode: until_name/until_role scrolls repeatedly until that element is present, up to max_scrolls; returns found. Coord mode (x/y at the real pointer) needs a foreground policy.
+
+**Scroll**: changes state, not destructive.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -113,6 +125,8 @@ Scroll. direction: up/down/left/right, amount = notches (default 3). Target = wi
 
 Click-hold at a start point, move to an end point, release. Each endpoint may be raw coords (from_x/from_y, to_x/to_y) OR an element (from_name/from_role, to_name/to_role) resolved to its center - e.g. drag a list row onto another, or a slider handle.
 
+**Drag**: may change or remove data.
+
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `from_name` | string |  | Start element name (instead of from_x/y) |
@@ -127,6 +141,8 @@ Click-hold at a start point, move to an end point, release. Each endpoint may be
 ### `ghost_wait`
 
 Unified wait - use it instead of sleeping. for=element: an element (name/role) appears or disappears in the target window; returns the moment it does. for=value: an element's VALUE equals/contains/changes (forms, async fields, 'wait until the total updates'). for=navigate: load url in a browser window WITHOUT raising it - sets the address bar over UIA, presses Enter, returns when the window title changes (response: title_before, title_after, title_changed, ms); only a foreground focus policy takes the old focus-and-type path. for=idle: screen stable. for=text: click a target then wait for text. for=event: next foreground change. for=cond: JSONLogic poll. for=ms: a plain sleep - last resort, it costs its full length every run. Target window for element|value|idle|text|navigate = window= or the session anchor.
+
+**Wait for a condition**: may change or remove data.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -149,6 +165,8 @@ Unified wait - use it instead of sleeping. for=element: an element (name/role) a
 
 Extract structured data from the screen. Strategy: UIA name-matching first, then a single batched VLM call for any fields still unmatched. Returns extracted object, unmatched list, and vlm_attempted flag.
 
+**Query a window's elements**: read-only, idempotent.
+
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `region` | array |  | Optional [left,top,right,bottom] region for VLM screenshot crop |
@@ -158,6 +176,8 @@ Extract structured data from the screen. Strategy: UIA name-matching first, then
 ### `ghost_assert`
 
 Assert a predicate about screen state. Fails (error) if not satisfied. text-present/text-absent: OCR text check. element-exists: element found. value-equals/value-contains: the element's actual value (ValuePattern) equals/contains 'text' - the fill-then-verify check.
+
+**Assert a condition**: read-only, idempotent.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -172,6 +192,8 @@ Assert a predicate about screen state. Fails (error) if not satisfied. text-pres
 
 Execute a declarative step-by-step flow in one round-trip. Each step: {op, ...params}. Op is any lean verb, legacy tool name, or short name (find, click, type, press, click_at, wait...). RETRIES: a failing read-only step is retried up to max_retries; an acting step is NOT retried (its effect may have landed) unless the step sets retry:true; retry:false disables retries for a step; unknown op / missing param errors are never retried. CHAINING: a param value of "${steps.N.path}" is replaced with a field from step N's result before dispatch - e.g. {op:'find',name:'Save'} then {op:'ghost_click_at', x:'${steps.0.center.x}', y:'${steps.0.center.y}'}. A whole-string ref keeps its type (number stays number). SPEED: name the window once; later steps can omit window= because the anchor follows that window by handle through title changes (a stale title still resolves and the response carries title_drift). Wait with {op:'ghost_wait', for:'element'|'value'|'navigate'} rather than for=ms - a fixed sleep costs its full length on every run.
 
+**Run a multi-step flow**: may change or remove data, reaches the network or runs programs.
+
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `json_flow` | string |  | JSON-encoded steps array string |
@@ -183,6 +205,8 @@ Execute a declarative step-by-step flow in one round-trip. Each step: {op, ...pa
 ### `ghost_screenshot`
 
 Capture a screenshot of the window the agent is working in. Target = window= or the session anchor: that window is captured BY HANDLE (works while covered, on a hidden desktop, or via CDP for a routed browser) at max 768px JPEG q=75 (~20-100KB). Only with no anchor does it fall back to the foreground window. Pass name/role to crop to ONE element inside the target, or rect=[l,t,r,b] (great for VLM-in-the-loop checks). full=true: the whole screen at max 1280px JPEG (max_dim=0 = native-res lossless PNG). Always includes size_bytes.
+
+**Take a screenshot**: read-only, idempotent.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -199,6 +223,8 @@ Capture a screenshot of the window the agent is working in. Target = window= or 
 
 Window management across the user's desktop AND Ghost's hidden desktops. op=list: every window (name, pid, hwnd, focused, state, surface=user|hidden) plus the current anchor. op=focus: under the default background policy this ANCHORS the window and does NOT raise it (the anchored verbs drive it without focus); only an operator-unlocked prefer_background/foreground policy raises it. op=anchor: name= sets the anchor, clear=true clears it, no args reports it. op=state: maximize|minimize|restore|close (name+state); under the background policy these never activate the window, so the user's focus stays put (restore is how a minimized window becomes actionable). op=launch: start exe - under the background policy the app starts on a hidden desktop, never on your screen, and is anchored (see target.surface in the response).
 
+**List, launch and manage windows**: may change or remove data.
+
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `clear` | boolean |  | op=anchor: forget the current anchor |
@@ -211,6 +237,8 @@ Window management across the user's desktop AND Ghost's hidden desktops. op=list
 ### `ghost_shell`
 
 Run terminal / PowerShell commands and drive persistent shells. THE way to run builds, git, CLIs, scripts, or open apps from a command line, and to edit files on machines with no file tools. op=run (default): one-shot - spawn shell, run 'cmd', return {output, exit_code, timed_out}. shell=powershell (default) | pwsh | cmd. op=open: start a persistent PowerShell whose variables/cwd/env survive across commands (returns an 'id'). op=send: run 'cmd' in session 'id' (state persists). op=read: drain the rest of a command that hit its timeout (busy=true). op=list: show sessions. op=kill: end a session and every program its commands started. A program a finished op=run started keeps running (until a stop). Output is merged stdout+stderr, tail-capped at 24000 chars. Emergency-stop (ghost_stop / Ctrl+Alt+G) kills a runaway command. To START A NEW CLAUDE CODE SESSION: op=run cmd='Start-Process wt -ArgumentList "pwsh","-NoExit","-Command","claude"', then drive the terminal window with ghost_see / ghost_act / ghost_key. Disabled entirely when GHOST_SHELL=off.
+
+**Run shell commands**: may change or remove data, reaches the network or runs programs.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -225,6 +253,8 @@ Run terminal / PowerShell commands and drive persistent shells. THE way to run b
 
 Clipboard access. op=get (default): read text. op=set: write text.
 
+**Read or set the clipboard**: may change or remove data, idempotent.
+
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `op` | string: `get`, `set` |  | get=read, set=write (default get) |
@@ -234,11 +264,15 @@ Clipboard access. op=get (default): read text. op=set: write text.
 
 Grounding + cache telemetry for debugging flow speed/reliability: which tier is winning (cache/UIA/OCR/VLM), VLM escalation rate, cache hit/miss counts, UIA-mirror stats. Call when a flow is slow or a find is unreliable.
 
+**Server statistics**: read-only, idempotent.
+
 No parameters.
 
 ### `ghost_reset`
 
 Lift a stop raised with ghost_stop, for every Ghost process. A stop the human raised with Ctrl+Alt+G is refused: only the human can lift it, so wait for them.
+
+**Lift a stop an agent raised**: changes state, not destructive, idempotent.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -248,6 +282,8 @@ Lift a stop raised with ghost_stop, for every Ghost process. A stop the human ra
 
 Emergency stop: halt all automation and release held modifier keys.
 
+**Emergency stop**: may change or remove data, idempotent.
+
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `scope` | string: `everywhere`, `process` |  | everywhere (default): every Ghost process in this logon session. process: only this server (used by ghost verify). |
@@ -255,6 +291,8 @@ Emergency stop: halt all automation and release held modifier keys.
 ### `ghost_http_get`
 
 HTTP GET. Returns {status, body}.
+
+**HTTP GET**: read-only, idempotent, reaches the network or runs programs.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -264,6 +302,8 @@ HTTP GET. Returns {status, body}.
 ### `ghost_http_post`
 
 HTTP POST. Returns {status, body}.
+
+**HTTP POST**: may change or remove data, reaches the network or runs programs.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -275,6 +315,8 @@ HTTP POST. Returns {status, body}.
 ### `ghost_session_state`
 
 The window the user is working in (handle + title), the real cursor position, the focus policy and lock, and the interference audit (foreground changes with no human input while a tool was in flight). Call before/after a batch of actions to verify nothing was disturbed; compare foreground_hwnd, since titles change on their own.
+
+**Session state and focus audit**: read-only, idempotent.
 
 No parameters.
 
@@ -306,6 +348,8 @@ Windows and Linux. Drive individual tabs of a Chromium-family browser over its D
 
 Launch an isolated browser for background automation. Each id gets its own process, profile, and DevTools port, so concurrent ghost processes never collide. browser= chrome | comet | edge | brave (default: first installed). mode=headless (invisible, default) | windowed (a real browser window, started on a hidden desktop - never on your screen, never takes focus; use it only for sites that behave differently headless). Never launched on your own desktop: a new Chromium window takes the foreground on creation. Tabs are driven individually via ghost_tab_* without focusing the window or moving the cursor.
 
+**Launch a browser**: changes state, not destructive, reaches the network or runs programs.
+
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `browser` | string: `chrome`, `comet`, `edge`, `brave` |  |  |
@@ -316,6 +360,8 @@ Launch an isolated browser for background automation. Each id gets its own proce
 
 Attach to a browser already running with --remote-debugging-port=<port> (use for the user's own logged-in browser). Ghost never closes a browser it did not start, and drives background tabs without switching the user's active tab.
 
+**Attach to a running browser**: changes state, not destructive, reaches the network or runs programs.
+
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `id` | string |  |  |
@@ -325,6 +371,8 @@ Attach to a browser already running with --remote-debugging-port=<port> (use for
 
 Close a browser ghost launched (attached browsers are only disconnected).
 
+**Close a browser**: may change or remove data, idempotent, reaches the network or runs programs.
+
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `id` | string |  |  |
@@ -332,6 +380,8 @@ Close a browser ghost launched (attached browsers are only disconnected).
 ### `ghost_browser_tabs`
 
 List open tabs with target ids, titles, URLs.
+
+**List a browser's tabs**: read-only, idempotent, reaches the network or runs programs.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -341,11 +391,15 @@ List open tabs with target ids, titles, URLs.
 
 List Chromium-family browsers installed on this machine (chrome, comet, edge, brave).
 
+**List installed browsers**: read-only, idempotent.
+
 No parameters.
 
 ### `ghost_tab_open`
 
 Open a new background tab (never brings the tab or window to the front). Returns its id for the other ghost_tab_* tools. With an http(s) url it waits for the page to load, like ghost_tab_navigate, so the next read sees the page (loaded:true and the url it landed on; loaded:false with a note for a download or an empty reply). A page that fails to load or exceeds timeout_ms (the whole navigation) is an error, and the tab it opened is closed. wait=false answers at once, before the page loads. url must be http://, https:// or about:blank (default); file:, chrome:, data:, javascript: and the like are refused. http(s) to any host including localhost is allowed.
+
+**Open a tab**: changes state, not destructive, reaches the network or runs programs.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -358,6 +412,8 @@ Open a new background tab (never brings the tab or window to the front). Returns
 
 Navigate a tab and wait for load. Runs in a background tab; the user's view never changes. url must be http://, https:// or about:blank; every other scheme (file:, chrome:, data:, javascript:, ftp: ...) is refused. http(s) to any host including localhost is allowed. Returns an error (naming the net:: errorText) when the page fails to load, e.g. DNS failure or refused connection.
 
+**Navigate a tab**: may change or remove data, idempotent, reaches the network or runs programs.
+
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `browser` | string |  |  |
@@ -369,6 +425,8 @@ Navigate a tab and wait for load. Runs in a background tab; the user's view neve
 
 Click an element by CSS selector via a trusted synthetic mouse event inside the tab's renderer. ~1-2ms; no cursor movement; works in a tab that is not in front.
 
+**Click in a tab**: may change or remove data, reaches the network or runs programs.
+
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `browser` | string |  |  |
@@ -379,6 +437,8 @@ Click an element by CSS selector via a trusted synthetic mouse event inside the 
 ### `ghost_tab_type`
 
 Focus an element by CSS selector and type into it. Layout-independent; does not touch the user's keyboard.
+
+**Type in a tab**: may change or remove data, reaches the network or runs programs.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -392,6 +452,8 @@ Focus an element by CSS selector and type into it. Layout-independent; does not 
 
 Send a key (Enter, Tab, ArrowDown, a, ...) to the tab's focused element. modifiers: Alt/Ctrl/Meta/Shift.
 
+**Press a key in a tab**: may change or remove data, reaches the network or runs programs.
+
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `browser` | string |  |  |
@@ -402,6 +464,8 @@ Send a key (Enter, Tab, ArrowDown, a, ...) to the tab's focused element. modifie
 ### `ghost_tab_text`
 
 Visible text of an element, or the whole page when selector is omitted. Prefer over screenshots for reading content.
+
+**Read a tab's text**: read-only, idempotent, reaches the network or runs programs.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -414,6 +478,8 @@ Visible text of an element, or the whole page when selector is omitted. Prefer o
 
 Evaluate a JavaScript expression in the tab and return its value (awaits promises). The serialized result is capped at max_chars; when cut, value is the cut JSON string with truncated:true and original_length.
 
+**Run JavaScript in a tab**: may change or remove data, reaches the network or runs programs.
+
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `browser` | string |  |  |
@@ -425,6 +491,8 @@ Evaluate a JavaScript expression in the tab and return its value (awaits promise
 
 PNG of a tab, rendered by that tab regardless of whether it is in front or focused.
 
+**Screenshot a tab**: read-only, idempotent, reaches the network or runs programs.
+
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `browser` | string |  |  |
@@ -435,6 +503,8 @@ PNG of a tab, rendered by that tab regardless of whether it is in front or focus
 
 Structured list of visible interactive elements with selectors and coordinates. Prefer this over screenshots for deciding what to click.
 
+**Describe a tab's page**: read-only, idempotent, reaches the network or runs programs.
+
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `browser` | string |  |  |
@@ -444,6 +514,8 @@ Structured list of visible interactive elements with selectors and coordinates. 
 ### `ghost_tab_scroll`
 
 Scroll a tab or a scrollable element inside it.
+
+**Scroll a tab**: changes state, not destructive, reaches the network or runs programs.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -457,6 +529,8 @@ Scroll a tab or a scrollable element inside it.
 
 Choose an option in a <select>, firing the input/change events a real choice fires.
 
+**Choose a select option in a tab**: may change or remove data, idempotent, reaches the network or runs programs.
+
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `browser` | string |  |  |
@@ -467,6 +541,8 @@ Choose an option in a <select>, firing the input/change events a real choice fir
 ### `ghost_tab_wait_for`
 
 Wait until a CSS selector matches an element in the tab.
+
+**Wait for a tab condition**: read-only, idempotent, reaches the network or runs programs.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -479,6 +555,8 @@ Wait until a CSS selector matches an element in the tab.
 
 Close a tab by id.
 
+**Close a tab**: may change or remove data, idempotent, reaches the network or runs programs.
+
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `browser` | string |  |  |
@@ -487,6 +565,8 @@ Close a tab by id.
 ### `ghost_tab_find`
 
 Find a tab whose URL or title contains a substring.
+
+**Find an element in a tab**: read-only, idempotent, reaches the network or runs programs.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -516,11 +596,15 @@ Windows only. Explicit control of isolated desktops the user never sees, and the
 
 Report the focus policy (background = never touches the user's mouse, keyboard or foreground; prefer_background; foreground) and whether it is locked. locked:true (the default) means this process cannot be raised above background by any tool call - only the operator can, with GHOST_FOCUS_LOCK=off in the server's environment - so do not plan on real input: launch apps with ghost_window op=launch and browsers with ghost_browser_launch and drive them anchored.
 
+**Read the focus policy**: read-only, idempotent.
+
 No parameters.
 
 ### `ghost_set_focus_policy`
 
 Set the focus policy. 'background' is always accepted and is the default. 'prefer_background' and 'foreground' let Ghost drive the user's real cursor and keyboard and are REFUSED while the lock is on (the default; see ghost_focus_policy). Do not retry a refusal: the error names the route that needs no policy (ghost_window op=launch, ghost_browser_launch). When the operator has unlocked the process, raise it only for a target with no background path and set it back afterwards.
+
+**Set the focus policy**: changes state, not destructive, idempotent.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -530,6 +614,8 @@ Set the focus policy. 'background' is always accepted and is the default. 'prefe
 
 Create an isolated Windows desktop - apps launched onto it NEVER appear on the user's screen (the desktop-app equivalent of headless). Usually unnecessary: under the default background policy ghost_window op=launch already starts apps on the hidden desktop 'auto' and the ordinary verbs (ghost_see/find/act/key/scroll with window=<title>) drive them there. UIA, window messages, and capture all work; real SendInput does not (OS boundary).
 
+**Create a hidden desktop**: changes state, not destructive.
+
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `id` | string |  |  |
@@ -538,6 +624,8 @@ Create an isolated Windows desktop - apps launched onto it NEVER appear on the u
 
 Destroy an isolated desktop, terminating any processes still on it (they have no visible window to close).
 
+**Close a hidden desktop**: may change or remove data, idempotent.
+
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `id` | string |  |  |
@@ -545,6 +633,8 @@ Destroy an isolated desktop, terminating any processes still on it (they have no
 ### `ghost_desktop_launch`
 
 Launch a program onto a specific isolated desktop (ghost_window op=launch does this automatically onto 'auto' under the background policy and anchors the window). Windows cannot move an existing window there - launch is the only entry.
+
+**Launch a program on a hidden desktop**: changes state, not destructive.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -555,6 +645,8 @@ Launch a program onto a specific isolated desktop (ghost_window op=launch does t
 
 Visible windows on an isolated desktop, with handles for the other desktop tools.
 
+**List a hidden desktop's windows**: read-only, idempotent.
+
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `desktop` | string |  |  |
@@ -562,6 +654,8 @@ Visible windows on an isolated desktop, with handles for the other desktop tools
 ### `ghost_desktop_wait_for_window`
 
 Wait for a window with a matching title to appear on an isolated desktop.
+
+**Wait for a window on a hidden desktop**: read-only, idempotent.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -572,6 +666,8 @@ Wait for a window with a matching title to appear on an isolated desktop.
 ### `ghost_desktop_click`
 
 Click a client-area point in a window on an isolated desktop. button=left|right|double.
+
+**Click on a hidden desktop**: may change or remove data.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -585,6 +681,8 @@ Click a client-area point in a window on an isolated desktop. button=left|right|
 
 Scroll a window on an isolated desktop.
 
+**Scroll on a hidden desktop**: changes state, not destructive.
+
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `amount` | integer |  |  |
@@ -596,6 +694,8 @@ Scroll a window on an isolated desktop.
 
 Type into a window on an isolated desktop.
 
+**Type on a hidden desktop**: may change or remove data.
+
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `desktop` | string |  |  |
@@ -605,6 +705,8 @@ Type into a window on an isolated desktop.
 ### `ghost_desktop_press`
 
 Send a key to a window on an isolated desktop.
+
+**Press a key on a hidden desktop**: may change or remove data.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -616,6 +718,8 @@ Send a key to a window on an isolated desktop.
 
 Editing shortcut (undo/cut/copy/paste/select_all, or 'Ctrl+Z' style) via the standard control messages - faked modifier keys would type a literal character instead.
 
+**Send a shortcut on a hidden desktop**: may change or remove data.
+
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `desktop` | string |  |  |
@@ -626,6 +730,8 @@ Editing shortcut (undo/cut/copy/paste/select_all, or 'Ctrl+Z' style) via the sta
 
 PNG of a window on an isolated desktop - the only way to see what an invisible app is doing.
 
+**Capture a hidden-desktop window**: read-only, idempotent.
+
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `desktop` | string |  |  |
@@ -634,6 +740,8 @@ PNG of a window on an isolated desktop - the only way to see what an invisible a
 ### `ghost_desktop_describe`
 
 Interactive elements of an app on an isolated desktop via UIA. Prefer over capture-and-guess: UI Automation works on a non-displayed desktop.
+
+**Describe a hidden-desktop window**: read-only, idempotent.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |

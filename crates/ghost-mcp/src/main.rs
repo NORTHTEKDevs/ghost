@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use ghost_session::{GhostSession, LocateMode, Target, TargetSource, WindowTarget};
 
+mod annotations;
 mod audit;
 mod cli;
 mod ext;
@@ -4213,6 +4214,7 @@ fn tools_schema() -> Value {
     if let Some(arr) = tools.as_array_mut() {
         arr.extend(ext::schemas());
     }
+    annotations::annotate(&mut tools);
     tools
 }
 
