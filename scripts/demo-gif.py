@@ -93,7 +93,7 @@ def frame(step, index, total, shot, audit=None):
 
 
 SW = 600
-S_HEAD = font(["seguisb.ttf", "DejaVuSans-Bold.ttf"], 30)
+S_HEAD = font(["seguisb.ttf", "DejaVuSans-Bold.ttf"], 26)
 S_MONO = font(["consola.ttf", "DejaVuSansMono.ttf"], 25)
 S_MONO_B = font(["consolab.ttf", "DejaVuSansMono-Bold.ttf"], 25)
 S_SANS = font(["segoeui.ttf", "DejaVuSans.ttf"], 22)
@@ -119,7 +119,7 @@ def stacked_frame(step, index, total, shot, height, audit=None):
     d.text((SW - S_PAD, y + 6), f"{index + 1}/{total}", font=S_SANS, fill=MUTED, anchor="ra")
     for line in wrap(d, step["label"], S_HEAD, SW - 2 * S_PAD - 50):
         d.text((S_PAD, y), line, font=S_HEAD, fill=TEXT)
-        y += 38
+        y += 34
     y += 10
     d.rectangle((S_PAD - 1, y - 1, S_PAD + shot.width, y + shot.height), outline=BORDER)
     img.paste(shot, (S_PAD, y))
@@ -131,7 +131,7 @@ def stacked_frame(step, index, total, shot, height, audit=None):
         d.text((S_PAD, y), f"{key}: {fmt(value)}", font=S_MONO, fill=color)
         y += 32
     if audit is not None:
-        d.text((S_PAD, y + 6), f"your foreground: {audit} changes", font=S_SANS, fill=GREEN if audit == 0 else AMBER)
+        d.text((S_PAD, y), f"your foreground: {audit} changes", font=S_MONO, fill=GREEN if audit == 0 else AMBER)
     return img
 
 
@@ -139,7 +139,7 @@ def stacked_height(steps, shots):
     probe = ImageDraw.Draw(Image.new("RGB", (SW, 10)))
     tallest = 0
     for step, shot in zip(steps, shots):
-        head = 38 * len(wrap(probe, step["label"], S_HEAD, SW - 2 * S_PAD - 50))
+        head = 34 * len(wrap(probe, step["label"], S_HEAD, SW - 2 * S_PAD - 50))
         body = 34 + 32 * len(response_lines(step["call"]["name"], step["response"]))
         tallest = max(tallest, 20 + head + 10 + shot.height + 16 + body + 44)
     return tallest
