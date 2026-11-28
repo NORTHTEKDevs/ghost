@@ -121,3 +121,27 @@ ai. NOT SENT - Kristian sends it if he wants the listing kept.
 >
 > Thanks,
 > Northtek (github.com/NORTHTEKDevs)
+
+## Glama support draft (mislabelled 0.24.7)
+
+Address: support@glama.ai (from https://glama.ai/support: "Need help or have a
+question? Email us at support@glama.ai"). NOT SENT - Kristian sends it if he
+wants the label fixed. Glama's release page has no control to delete a release.
+
+> Subject: Ghost (NORTHTEKDevs/ghost) - please remove the mislabelled 0.24.7 release
+>
+> Hi Glama team,
+>
+> Our server https://glama.ai/mcp/servers/NORTHTEKDevs/ghost has auto-release on.
+> On 2026-11-27 it correctly published 0.24.6 from our GitHub release v0.24.6
+> (16:06 AKST). A manual Build & Release we had queued at 16:02 finished at
+> 16:08 and was published as "0.24.7", which is now shown as Latest. There is
+> no Ghost 0.24.7: that build contains the 0.24.6 binary
+> (https://github.com/NORTHTEKDevs/ghost/releases/tag/v0.24.6).
+>
+> Could you remove the 0.24.7 release (build test published 2026-11-27 16:08)
+> so 0.24.6 shows as Latest again? We could not find a way to delete a release
+> from the admin pages.
+>
+> Thanks,
+> Northtek (github.com/NORTHTEKDevs)
