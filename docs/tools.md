@@ -71,12 +71,12 @@ Find an element and act on it in one call. Target window = window= (anchored) or
 | --- | --- | --- | --- |
 | `action` | string: `click`, `type`, `double_click`, `right_click`, `hover` | yes | Action to perform |
 | `background` | boolean |  | Compatibility flag: background dispatch is already the default. Real Win32 controls get posted messages; windowless (WinUI/Chromium/Electron) controls get UIA Invoke/ValuePattern; double_click/right_click/hover need a windowed control. focus_preserved in the response reports the truth. |
-| `description` | string |  |  |
+| `description` | string |  | Natural-language description of the element; needs vision and a window facing the screen, so prefer name/role |
 | `index` | integer |  | Act on the nth match (0-based) when several elements share the name/role. Honoured on every route (background, hidden desktop, CDP, foreground); use ghost_find with the same name/index first to see the matches count |
-| `mode` | string: `instant`, `deliberate`, `instant_only` |  |  |
-| `name` | string |  |  |
-| `role` | string |  |  |
-| `text` | string |  |  |
+| `mode` | string: `instant`, `deliberate`, `instant_only` |  | Dispatch mode: instant (default, local tiers, escalates if needed), deliberate, or instant_only (never escalates) |
+| `name` | string |  | Accessible name of the target element (substring match) |
+| `role` | string |  | UI Automation role of the target element, e.g. button, edit |
+| `text` | string |  | Match the element by its visible text instead of name/role (the text to type is text_input) |
 | `text_input` | string |  | Text to type when action=type (use this to avoid param collision with text-target) |
 | `window` | string |  | Title substring of the window to act in (anchors it). Omit to use the anchor. |
 
@@ -112,14 +112,14 @@ Scroll. direction: up/down/left/right, amount = notches (default 3). Target = wi
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `amount` | integer |  |  |
-| `direction` | string: `up`, `down`, `left`, `right` | yes |  |
+| `amount` | integer |  | Wheel notches to scroll (default 3) |
+| `direction` | string: `up`, `down`, `left`, `right` | yes | Scroll direction |
 | `max_scrolls` | integer |  | Max scroll steps in 'until' mode |
 | `until_name` | string |  | Scroll until an element with this name is visible |
 | `until_role` | string |  | Scroll until an element with this role is visible |
 | `window` | string |  | Title substring of the window to scroll (anchors it). Omit to use the anchor. |
-| `x` | integer |  |  |
-| `y` | integer |  |  |
+| `x` | integer |  | Screen x of the real pointer for coordinate mode (needs a foreground policy) |
+| `y` | integer |  | Screen y of the real pointer for coordinate mode (needs a foreground policy) |
 
 ### `ghost_drag`
 
@@ -131,12 +131,12 @@ Click-hold at a start point, move to an end point, release. Each endpoint may be
 | --- | --- | --- | --- |
 | `from_name` | string |  | Start element name (instead of from_x/y) |
 | `from_role` | string |  | Start element role |
-| `from_x` | integer |  |  |
-| `from_y` | integer |  |  |
+| `from_x` | integer |  | Start x in screen coordinates (or use from_name/from_role) |
+| `from_y` | integer |  | Start y in screen coordinates |
 | `to_name` | string |  | End element name (instead of to_x/y) |
 | `to_role` | string |  | End element role |
-| `to_x` | integer |  |  |
-| `to_y` | integer |  |  |
+| `to_x` | integer |  | End x in screen coordinates (or use to_name/to_role) |
+| `to_y` | integer |  | End y in screen coordinates |
 
 ### `ghost_wait`
 
@@ -183,7 +183,7 @@ Assert a predicate about screen state. Fails (error) if not satisfied. text-pres
 | --- | --- | --- | --- |
 | `foreground` | boolean |  | Only without a window/anchor: OCR the foreground window (true) or the whole screen |
 | `name` | string |  | Element name (element-exists\|value-*) |
-| `predicate` | string: `text-present`, `text-absent`, `element-exists`, `value-equals`, `value-contains` | yes |  |
+| `predicate` | string: `text-present`, `text-absent`, `element-exists`, `value-equals`, `value-contains` | yes | What to check: text-present/text-absent (OCR), element-exists, value-equals/value-contains (element value against text) |
 | `role` | string |  | Element role (element-exists\|value-*) |
 | `text` | string |  | Text to check (text-present/absent) or expected value (value-equals/contains) |
 | `window` | string |  | Title substring of the window to check (anchors it). Omit to use the anchor. text-present/absent then OCR THAT window by handle, never the foreground. |
@@ -197,10 +197,10 @@ Execute a declarative step-by-step flow in one round-trip. Each step: {op, ...pa
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `json_flow` | string |  | JSON-encoded steps array string |
-| `max_retries` | integer |  |  |
+| `max_retries` | integer |  | Retries for a failing read-only step (default 2, max 10); acting steps retry only with retry:true |
 | `script` | string |  | YAML or JSON string of steps array (YAML tried first) |
 | `steps` | array |  | Array of {op, ...params} steps (direct) |
-| `stop_on_error` | boolean |  |  |
+| `stop_on_error` | boolean |  | Stop at the first failed step (default true); false runs the remaining steps and reports each result |
 
 ### `ghost_screenshot`
 
@@ -212,7 +212,7 @@ Capture a screenshot of the window the agent is working in. Target = window= or 
 | --- | --- | --- | --- |
 | `foreground` | boolean |  | Only without a window/anchor: crop to the foreground window (default true) |
 | `full` | boolean |  | Full-screen capture (default false) |
-| `jpeg_quality` | integer, 0 to 100 |  |  |
+| `jpeg_quality` | integer, 0 to 100 |  | JPEG quality 0-100 (default 75) |
 | `max_dim` | integer |  | Longest-edge resize (default 768; 1280 with full=true; 0 = no resize, and with full=true a lossless PNG) |
 | `name` | string |  | Crop to the element with this accessible name |
 | `rect` | array |  | Crop to [left,top,right,bottom] region |
@@ -296,8 +296,8 @@ HTTP GET. Returns {status, body}.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `headers` | object |  |  |
-| `url` | string | yes |  |
+| `headers` | object |  | Extra request headers as an object of name: value strings (Host cannot be set) |
+| `url` | string | yes | http(s) URL to fetch; loopback, private, link-local and reserved addresses are refused |
 
 ### `ghost_http_post`
 
@@ -307,10 +307,10 @@ HTTP POST. Returns {status, body}.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `body` | string |  |  |
-| `content_type` | string |  |  |
-| `headers` | object |  |  |
-| `url` | string | yes |  |
+| `body` | string |  | Request body, sent as given |
+| `content_type` | string |  | Content-Type of the body (default application/json) |
+| `headers` | object |  | Extra request headers as an object of name: value strings (Host cannot be set) |
+| `url` | string | yes | http(s) URL to post to; loopback, private, link-local and reserved addresses are refused |
 
 ### `ghost_session_state`
 
@@ -352,9 +352,9 @@ Launch an isolated browser for background automation. Each id gets its own proce
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `browser` | string: `chrome`, `comet`, `edge`, `brave` |  |  |
+| `browser` | string: `chrome`, `comet`, `edge`, `brave` |  | Which installed browser to launch (default: the first one installed) |
 | `id` | string |  | Handle for later calls (default: 'default') |
-| `mode` | string: `headless`, `windowed` |  |  |
+| `mode` | string: `headless`, `windowed` |  | headless (invisible, default) or windowed (a real window on a hidden desktop, never on your screen) |
 
 ### `ghost_browser_attach`
 
@@ -364,8 +364,8 @@ Attach to a browser already running with --remote-debugging-port=<port> (use for
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `id` | string |  |  |
-| `port` | integer | yes |  |
+| `id` | string |  | Handle for later calls (default 'default') |
+| `port` | integer | yes | The --remote-debugging-port the running browser was started with |
 
 ### `ghost_browser_close`
 
@@ -375,7 +375,7 @@ Close a browser ghost launched (attached browsers are only disconnected).
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `id` | string |  |  |
+| `id` | string |  | Browser id to close (default 'default'); an attached browser is only disconnected |
 
 ### `ghost_browser_tabs`
 
@@ -385,7 +385,7 @@ List open tabs with target ids, titles, URLs.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `id` | string |  |  |
+| `id` | string |  | Browser id (default 'default') |
 
 ### `ghost_browser_list_installed`
 
@@ -403,9 +403,9 @@ Open a new background tab (never brings the tab or window to the front). Returns
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `browser` | string |  |  |
+| `browser` | string |  | Browser id from ghost_browser_launch or ghost_browser_attach (default 'default') |
 | `timeout_ms` | integer, 1 to 600000 |  | Load timeout when waiting, default 30000, max 600000 |
-| `url` | string |  |  |
+| `url` | string |  | http(s) URL or about:blank (default); other schemes are refused |
 | `wait` | boolean |  | Wait for the page to load (default true; about:blank never waits) |
 
 ### `ghost_tab_navigate`
@@ -416,10 +416,10 @@ Navigate a tab and wait for load. Runs in a background tab; the user's view neve
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `browser` | string |  |  |
-| `tab` | string | yes |  |
+| `browser` | string |  | Browser id from ghost_browser_launch or ghost_browser_attach (default 'default') |
+| `tab` | string | yes | Tab id from ghost_tab_open or ghost_browser_tabs |
 | `timeout_ms` | integer, 1 to 600000 |  | Load timeout, default 30000, max 600000 |
-| `url` | string | yes |  |
+| `url` | string | yes | http(s) URL or about:blank; other schemes are refused |
 
 ### `ghost_tab_click`
 
@@ -429,10 +429,10 @@ Click an element by CSS selector via a trusted synthetic mouse event inside the 
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `browser` | string |  |  |
-| `selector` | string | yes |  |
-| `tab` | string | yes |  |
-| `timeout_ms` | integer, 1 to 600000 |  |  |
+| `browser` | string |  | Browser id from ghost_browser_launch or ghost_browser_attach (default 'default') |
+| `selector` | string | yes | CSS selector of the element to click |
+| `tab` | string | yes | Tab id from ghost_tab_open or ghost_browser_tabs |
+| `timeout_ms` | integer, 1 to 600000 |  | How long to wait for the element, 1 to 600000 (default 10000) |
 
 ### `ghost_tab_type`
 
@@ -442,11 +442,11 @@ Focus an element by CSS selector and type into it. Layout-independent; does not 
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `browser` | string |  |  |
+| `browser` | string |  | Browser id from ghost_browser_launch or ghost_browser_attach (default 'default') |
 | `clear` | boolean |  | Clear the field first (default true) |
-| `selector` | string | yes |  |
-| `tab` | string | yes |  |
-| `text` | string | yes |  |
+| `selector` | string | yes | CSS selector of the field to type into |
+| `tab` | string | yes | Tab id from ghost_tab_open or ghost_browser_tabs |
+| `text` | string | yes | Text to type |
 
 ### `ghost_tab_press`
 
@@ -456,10 +456,10 @@ Send a key (Enter, Tab, ArrowDown, a, ...) to the tab's focused element. modifie
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `browser` | string |  |  |
-| `key` | string | yes |  |
-| `modifiers` | array |  |  |
-| `tab` | string | yes |  |
+| `browser` | string |  | Browser id from ghost_browser_launch or ghost_browser_attach (default 'default') |
+| `key` | string | yes | Key to send to the focused element: Enter, Tab, ArrowDown, a, ... |
+| `modifiers` | array |  | Modifier keys held during the press: Alt, Ctrl, Meta, Shift |
+| `tab` | string | yes | Tab id from ghost_tab_open or ghost_browser_tabs |
 
 ### `ghost_tab_text`
 
@@ -469,10 +469,10 @@ Visible text of an element, or the whole page when selector is omitted. Prefer o
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `browser` | string |  |  |
+| `browser` | string |  | Browser id from ghost_browser_launch or ghost_browser_attach (default 'default') |
 | `max_chars` | integer |  | Cap on returned characters (default 100000, max 2000000). When cut, the result carries truncated:true and original_length. |
-| `selector` | string |  |  |
-| `tab` | string | yes |  |
+| `selector` | string |  | CSS selector of the element to read (default: the whole page) |
+| `tab` | string | yes | Tab id from ghost_tab_open or ghost_browser_tabs |
 
 ### `ghost_tab_eval`
 
@@ -482,10 +482,10 @@ Evaluate a JavaScript expression in the tab and return its value (awaits promise
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `browser` | string |  |  |
-| `expression` | string | yes |  |
+| `browser` | string |  | Browser id from ghost_browser_launch or ghost_browser_attach (default 'default') |
+| `expression` | string | yes | JavaScript expression to evaluate in the page; promises are awaited |
 | `max_chars` | integer |  | Cap on the serialized result in characters (default 100000, max 2000000). |
-| `tab` | string | yes |  |
+| `tab` | string | yes | Tab id from ghost_tab_open or ghost_browser_tabs |
 
 ### `ghost_tab_screenshot`
 
@@ -495,9 +495,9 @@ PNG of a tab, rendered by that tab regardless of whether it is in front or focus
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `browser` | string |  |  |
-| `full_page` | boolean |  |  |
-| `tab` | string | yes |  |
+| `browser` | string |  | Browser id from ghost_browser_launch or ghost_browser_attach (default 'default') |
+| `full_page` | boolean |  | Capture the whole scrollable page, not just the viewport (default false) |
+| `tab` | string | yes | Tab id from ghost_tab_open or ghost_browser_tabs |
 
 ### `ghost_tab_describe`
 
@@ -507,9 +507,9 @@ Structured list of visible interactive elements with selectors and coordinates. 
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `browser` | string |  |  |
-| `limit` | integer |  |  |
-| `tab` | string | yes |  |
+| `browser` | string |  | Browser id from ghost_browser_launch or ghost_browser_attach (default 'default') |
+| `limit` | integer |  | Most elements to return (default 120) |
+| `tab` | string | yes | Tab id from ghost_tab_open or ghost_browser_tabs |
 
 ### `ghost_tab_scroll`
 
@@ -519,11 +519,11 @@ Scroll a tab or a scrollable element inside it.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `browser` | string |  |  |
-| `dx` | number |  |  |
-| `dy` | number |  |  |
-| `selector` | string |  |  |
-| `tab` | string | yes |  |
+| `browser` | string |  | Browser id from ghost_browser_launch or ghost_browser_attach (default 'default') |
+| `dx` | number |  | Horizontal scroll in pixels (default 0) |
+| `dy` | number |  | Vertical scroll in pixels, positive is down (default 0) |
+| `selector` | string |  | CSS selector of a scrollable element (default: the page) |
+| `tab` | string | yes | Tab id from ghost_tab_open or ghost_browser_tabs |
 
 ### `ghost_tab_select_option`
 
@@ -533,10 +533,10 @@ Choose an option in a <select>, firing the input/change events a real choice fir
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `browser` | string |  |  |
-| `selector` | string | yes |  |
-| `tab` | string | yes |  |
-| `value` | string | yes |  |
+| `browser` | string |  | Browser id from ghost_browser_launch or ghost_browser_attach (default 'default') |
+| `selector` | string | yes | CSS selector of the <select> element |
+| `tab` | string | yes | Tab id from ghost_tab_open or ghost_browser_tabs |
+| `value` | string | yes | Value of the option to choose |
 
 ### `ghost_tab_wait_for`
 
@@ -546,10 +546,10 @@ Wait until a CSS selector matches an element in the tab.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `browser` | string |  |  |
-| `selector` | string | yes |  |
-| `tab` | string | yes |  |
-| `timeout_ms` | integer, 1 to 600000 |  |  |
+| `browser` | string |  | Browser id from ghost_browser_launch or ghost_browser_attach (default 'default') |
+| `selector` | string | yes | CSS selector to wait for |
+| `tab` | string | yes | Tab id from ghost_tab_open or ghost_browser_tabs |
+| `timeout_ms` | integer, 1 to 600000 |  | How long to wait, 1 to 600000 (default 15000) |
 
 ### `ghost_tab_close`
 
@@ -559,8 +559,8 @@ Close a tab by id.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `browser` | string |  |  |
-| `tab` | string | yes |  |
+| `browser` | string |  | Browser id from ghost_browser_launch or ghost_browser_attach (default 'default') |
+| `tab` | string | yes | Tab id from ghost_tab_open or ghost_browser_tabs |
 
 ### `ghost_tab_find`
 
@@ -570,8 +570,8 @@ Find a tab whose URL or title contains a substring.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `browser` | string |  |  |
-| `query` | string | yes |  |
+| `browser` | string |  | Browser id from ghost_browser_launch or ghost_browser_attach (default 'default') |
+| `query` | string | yes | Substring to look for in each tab's URL or title |
 
 ## Hidden desktops and focus policy
 
@@ -608,7 +608,7 @@ Set the focus policy. 'background' is always accepted and is the default. 'prefe
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `policy` | string: `background`, `prefer_background`, `foreground` | yes |  |
+| `policy` | string: `background`, `prefer_background`, `foreground` | yes | background (always allowed, the default), prefer_background or foreground (refused while the focus lock is on) |
 
 ### `ghost_desktop_create`
 
@@ -618,7 +618,7 @@ Create an isolated Windows desktop - apps launched onto it NEVER appear on the u
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `id` | string |  |  |
+| `id` | string |  | Id for the new hidden desktop (default 'default') |
 
 ### `ghost_desktop_close`
 
@@ -628,7 +628,7 @@ Destroy an isolated desktop, terminating any processes still on it (they have no
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `id` | string |  |  |
+| `id` | string |  | Hidden desktop to close (default 'default'); processes still on it are ended |
 
 ### `ghost_desktop_launch`
 
@@ -638,8 +638,8 @@ Launch a program onto a specific isolated desktop (ghost_window op=launch does t
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `command` | string | yes |  |
-| `desktop` | string |  |  |
+| `command` | string | yes | Program to start on the hidden desktop, with any arguments |
+| `desktop` | string |  | Hidden desktop id from ghost_desktop_create (default 'default') |
 
 ### `ghost_desktop_windows`
 
@@ -649,7 +649,7 @@ Visible windows on an isolated desktop, with handles for the other desktop tools
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `desktop` | string |  |  |
+| `desktop` | string |  | Hidden desktop id from ghost_desktop_create (default 'default') |
 
 ### `ghost_desktop_wait_for_window`
 
@@ -659,9 +659,9 @@ Wait for a window with a matching title to appear on an isolated desktop.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `desktop` | string |  |  |
-| `timeout_ms` | integer, 1 to 600000 |  |  |
-| `title` | string | yes |  |
+| `desktop` | string |  | Hidden desktop id from ghost_desktop_create (default 'default') |
+| `timeout_ms` | integer, 1 to 600000 |  | How long to wait, 1 to 600000 (default 20000) |
+| `title` | string | yes | Title substring to wait for |
 
 ### `ghost_desktop_click`
 
@@ -671,11 +671,11 @@ Click a client-area point in a window on an isolated desktop. button=left|right|
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `button` | string: `left`, `right`, `double` |  |  |
-| `desktop` | string |  |  |
-| `hwnd` | integer | yes |  |
-| `x` | integer | yes |  |
-| `y` | integer | yes |  |
+| `button` | string: `left`, `right`, `double` |  | left (default), right or double |
+| `desktop` | string |  | Hidden desktop id from ghost_desktop_create (default 'default') |
+| `hwnd` | integer | yes | Window handle from ghost_desktop_windows or ghost_desktop_wait_for_window |
+| `x` | integer | yes | Client-area x of the point to click |
+| `y` | integer | yes | Client-area y of the point to click |
 
 ### `ghost_desktop_scroll`
 
@@ -685,10 +685,10 @@ Scroll a window on an isolated desktop.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `amount` | integer |  |  |
-| `desktop` | string |  |  |
-| `direction` | string: `up`, `down`, `left`, `right` |  |  |
-| `hwnd` | integer | yes |  |
+| `amount` | integer |  | Wheel notches to scroll (default 3) |
+| `desktop` | string |  | Hidden desktop id from ghost_desktop_create (default 'default') |
+| `direction` | string: `up`, `down`, `left`, `right` |  | Scroll direction |
+| `hwnd` | integer | yes | Window handle from ghost_desktop_windows or ghost_desktop_wait_for_window |
 
 ### `ghost_desktop_type`
 
@@ -698,9 +698,9 @@ Type into a window on an isolated desktop.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `desktop` | string |  |  |
-| `hwnd` | integer | yes |  |
-| `text` | string | yes |  |
+| `desktop` | string |  | Hidden desktop id from ghost_desktop_create (default 'default') |
+| `hwnd` | integer | yes | Window handle from ghost_desktop_windows or ghost_desktop_wait_for_window |
+| `text` | string | yes | Text to type into the window |
 
 ### `ghost_desktop_press`
 
@@ -710,9 +710,9 @@ Send a key to a window on an isolated desktop.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `desktop` | string |  |  |
-| `hwnd` | integer | yes |  |
-| `key` | string | yes |  |
+| `desktop` | string |  | Hidden desktop id from ghost_desktop_create (default 'default') |
+| `hwnd` | integer | yes | Window handle from ghost_desktop_windows or ghost_desktop_wait_for_window |
+| `key` | string | yes | Key name to send, e.g. Enter, Tab, F5 |
 
 ### `ghost_desktop_shortcut`
 
@@ -722,9 +722,9 @@ Editing shortcut (undo/cut/copy/paste/select_all, or 'Ctrl+Z' style) via the sta
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `desktop` | string |  |  |
-| `hwnd` | integer | yes |  |
-| `shortcut` | string | yes |  |
+| `desktop` | string |  | Hidden desktop id from ghost_desktop_create (default 'default') |
+| `hwnd` | integer | yes | Window handle from ghost_desktop_windows or ghost_desktop_wait_for_window |
+| `shortcut` | string | yes | undo, cut, copy, paste, select_all, or a 'Ctrl+Z' style combination |
 
 ### `ghost_desktop_capture`
 
@@ -734,8 +734,8 @@ PNG of a window on an isolated desktop - the only way to see what an invisible a
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `desktop` | string |  |  |
-| `hwnd` | integer | yes |  |
+| `desktop` | string |  | Hidden desktop id from ghost_desktop_create (default 'default') |
+| `hwnd` | integer | yes | Window handle from ghost_desktop_windows or ghost_desktop_wait_for_window |
 
 ### `ghost_desktop_describe`
 
@@ -745,5 +745,5 @@ Interactive elements of an app on an isolated desktop via UIA. Prefer over captu
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `desktop` | string |  |  |
-| `window` | string |  |  |
+| `desktop` | string |  | Hidden desktop id from ghost_desktop_create (default 'default') |
+| `window` | string |  | Title substring of the window to describe |

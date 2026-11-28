@@ -6,6 +6,7 @@ use ghost_session::{GhostSession, LocateMode, Target, TargetSource, WindowTarget
 
 mod annotations;
 mod audit;
+mod param_docs;
 mod cli;
 mod ext;
 mod realinput;
@@ -4208,13 +4209,20 @@ fn lean_tools_schema() -> Value {
 
 /// Returns the lean tool list. Called by tools/list.
 fn tools_schema() -> Value {
-    // Lean verbs plus the extended surface (browsers/tabs, isolated desktops,
-    // focus policy). Legacy aliases stay dispatchable but unadvertised.
+    let mut tools = raw_tools_schema();
+    annotations::annotate(&mut tools);
+    param_docs::document(&mut tools);
+    tools
+}
+
+/// Lean verbs plus the extended surface (browsers/tabs, isolated desktops,
+/// focus policy), as the schemas declare them. Legacy aliases stay
+/// dispatchable but unadvertised.
+fn raw_tools_schema() -> Value {
     let mut tools = lean_tools_schema();
     if let Some(arr) = tools.as_array_mut() {
         arr.extend(ext::schemas());
     }
-    annotations::annotate(&mut tools);
     tools
 }
 
