@@ -6,8 +6,6 @@
 
 **Lets AI agents use the apps on your computer, in the background, and proves every action worked.**
 
-<sub>2,949 of ~2,950 keystrokes stayed in your window across six agent runs · 14 of 14 benchmark tasks verified by re-reading the app</sub>
-
 [![CI](https://github.com/NORTHTEKDevs/ghost/actions/workflows/ci.yml/badge.svg)](https://github.com/NORTHTEKDevs/ghost/actions/workflows/ci.yml)
 [![Linux](https://github.com/NORTHTEKDevs/ghost/actions/workflows/linux.yml/badge.svg)](https://github.com/NORTHTEKDevs/ghost/actions/workflows/linux.yml)
 [![Release](https://img.shields.io/github/v/release/NORTHTEKDevs/ghost)](https://github.com/NORTHTEKDevs/ghost/releases/latest)
@@ -104,22 +102,17 @@ Checksums, provenance, SmartScreen, building from source:
 
 ### 2. Connect your client
 
-<details open>
-<summary><b>Claude Code</b></summary>
-
-**Windows** (PowerShell):
+**Claude Code**, Windows (PowerShell):
 
 ```powershell
 claude mcp add ghost --scope user -- "$env:LOCALAPPDATA\Programs\ghost\ghost-mcp.exe"
 ```
 
-**Linux**:
+**Claude Code**, Linux:
 
 ```bash
 claude mcp add ghost --scope user -- "$HOME/.local/bin/ghost-mcp"
 ```
-
-</details>
 
 The other clients take the full path to `ghost-mcp` in a JSON or TOML file;
 replace `YOU` in the example, or print the exact path with the last item.
