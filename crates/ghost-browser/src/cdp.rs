@@ -151,7 +151,7 @@ impl Cdp {
         // No entry in `pending`, so the eventual reply is simply dropped by the
         // reader rather than accumulating a waiter that nobody polls.
         conn.outbound
-            .send(Message::Text(msg.to_string()))
+            .send(Message::Text(msg.to_string().into()))
             .map_err(|_| BrowserError::Closed)
     }
 
@@ -192,7 +192,7 @@ impl Cdp {
             return Err(BrowserError::Closed);
         }
 
-        if conn.outbound.send(Message::Text(msg.to_string())).is_err() {
+        if conn.outbound.send(Message::Text(msg.to_string().into())).is_err() {
             conn.pending.lock().unwrap().remove(&id);
             return Err(BrowserError::Closed);
         }
@@ -219,11 +219,9 @@ impl Cdp {
 
 /// Open one socket and start its writer and reader tasks.
 async fn open(ws_url: &str) -> Result<Conn> {
-    let config = WebSocketConfig {
-        max_message_size: Some(MAX_MESSAGE_BYTES),
-        max_frame_size: Some(MAX_MESSAGE_BYTES),
-        ..Default::default()
-    };
+    let config = WebSocketConfig::default()
+        .max_message_size(Some(MAX_MESSAGE_BYTES))
+        .max_frame_size(Some(MAX_MESSAGE_BYTES));
     let (stream, _) = tokio::time::timeout(
         CONNECT_TIMEOUT,
         tokio_tungstenite::connect_async_with_config(ws_url, Some(config), false),
@@ -252,7 +250,7 @@ async fn open(ws_url: &str) -> Result<Conn> {
     tokio::spawn(async move {
         while let Some(Ok(msg)) = read.next().await {
             let text = match msg {
-                Message::Text(t) => t,
+                Message::Text(t) => t.to_string(),
                 Message::Binary(b) => String::from_utf8_lossy(&b).into_owned(),
                 Message::Close(_) => break,
                 _ => continue,
@@ -344,7 +342,7 @@ mod tests {
                     while let Some(Ok(Message::Text(t))) = ws.next().await {
                         let v: Value = serde_json::from_str(&t).unwrap();
                         let reply = json!({ "id": v["id"], "result": { "data": "a".repeat(reply_len) } });
-                        if ws.send(Message::Text(reply.to_string())).await.is_err() {
+                        if ws.send(Message::Text(reply.to_string().into())).await.is_err() {
                             break;
                         }
                     }
@@ -372,6 +370,41 @@ mod tests {
             }
         });
         port
+    }
+
+    /// A loopback CDP stand-in that answers each command with its own
+    /// `params.text`, sent as a text frame (or a binary frame with `binary`).
+    async fn echo_cdp(binary: bool) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((tcp, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let mut ws = tokio_tungstenite::accept_async(tcp).await.unwrap();
+                    while let Some(Ok(Message::Text(t))) = ws.next().await {
+                        let v: Value = serde_json::from_str(&t).unwrap();
+                        let reply = json!({ "id": v["id"], "result": { "echo": v["params"]["text"] } }).to_string();
+                        let frame = if binary { Message::Binary(reply.into_bytes().into()) } else { Message::Text(reply.into()) };
+                        if ws.send(frame).await.is_err() {
+                            break;
+                        }
+                    }
+                });
+            }
+        });
+        format!("ws://127.0.0.1:{port}/devtools/browser/test")
+    }
+
+    /// Page text is often non-ASCII; it must cross the socket unchanged in both
+    /// directions, whether the browser answers in a text or a binary frame.
+    #[tokio::test]
+    async fn non_ascii_text_round_trips_in_text_and_binary_frames() {
+        let text = "é漢🙂 \u{2028} \"quoted\"";
+        for binary in [false, true] {
+            let cdp = Cdp::connect(&echo_cdp(binary).await).await.unwrap();
+            let r = cdp.call("Runtime.evaluate", json!({ "text": text }), None).await.expect("echo");
+            assert_eq!(r["echo"].as_str(), Some(text), "binary={binary}");
+        }
     }
 
     /// A full-page screenshot of a long page is a reply far over tungstenite's
